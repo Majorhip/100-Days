@@ -3,7 +3,7 @@
 // The code between @moved-from and @end-moved must stay byte-identical to the original
 // (tests/golden/compare-build.mjs); changes go through tests/golden/approved-edits.mjs.
 
-import './core/geometry.js';   // load order: runs after the previous part of the original script
+import './gfx/core.js';   // load order: runs after the previous part of the original script
 import { SAVE_VERSION } from './core/constants.js';
 
 // @moved-from: original

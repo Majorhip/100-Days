@@ -17,12 +17,12 @@ window.__stranded = ALL;
 // @moved-to: src/core/noise.js
 // @moved-to: src/core/constants.js
 // @moved-to: src/core/geometry.js
-// @moved-to: src/legacy.js#1
+// @moved-to: src/gfx/core.js
 // @moved-to: src/state.js
-// @moved-to: src/legacy.js#2
+// @moved-to: src/legacy.js#1
 // @moved-to: src/data/items.js
 // @moved-to: src/data/recipes.js
 // @moved-to: src/data/buildings.js
 // @moved-to: src/data/creatures.js
 // @moved-to: src/data/story.js
-// @moved-to: src/legacy.js#3
+// @moved-to: src/legacy.js#2

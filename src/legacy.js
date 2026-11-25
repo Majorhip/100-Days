@@ -12,6 +12,7 @@ import { wr, wrr } from './core/rng.js';
 import { hash2, fbm } from './core/noise.js';
 import { HOUR_SECONDS, TICK, SAVE_KEY, SAVE_VERSION, WORLD, HALF, GRID, CELL, BUILD_CELL } from './core/constants.js';
 import { box, cyl, cone, ico, sph, part, merge } from './core/geometry.js';
+import { GU, GLSL_HGT, GLSL_CLOUDSH, gfxInject, litMat, windShadow, MAT_VC, MAT_VC_TOOL, MAT_VC_DS, MAT_GLOW, vcMesh } from './gfx/core.js';
 import { newGameState, G, R, setG } from './state.js';
 import { ITEMS, HOTBAR, HANDS } from './data/items.js';
 import { RECIPES } from './data/recipes.js';
@@ -20,163 +21,6 @@ import { CREATURES } from './data/creatures.js';
 import { NOTES, DIALOGS, INTRO, LANDMARKS, BADGES, TIPS } from './data/story.js';
 
 // @moved-from: original #1
-/* =========================================================================
-   02a_gfx_core: shared shader uniforms, upgraded fog, and the lit-material
-   factory every model uses. (Graphics only — no gameplay rules live here.)
-   ========================================================================= */
-const GU = {
-  uTime: { value: 0 },
-  uNight: { value: 0 },
-  uWet: { value: 0 },                                   // 0 dry .. 1 soaked (rain)
-  uWind: { value: new THREE.Vector3(1, 0, 0.35).normalize() },
-  uWindAmp: { value: 0.5 },
-  uPlayer: { value: new THREE.Vector3() },
-  uCamPos: { value: new THREE.Vector3() },             // camera position (three.js skips cameraPosition for Lambert/Basic)
-  uSkyHor: { value: new THREE.Color(0xc6e6ff) },
-  uSkyTop: { value: new THREE.Color(0x3b8ee6) },
-  uSunCol: { value: new THREE.Color(1, 1, 1) },
-  uHgt: { value: null },                                // terrain heightmap (R32F)
-  uNoise: { value: null },                              // tileable RGBA noise
-  uAO: { value: 1 },                                    // contact-shadow strength (quality)
-  uRim: { value: 1 },
-  uCloudSh: { value: 0.3 },                             // strength of drifting cloud shadows
-  uCloudCov: { value: 0.2 },
-  uBiome: { value: null },                              // r = snow weight, g = desert weight
-  // fog extras (names prefixed fg so they never clash with material uniforms)
-  fgSunDir: { value: new THREE.Vector3(0, 1, 0) },
-  fgSunCol: { value: new THREE.Color(1, 0.9, 0.7) },
-  fgSunStr: { value: 0.5 },
-  fgH: { value: new THREE.Vector3(2, 0.2, 0) }          // x base height, y falloff, z density
-};
-/* the terrain heightmap lookup, identical to heightAt() so GPU and game agree */
-const GLSL_HGT = `
-uniform sampler2D uHgt;
-float gHT(float ix, float iz){ return texture2D(uHgt, (vec2(ix, iz) + 0.5) / ${(GRID + 1).toFixed(1)}).r; }
-float terrainH(vec2 p){
-  vec2 f = clamp((p + ${HALF.toFixed(1)}) / ${CELL.toFixed(4)}, 0.0, ${(GRID - 0.001).toFixed(3)});
-  vec2 i = floor(f); f -= i;
-  float h00 = gHT(i.x, i.y), h10 = gHT(i.x + 1.0, i.y), h01 = gHT(i.x, i.y + 1.0), h11 = gHT(i.x + 1.0, i.y + 1.0);
-  return (f.x + f.y <= 1.0) ? h00 + (h10 - h00) * f.x + (h01 - h00) * f.y : h11 + (h01 - h11) * (1.0 - f.x) + (h10 - h11) * (1.0 - f.y);
-}
-`;
-
-/* moving cloud shadows: sample the cloud layer where the sun's ray through this point meets it */
-const GLSL_CLOUDSH = `
-float cloudShadow(vec3 wp, vec3 sd){
-  vec2 p = (wp.xz + sd.xz / max(sd.y, 0.25) * (140.0 - wp.y)) * 0.0032 + uTime * vec2(0.0042, 0.0016);
-  float n = texture2D(uNoise, p).g * 0.65 + texture2D(uNoise, p * 2.3 + 0.37).g * 0.35;
-  return 1.0 - uCloudSh * smoothstep(0.6 - uCloudCov * 0.25, 0.72 - uCloudCov * 0.2, n);
-}
-`;
-/* fog: world-space distance (no shifting when you turn), low-lying mist, and a warm glow toward the sun */
-THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\n varying float fogDepth; varying vec3 vFogW;\n#endif';
-THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\n fogDepth = -mvPosition.z;\n vFogW = (mvPosition.xyz - viewMatrix[3].xyz) * mat3(viewMatrix);\n#endif';
-THREE.ShaderChunk.fog_pars_fragment = '#ifdef USE_FOG\n uniform vec3 fogColor; varying float fogDepth; varying vec3 vFogW;\n uniform float fogNear; uniform float fogFar;\n uniform vec3 uCamPos; uniform vec3 fgSunDir; uniform vec3 fgSunCol; uniform float fgSunStr; uniform vec3 fgH;\n#endif';
-THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
-  vec3 fgV = vFogW - uCamPos; float fgD = length(fgV);
-  float fogFactor = pow(smoothstep(fogNear, fogFar, fgD), 1.3);
-  float fgHF = fgH.z * exp(-max(vFogW.y - fgH.x, 0.0) * fgH.y) * (1.0 - exp(-fgD * 0.02));
-  fogFactor = clamp(fogFactor + fgHF * (1.0 - fogFactor), 0.0, 1.0);
-  float fgS = pow(max(dot(fgV / max(fgD, 0.001), fgSunDir), 0.0), 6.0) * fgSunStr;
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(fogColor, fgSunCol, clamp(fgS, 0.0, 1.0)), fogFactor);
-#endif`;
-
-/** hand every shader the shared uniforms (objects are shared, so one update reaches all materials) */
-function gfxInject(sh) { for (const k in GU) sh.uniforms[k] = GU[k]; }
-THREE.Material.prototype.onBeforeCompile = function (sh) { gfxInject(sh); };
-
-/* vertex snippet: bend instanced plants with the wind. K = bend per height², F = leaf flutter */
-function windGLSL(K, F) {
-  return `
-  { vec3 gIP = modelMatrix[3].xyz; vec2 gLW = uWind.xz;
-  #ifdef USE_INSTANCING
-    gIP = (modelMatrix * instanceMatrix[3]).xyz;
-    vec2 gc0 = instanceMatrix[0].xz, gc2 = instanceMatrix[2].xz; float gs2 = max(dot(gc0, gc0), 1e-4);
-    gLW = vec2(dot(uWind.xz, gc0), dot(uWind.xz, gc2)) / gs2;
-  #endif
-    float gH = max(position.y, 0.0);
-    float gPh = uTime * 1.3 + dot(gIP.xz, vec2(0.09, 0.06));
-    float gGust = 0.55 + 0.45 * sin(gPh) * sin(gPh * 0.41 + 1.7);
-    float gB = gH * gH * ${K.toFixed(4)} * uWindAmp * gGust;
-    transformed.xz += gLW * gB;
-    transformed += ${F.toFixed(4)} * uWindAmp * sin(uTime * 5.5 + dot(position, vec3(3.1, 2.3, 1.7)) + gIP.x) * smoothstep(0.6, 2.0, gH) * vec3(0.6, 0.3, 0.6);
-  }`;
-}
-const WIND_UNI = 'uniform float uTime; uniform vec3 uWind; uniform float uWindAmp;\n';
-
-/**
- * Lit material for all models: per-pixel lighting (so campfires light things properly),
- * soft contact shadows where objects meet the ground, a sky-coloured rim light,
- * optional wind sway and back-lit leaves.
- * o: { color, vc, side, emissive, emissiveIntensity, wind:[K,F], foliage, rim, ao, key }
- */
-function litMat(o) {
-  o = o || {};
-  const m = new THREE.MeshPhongMaterial({
-    color: o.color === undefined ? 0xffffff : o.color, vertexColors: !!o.vc, side: o.side || THREE.FrontSide,
-    specular: o.spec || 0x000000, shininess: o.shininess || 6,
-    emissive: o.emissive || 0, emissiveIntensity: o.emissiveIntensity === undefined ? 1 : o.emissiveIntensity
-  });
-  const key = 'lit|' + (o.wind ? o.wind.join(',') : '') + '|' + (o.foliage ? 'f' : '') + (o.rim === false ? '' : 'r') + (o.ao === false ? '' : 'a') + (o.snow ? 's' : '');
-  m.customProgramCacheKey = () => key;
-  m.onBeforeCompile = sh => litPatch(sh, o);
-  if (o.wind) {
-    const d = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
-    d.customProgramCacheKey = () => 'depth' + key;
-    d.onBeforeCompile = sh => { gfxInject(sh); sh.vertexShader = WIND_UNI + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>' + windGLSL(o.wind[0], o.wind[1])); };
-    m.userData.depth = d;
-  }
-  return m;
-}
-function litPatch(sh, o) {
-  gfxInject(sh);
-  let v = sh.vertexShader, f = sh.fragmentShader;
-  v = 'varying vec3 vGW; varying float vGLY;\n' + (o.wind ? WIND_UNI : '') + v;
-  if (o.wind) v = v.replace('#include <begin_vertex>', '#include <begin_vertex>' + windGLSL(o.wind[0], o.wind[1]));
-  v = v.replace('#include <fog_vertex>', `#include <fog_vertex>
-  { vec4 gw = vec4(transformed, 1.0);
-  #ifdef USE_INSTANCING
-    gw = instanceMatrix * gw;
-  #endif
-    vGW = (modelMatrix * gw).xyz; vGLY = position.y; }`);
-  f = 'varying vec3 vGW; varying float vGLY;\nuniform float uNight; uniform float uAO; uniform float uRim; uniform vec3 uSkyHor; uniform vec3 uSunCol; uniform sampler2D uNoise; uniform float uTime; uniform float uCloudSh; uniform float uCloudCov; uniform sampler2D uBiome;\n#ifndef USE_FOG\nuniform vec3 fgSunDir;\n#endif\n' +
-    (o.ao === false ? '' : GLSL_HGT) + GLSL_CLOUDSH + f;
-  if (o.snow) f = f.replace('#include <color_fragment>', `#include <color_fragment>
-  { vec3 gFN = normalize(cross(dFdx(vGW), dFdy(vGW)));
-    float gSnow = texture2D(uBiome, (vGW.xz + ${HALF.toFixed(1)}) / ${WORLD.toFixed(1)}).r;
-    float gCap = smoothstep(0.45, 0.8, gFN.y) * smoothstep(0.35, 0.7, gSnow);
-    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.94, 1.0), gCap * 0.85); }`);
-  f = f.replace('#include <envmap_fragment>', `#include <envmap_fragment>
-  outgoingLight *= cloudShadow(vGW, fgSunDir);
-  ${o.ao === false ? '' : `
-  { float gUp = vGW.y - terrainH(vGW.xz);
-    float gAO = mix(0.52, 1.0, smoothstep(0.0, 0.85, gUp));
-    outgoingLight *= mix(1.0, gAO, uAO * step(gUp, 4.0)); }`}
-  ${o.rim === false ? '' : `
-  { float gR = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
-    outgoingLight += uSkyHor * gR * 0.22 * uRim * diffuseColor.rgb * (1.0 - uNight * 0.6) + vec3(0.25, 0.35, 0.6) * gR * 0.12 * uNight * uRim; }`}
-  ${o.foliage ? `
-  { vec3 gVD = normalize(vGW - cameraPosition);
-    float gLeaf = smoothstep(0.02, 0.12, diffuseColor.g - max(diffuseColor.r, diffuseColor.b));
-    float gT = pow(max(dot(gVD, fgSunDir), 0.0), 5.0) * gLeaf * (1.0 - uNight);
-    outgoingLight += uSunCol * diffuseColor.rgb * gT * 0.9;
-    outgoingLight *= mix(0.62, 1.0, smoothstep(0.2, 1.6, vGLY)); }` : ''}`);
-  sh.vertexShader = v; sh.fragmentShader = f;
-}
-/** apply the swaying shadow material to an instanced plant mesh */
-function windShadow(mesh) { if (mesh.material.userData.depth) mesh.customDepthMaterial = mesh.material.userData.depth; return mesh; }
-
-const MAT_VC = litMat({ vc: true, snow: true });
-const MAT_VC_TOOL = litMat({ vc: true });
-const MAT_VC_DS = litMat({ vc: true, side: THREE.DoubleSide, snow: true });
-const MAT_GLOW = litMat({ vc: true, emissive: 0x2a8fb0, emissiveIntensity: 0.7 });
-function vcMesh(parts, mat) {
-  const m = new THREE.Mesh(merge(parts), mat || MAT_VC);
-  m.castShadow = true; m.receiveShadow = true; return m;
-}
-// @end-moved
-
-// @moved-from: original #2
 
 /* =========================================================================
    01_audio: every sound is synthesised with WebAudio — no files needed
@@ -1282,7 +1126,7 @@ function gfxUpdate(dt) {
 }
 // @end-moved
 
-// @moved-from: original #3
+// @moved-from: original #2
 
 /* =========================================================================
    04_nodes: trees, rocks, plants and pickups — placement, instancing, gathering
@@ -3704,4 +3548,4 @@ function touchHelpHTML() {
 }
 // @end-moved
 
-export { GU, GLSL_HGT, GLSL_CLOUDSH, gfxInject, windGLSL, WIND_UNI, litMat, litPatch, windShadow, MAT_VC, MAT_VC_TOOL, MAT_VC_DS, MAT_GLOW, vcMesh, AU, audioInit, noiseLoop, tone, burst, SFX, sfx, audioAmbient, setVolume, PEAK, LAKES, SITES, biomeW, biomeAt, shoreR, rawH, siteH, finalH, HGT, heightAt, slopeAt, shorePoint, inSite, terrainColor, SH_CELL, SH, shKey, shCell, addCollider, removeCollider, _col, collide, SKY_KEYS, _c1, _c2, nightAmount, puff, GFXQ, makeNoiseTex, makeSoftTex, GFX, terrainMaterial, buildTerrain, gfxBakeTerrain, H2, gfxStampGrass, waterMaterial, buildSky, _sunDir, _shR, _shU, _shC, _UP, updateSky, rainField, pointField, buildPrecip, makeBolt, updatePrecip, buildFx, updateFx, FLAME_GEO, FLAME_MAT, flameMat, flameGroup, gfxBuildGrass, NODE_WIND, gfxNodeMat, buildLife, _lm, _lq, _le, _lp, _ls, updateLife, PP, PP_VS, ppMat, ppInit, ppResize, ppPass, _sp, _cf, gfxRender, _gt, _gl, _gv, gradeUpdate, gfxLightPool, gfxUpdate, NT, NODES, NODE_MESH, _white, nodeGeos, placeNodes, _nm, _nq, _np, _ns, _ne, setNodeMatrix, buildGrass, nodeNear, dropsOf, depleteNode, restoreNode, respawnNodes, applyNodeState, pickNode, hitNode, nodeNeeds, UNIT_BOX, lam, bx, quadruped, scorpionModel, ANIMALS, humanModel, toolModel, WOODC, planks, structureModel, inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP, ambientTemp, SURV, survivalStep, hurtPlayer, blackout, eat, quickEat, drinkCanteen, drinkHere, FLOORS, groundAt, _fwd, updatePlayer, refreshViewModel, swingNow, updateViewModel, POIS, findTarget, targetPrompt, TKEY, key, primaryAction, interact, resolveSwing, shootBow, updateArrows, startFishing, tryCast, stopFishing, fishClick, updateFishing, setupInput, lockPointer, selectSlot, STRUCT, ROOFS, WALLS, cellKey, structColliders, spawnStructure, removeStructure, rebuildStructures, startBuild, cancelBuild, aimPoint, updateBuildGhost, placeBuild, tryDismantle, isRoofed, structPrompt, useStructure, lightFire, douse, addFuel, structuresStep, structuresNewDay, nearestFlame, updateStructures, trySleep, spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };
+export { AU, audioInit, noiseLoop, tone, burst, SFX, sfx, audioAmbient, setVolume, PEAK, LAKES, SITES, biomeW, biomeAt, shoreR, rawH, siteH, finalH, HGT, heightAt, slopeAt, shorePoint, inSite, terrainColor, SH_CELL, SH, shKey, shCell, addCollider, removeCollider, _col, collide, SKY_KEYS, _c1, _c2, nightAmount, puff, GFXQ, makeNoiseTex, makeSoftTex, GFX, terrainMaterial, buildTerrain, gfxBakeTerrain, H2, gfxStampGrass, waterMaterial, buildSky, _sunDir, _shR, _shU, _shC, _UP, updateSky, rainField, pointField, buildPrecip, makeBolt, updatePrecip, buildFx, updateFx, FLAME_GEO, FLAME_MAT, flameMat, flameGroup, gfxBuildGrass, NODE_WIND, gfxNodeMat, buildLife, _lm, _lq, _le, _lp, _ls, updateLife, PP, PP_VS, ppMat, ppInit, ppResize, ppPass, _sp, _cf, gfxRender, _gt, _gl, _gv, gradeUpdate, gfxLightPool, gfxUpdate, NT, NODES, NODE_MESH, _white, nodeGeos, placeNodes, _nm, _nq, _np, _ns, _ne, setNodeMatrix, buildGrass, nodeNear, dropsOf, depleteNode, restoreNode, respawnNodes, applyNodeState, pickNode, hitNode, nodeNeeds, UNIT_BOX, lam, bx, quadruped, scorpionModel, ANIMALS, humanModel, toolModel, WOODC, planks, structureModel, inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP, ambientTemp, SURV, survivalStep, hurtPlayer, blackout, eat, quickEat, drinkCanteen, drinkHere, FLOORS, groundAt, _fwd, updatePlayer, refreshViewModel, swingNow, updateViewModel, POIS, findTarget, targetPrompt, TKEY, key, primaryAction, interact, resolveSwing, shootBow, updateArrows, startFishing, tryCast, stopFishing, fishClick, updateFishing, setupInput, lockPointer, selectSlot, STRUCT, ROOFS, WALLS, cellKey, structColliders, spawnStructure, removeStructure, rebuildStructures, startBuild, cancelBuild, aimPoint, updateBuildGhost, placeBuild, tryDismantle, isRoofed, structPrompt, useStructure, lightFire, douse, addFuel, structuresStep, structuresNewDay, nearestFlame, updateStructures, trySleep, spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };
