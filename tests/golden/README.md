@@ -41,3 +41,8 @@ Each view loads the fixture save, sets the position, time and weather, freezes t
 
 **Noise baseline:** recapturing the unchanged original gives a mean colour difference of **0.6–4.7** (out of 255) per shot, mostly from grass moving in the wind, rain and animals. The meadow and storm views are the noisiest (up to ~4.7), and the figure depends on the frame rate at capture time: the golden shots were taken at ~13 fps, later runs at ~30 fps. A real visual change shows up well above that, and you should still look at the images.
 
+## Phase 2 result (Vite scaffold)
+- `node tests/golden/compare-build.mjs` passes: both inline scripts in `dist/index.html` are byte-identical to the original, and so are the CSS text and the markup. The only extra is Vite's trailing `/*$vite$:1*/` CSS comment. Size: 959,144 bytes, against 959,102.
+- The fingerprint and save check pass against `dist/index.html` opened from disk and against `npm run dev`.
+- The screenshots from both match by eye. Their differences (1.5–4.7) equal a control run of the original at the same frame rate (1.5–4.5).
+- On the dev server the browser asks for `/favicon.ico` and gets a 404. The original has no favicon either.

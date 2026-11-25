@@ -5,11 +5,20 @@
   "description": "Stranded: 100 Days on Kestrel Island",
   "type": "module",
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "golden:fingerprint": "node tests/golden/fingerprint.mjs",
     "golden:save": "node tests/golden/savecheck.mjs",
-    "golden:shots": "node tests/golden/screenshots.mjs"
+    "golden:shots": "node tests/golden/screenshots.mjs",
+    "golden:build": "node tests/golden/compare-build.mjs"
   },
   "devDependencies": {
-    "puppeteer-core": "^25.18.1"
+    "puppeteer-core": "^25.18.1",
+    "vite": "^8.3.8",
+    "vite-plugin-singlefile": "^2.3.4"
+  },
+  "dependencies": {
+    "three": "0.128.0"
   }
 }
