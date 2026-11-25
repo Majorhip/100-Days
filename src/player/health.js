@@ -10,7 +10,9 @@ import { sfx } from '../audio/audio.js';
 import { ITEMS } from '../data/items.js';
 import { inv, take, armorValue } from './inventory.js';
 import { groundAt } from './movement.js';
-import { clearCreatures, endRaid, refreshPack, uiDirty, hint, toast, uiDamage, uiFade, showMessage, onNewDay, saveGame } from '../legacy.js';
+import { clearCreatures } from '../creatures/creatures.js';
+import { endRaid } from '../creatures/spawner.js';
+import { refreshPack, uiDirty, hint, toast, uiDamage, uiFade, showMessage, onNewDay, saveGame } from '../legacy.js';
 
 // @moved-from: original
 function hurtPlayer(dmg, src) {

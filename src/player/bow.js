@@ -13,7 +13,8 @@ import { puff } from '../world/sky.js';
 import { ITEMS } from '../data/items.js';
 import { inv, give, take, dmgMult } from './inventory.js';
 import { _fwd } from './movement.js';
-import { damageCreature, hint } from '../legacy.js';
+import { damageCreature } from '../creatures/creatures.js';
+import { hint } from '../legacy.js';
 
 // @moved-from: original
 

@@ -4,9 +4,9 @@
 // The code between @moved-from and @end-moved must stay byte-identical to the original
 // (tests/golden/compare-build.mjs); changes go through tests/golden/approved-edits.mjs.
 
-import './build/sleep.js';   // load order: runs after the previous part of the original script
+import './creatures/scout.js';   // load order: runs after the previous part of the original script
 import * as THREE from 'three';
-import { TAU, clamp, lerp, dist2, rnd, pick, angDiff } from './core/math.js';
+import { TAU, clamp, lerp, dist2, rnd, angDiff } from './core/math.js';
 import { $ } from './ui/dom.js';
 import { hash2 } from './core/noise.js';
 import { HOUR_SECONDS, TICK, SAVE_KEY, SAVE_VERSION, WORLD, HALF } from './core/constants.js';
@@ -14,8 +14,8 @@ import { box, cyl, cone, ico, sph, part, merge } from './core/geometry.js';
 import { GU, MAT_GLOW, vcMesh } from './gfx/core.js';
 import { newGameState, G, R, setG } from './state.js';
 import { AU, audioInit, sfx, audioAmbient, setVolume } from './audio/audio.js';
-import { LAKES, SITES, biomeAt, siteH, heightAt, slopeAt, shorePoint, inSite, terrainColor } from './world/terrain.js';
-import { addCollider, collide } from './world/collision.js';
+import { LAKES, SITES, biomeAt, siteH, heightAt, shorePoint, terrainColor } from './world/terrain.js';
+import { addCollider } from './world/collision.js';
 import { nightAmount, puff } from './world/sky.js';
 import { GFXQ } from './gfx/quality.js';
 import { GFX } from './gfx/textures.js';
@@ -30,16 +30,15 @@ import { gfxLightPool, gfxUpdate } from './gfx/update.js';
 import { ITEMS, HOTBAR } from './data/items.js';
 import { RECIPES } from './data/recipes.js';
 import { BUILD_BY_ID } from './data/buildings.js';
-import { CREATURES } from './data/creatures.js';
 import { NOTES, DIALOGS, INTRO, LANDMARKS, BADGES, TIPS } from './data/story.js';
 import { NT, NODES, placeNodes } from './world/nodes.js';
 import { respawnNodes, applyNodeState, nodeNeeds } from './world/gathering.js';
-import { UNIT_BOX, ANIMALS } from './models/animals.js';
+import { UNIT_BOX } from './models/animals.js';
 import { humanModel } from './models/people.js';
 import { planks, structureModel } from './models/structures.js';
 import { inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP } from './player/inventory.js';
 import { ambientTemp, SURV, survivalStep } from './game/survival.js';
-import { hurtPlayer, eat, quickEat, drinkCanteen } from './player/health.js';
+import { eat, quickEat, drinkCanteen } from './player/health.js';
 import { groundAt, _fwd, updatePlayer } from './player/movement.js';
 import { refreshViewModel, swingNow, updateViewModel } from './player/viewmodel.js';
 import { POIS, findTarget, targetPrompt, key, primaryAction, interact } from './player/targeting.js';
@@ -50,287 +49,11 @@ import { STRUCT, rebuildStructures } from './build/structures.js';
 import { startBuild, cancelBuild, updateBuildGhost, placeBuild, tryDismantle } from './build/placement.js';
 import { lightFire, addFuel } from './build/use.js';
 import { structuresStep, structuresNewDay, nearestFlame, updateStructures } from './build/update.js';
+import { updateCreatures } from './creatures/creatures.js';
+import { updateSpawner } from './creatures/spawner.js';
+import { initScout, scoutLeaves, scoutHungerCheck, updateScout } from './creatures/scout.js';
 
 // @moved-from: original
-
-/* =========================================================================
-   08_creatures: animals, predators, bosses, Wolf Moon raids, Scout the dog
-   ========================================================================= */
-function spawnCreature(type, x, z, o = {}) {
-  const def = CREATURES[type], model = ANIMALS[o.model || type]();
-  const c = {
-    type, def, model, g: model.g, x, z, y: heightAt(x, z), yaw: rnd(TAU), hp: def.hp * (o.hpMul || 1), maxHp: def.hp * (o.hpMul || 1), scale: model.g.scale.x,
-    state: 'idle', st: rnd(1, 3), tx: x, tz: z, home: { x, z }, phase: rnd(TAU), moving: 0, flash: 0, atkCd: 0, spec: rnd(4, 7), lunge: 0,
-    raid: !!o.raid, lair: o.lair || null, boss: !!def.boss, warned: false, dead: false, summoned: false
-  };
-  c.g.position.set(x, c.y, z); R.scene.add(c.g); R.creatures.push(c); return c;
-}
-function removeCreature(c) { R.scene.remove(c.g); c.g.traverse(o => { if (o.material && o.material.dispose) o.material.dispose(); if (o.geometry && o.geometry !== UNIT_BOX) o.geometry.dispose(); }); const i = R.creatures.indexOf(c); if (i >= 0) R.creatures.splice(i, 1); if (R.focus === c) R.focus = null; if (R.boss === c) R.boss = null; }
-function clearCreatures() { for (const c of R.creatures.slice()) removeCreature(c); }
-function nearestHostile(d) {
-  let best = null;
-  for (const c of R.creatures) { if (c.dead || c.def.passive || c.state === 'flee' || c.state === 'home') continue; const dd = dist2(c.x, c.z, G.p.x, G.p.z); if (dd < d) { d = dd; best = c; } }
-  return best;
-}
-function damageCreature(c, dmg, tool) {
-  if (c.dead) return;
-  if (c.state === 'stun') dmg *= 1.5;
-  dmg = Math.round(dmg); c.hp -= dmg; c.flash = 0.12; sfx('hit'); R.focus = c; R.focusT = 5;
-  dmgNumber(c.x, c.y + c.model.h + 0.3, c.z, dmg, c.state === 'stun' ? 'crit' : '');
-  puff(c.x, c.y + c.model.h * 0.6, c.z, 0xffffff, 3, { size: 0.1, speed: 3, g: 6 });
-  if (tool && tool.storm) { sfx('zap'); uiFlash('#fff7c2', 0.3); R.flashT = 0.15; puff(c.x, c.y + 1, c.z, 0xffe066, 10, { size: 0.2, speed: 5, up: 4 }); }
-  const dx = c.x - G.p.x, dz = c.z - G.p.z, d = Math.hypot(dx, dz) || 1;
-  if (!c.boss) { const k = collide(c.x + dx / d * 0.5, c.z + dz / d * 0.5, c.def.r * c.scale); c.x = k[0]; c.z = k[1]; }
-  if (c.hp <= 0) { killCreature(c); return; }
-  if (c.def.passive) { c.state = 'flee'; c.st = 5; if (c.type === 'rabbit') sfx('squeak'); }
-  else if (c.state === 'idle' || c.state === 'home' || (c.state === 'flee' && !c.def.fearsFire)) { c.state = 'chase'; c.st = 0; }
-}
-function killCreature(c) {
-  c.dead = true; c.deadT = 0.45; G.stats.kills++;
-  puff(c.x, c.y + c.model.h * 0.5, c.z, 0xd8ccb4, c.boss ? 30 : 12, { size: c.boss ? 0.7 : 0.4, speed: c.boss ? 5 : 2.5 });
-  const loot = c.def.loot; for (const k in loot) give(k, loot[k]);
-  addXP(c.def.xp); if (G.stats.kills >= 10) badge('hunter');
-  if (c.lair) G.lairs[c.lair] = G.day + 5;
-  if (c.boss) {
-    G.bossDead[c.type] = true; G.stats.bosses++; R.boss = null; badge(c.type); sfx('discover'); uiFlash('#fff', 0.5);
-    banner(c.def.n.toUpperCase() + ' DEFEATED!', 'You found the ' + (c.type === 'grizzle' ? 'Power Coil' : c.type === 'duneking' ? 'Battery' : 'Antenna') + '!');
-    if (c.type === 'grizzle') spawnPackNote();
-  }
-  if (c.raid && R.raid) { R.raid.killed++; if (R.raid.killed >= R.raid.total) endRaid(false); }
-}
-/** move with collision; refuses to walk into water */
-function moveCreature(c, dx, dz, speed, dt) {
-  const l = Math.hypot(dx, dz); if (l < 0.0001) return;
-  const nx = c.x + dx / l * speed * dt, nz = c.z + dz / l * speed * dt;
-  if (heightAt(nx, nz) < 0.25) { c.st = 0; return; }
-  const k = collide(nx, nz, Math.min(0.7, c.def.r * c.scale));
-  c.x = k[0]; c.z = k[1]; c.moving = speed;
-  c.yaw += angDiff(c.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 9);
-}
-function updateCreatures(dt) {
-  const p = G.p, torch = heldDef().tool.cls === 'torch', dawn = G.hour > 5.6 && G.hour < 8;
-  for (let i = R.creatures.length - 1; i >= 0; i--) {
-    const c = R.creatures[i], def = c.def;
-    if (c.dead) { c.deadT -= dt; c.g.scale.setScalar(Math.max(0.01, c.scale * c.deadT / 0.45)); if (c.deadT <= 0) removeCreature(c); continue; }
-    const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz); c.moving = 0; c.st -= dt; if (c.atkCd > 0) c.atkCd -= dt;
-    if (d > 150 && !c.raid) { removeCreature(c); continue; }
-    if (def.passive) {
-      if (c.state === 'flee') { moveCreature(c, -dx, -dz, def.spd, dt); if (c.st <= 0) c.state = 'idle'; }
-      else if (d < def.flee) { c.state = 'flee'; c.st = rnd(2, 3.2); if (c.type === 'rabbit' && d < 14) sfx('squeak'); }
-      else wander(c, dt, 2.0);
-    } else {
-      // fear of flame (never during a Wolf Moon)
-      if (def.fearsFire && !c.raid && c.state !== 'flee') {
-        let th = null;
-        if (torch && d < 12) th = p; else { const f = nearestFlame(c.x, c.z, 9); if (f) th = f.s; }
-        if (th) { c.state = 'flee'; c.st = 4; c.fx = th.x; c.fz = th.z; if (d < 30) { sfx('whine'); tipOnce('wolfFear', 'The wolf is scared of the flames and runs away!'); } }
-      }
-      if (def.fearsFire && !c.raid && !c.lair && dawn && c.state !== 'flee') { c.state = 'flee'; c.st = 30; c.fx = p.x; c.fz = p.z; }
-      // spikes hurt
-      for (const s of G.structures) if (s.k === 'spikes' && Math.abs(s.x - c.x) < 2 && dist2(s.x, s.z, c.x, c.z) < 1.9) { c.hp -= 18 * dt; if (Math.random() < dt * 4) { c.flash = 0.1; puff(c.x, c.y + 0.6, c.z, 0xffffff, 2, { size: 0.1 }); } if (c.hp <= 0) { killCreature(c); break; } }
-      if (c.dead) continue;
-      const hd = dist2(c.x, c.z, c.home.x, c.home.z);
-      switch (c.state) {
-        case 'flee': {
-          const fx = c.x - c.fx, fz = c.z - c.fz; moveCreature(c, fx, fz, def.spd * 1.1, dt);
-          if (Math.hypot(fx, fz) > 45 || (d > 60)) { if (c.lair) { c.state = 'home'; } else { removeCreature(c); continue; } }
-          if (c.st <= 0) c.state = 'idle'; break;
-        }
-        case 'idle':
-          if (def.leash && hd > 6) { moveCreature(c, c.home.x - c.x, c.home.z - c.z, def.spd * 0.5, dt); } else wander(c, dt, 1.6);
-          if (d < def.sense * (c.raid ? 6 : 1)) { c.state = 'chase'; if (!c.warned) { c.warned = true; sfx(c.boss ? 'roar' : c.type === 'scorpion' ? 'hiss' : 'growl'); scoutAlert(c); } }
-          break;
-        case 'home':
-          moveCreature(c, c.home.x - c.x, c.home.z - c.z, def.spd, dt); c.hp = Math.min(c.maxHp, c.hp + c.maxHp * 0.04 * dt);
-          if (hd < 4) c.state = 'idle'; break;
-        case 'chase': {
-          if (def.leash && hd > def.leash) { c.state = 'home'; if (c.boss) hint(def.n + ' loses interest and heads home.'); break; }
-          if (!c.raid && !c.boss && d > def.sense * 2.2) { c.state = 'idle'; break; }
-          const reach = def.atk * (0.75 + 0.25 * c.scale);
-          if (c.boss) {
-            c.spec -= dt;
-            if (c.spec <= 0 && d > 4 && d < 22) { c.spec = rnd(6, 9); c.state = 'tele'; c.st = 0.95; c.mode = (c.type === 'frostclaw' && Math.random() < 0.5 && d < 9) ? 'slam' : 'charge'; sfx('roar'); dmgNumber(c.x, c.y + c.model.h + 0.6, c.z, c.mode === 'slam' ? 'JUMP!' : 'DODGE!', 'warn'); break; }
-            if (c.type === 'duneking' && !c.summoned && c.hp < c.maxHp * 0.5) { c.summoned = true; sfx('hiss'); banner('', 'The Dune King calls its brood!'); for (let k = 0; k < 3; k++) { const a = rnd(TAU); const s = spawnCreature('scorpion', c.x + Math.cos(a) * 4, c.z + Math.sin(a) * 4); s.state = 'chase'; s.warned = true; } }
-          }
-          if (d > reach) moveCreature(c, dx, dz, def.spd * (c.raid ? 1.05 : 1), dt);
-          else if (c.atkCd <= 0) { c.state = 'wind'; c.st = c.boss ? 0.55 : 0.42; }
-          c.yaw += angDiff(c.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 8);
-          break;
-        }
-        case 'wind':
-          c.yaw += angDiff(c.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 10);
-          if (c.st <= 0) {
-            c.lunge = 0.22; c.atkCd = c.boss ? 1.5 : 1.25; c.state = 'chase';
-            if (d < def.atk * (0.75 + 0.25 * c.scale) + 0.7 && Math.abs(p.y - c.y) < 2.5) hurtPlayer(def.dmg, 'hurt');
-            else sfx('swish');
-          }
-          break;
-        case 'tele':   // boss winds up a special
-          c.yaw += angDiff(c.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 10); c.flash = 0.06;
-          if (c.st <= 0) {
-            if (c.mode === 'slam') {
-              sfx('thunder'); R.shake = Math.max(R.shake, 0.5); for (let k = 0; k < 16; k++) { const a = k / 16 * TAU; puff(c.x + Math.cos(a) * 5, c.y + 0.3, c.z + Math.sin(a) * 5, 0xdff4ff, 1, { size: 0.5 }); }
-              if (d < 8 && p.y - R.ground < 0.5) hurtPlayer(def.dmg * 1.3, 'hurt'); c.state = 'stun'; c.st = 1.4;
-            } else { c.state = 'charge'; c.st = 1.0; const l = d || 1; c.cx = dx / l; c.cz = dz / l; c.hitOnce = false; }
-          }
-          break;
-        case 'charge':
-          moveCreature(c, c.cx, c.cz, 15, dt);
-          if (!c.hitOnce && d < def.r * c.scale + 1.1) { c.hitOnce = true; hurtPlayer(def.dmg * 1.5, 'hurt'); R.shake = 0.6; }
-          if (Math.random() < dt * 20) puff(c.x, c.y + 0.2, c.z, 0xcbbfa5, 1, { size: 0.4 });
-          if (c.st <= 0) { c.state = 'stun'; c.st = c.hitOnce ? 0.8 : 1.7; if (!c.hitOnce) dmgNumber(c.x, c.y + c.model.h + 0.6, c.z, 'DIZZY!', 'crit'); }
-          break;
-        case 'stun': if (c.st <= 0) c.state = 'chase'; break;
-      }
-      if (c.boss && (c.state !== 'idle' && c.state !== 'home') && d < 60) R.boss = c; else if (R.boss === c) R.boss = null;
-    }
-    // keep creatures from standing inside the player
-    if (d < 0.75 && !c.def.passive) { c.x -= dx / (d || 1) * 0.05; c.z -= dz / (d || 1) * 0.05; }
-    // animate
-    c.y = lerp(c.y, heightAt(c.x, c.z), Math.min(1, dt * 12));
-    let ox = 0, oz = 0; if (c.lunge > 0) { c.lunge -= dt; const k = Math.sin(c.lunge / 0.22 * Math.PI) * 0.5; ox = Math.sin(c.yaw) * k; oz = Math.cos(c.yaw) * k; }
-    c.g.position.set(c.x + ox, c.y, c.z + oz); c.g.rotation.y = c.yaw;
-    const m = c.model;
-    if (c.moving > 0) { c.phase += dt * Math.min(c.moving, 9) * m.stride * 0.22; const s = Math.sin(c.phase) * (m.scorp ? 0.35 : 0.65); if (m.scorp) m.legs.forEach((l, j) => l.rotation.y = (j % 2 ? -1 : 1) * Math.sin(c.phase + j) * 0.4); else { m.legs[0].rotation.x = s; m.legs[3].rotation.x = s; m.legs[1].rotation.x = -s; m.legs[2].rotation.x = -s; } }
-    else if (!m.scorp) m.legs.forEach(l => l.rotation.x *= 0.85);
-    if (m.head) m.head.rotation.x = c.state === 'wind' ? -0.5 : c.state === 'stun' ? 0.5 + Math.sin(R.t * 12) * 0.1 : Math.sin(R.t * 1.3 + c.phase) * 0.06;
-    if (m.scorp && m.tail) m.tail.rotation.x = c.state === 'wind' || c.state === 'tele' ? 0.5 : Math.sin(R.t * 2 + c.phase) * 0.08;
-    c.g.rotation.z = c.state === 'stun' ? Math.sin(R.t * 9) * 0.06 : 0;
-    if (c.flash > 0) { c.flash -= dt; const on = c.flash > 0; for (const mt of m.mats) mt.emissive.setHex(on ? (c.state === 'tele' ? 0xaa3300 : 0x999999) : 0); }
-  }
-  if (R.focusT > 0) { R.focusT -= dt; if (R.focusT <= 0) R.focus = null; }
-}
-function wander(c, dt, speed) {
-  if (c.st <= 0) { if (c.tx === null) { c.tx = c.x + rnd(-12, 12); c.tz = c.z + rnd(-12, 12); c.st = rnd(2, 5); } else { c.tx = null; c.st = rnd(1.5, 5); } }
-  if (c.tx !== null) { const dx = c.tx - c.x, dz = c.tz - c.z; if (Math.hypot(dx, dz) > 0.6) moveCreature(c, dx, dz, speed, dt); }
-}
-
-/* ---------- population ---------- */
-function spawnPoint(biome, r0, r1) {
-  for (let i = 0; i < 8; i++) {
-    const a = rnd(TAU), r = rnd(r0, r1), x = G.p.x + Math.cos(a) * r, z = G.p.z + Math.sin(a) * r;
-    if (Math.abs(x) > 330 || Math.abs(z) > 330 || heightAt(x, z) < 1.2 || slopeAt(x, z) > 0.9) continue;
-    if (biome && biomeAt(x, z) !== biome) continue;
-    if (inSite(x, z, 4)) continue;
-    return { x, z };
-  }
-  return null;
-}
-function updateSpawner() {
-  const p = G.p, b = R.biome, night = nightAmount() > 0.6, cnt = {};
-  for (const c of R.creatures) if (!c.dead && !c.lair && !c.boss && !c.raid) cnt[c.type] = (cnt[c.type] || 0) + 1;
-  const want = (type, cap, biome, o) => { if ((cnt[type] || 0) < cap) { const s = spawnPoint(biome, 46, 72); if (s) { spawnCreature(type, s.x, s.z, o); return true; } } return false; };
-  if (b === 'forest') {
-    want('rabbit', night ? 1 : 3, 'forest'); if (!night) want('deer', 2, 'forest');
-    if (night && G.day >= 2 && !R.raid && (G.hour < 5 || G.hour > 20.5)) want('wolf', clamp(1 + Math.floor(G.day / 3), 1, 4), 'forest');
-  } else if (b === 'desert') {
-    want('rabbit', 2, 'desert'); want('scorpion', night ? 4 : 2, 'desert');
-  } else {
-    want('goat', 3, 'snow'); want('rabbit', 2, 'snow', { model: 'hare' }); want('snowwolf', night ? 3 : (G.day >= 3 ? 2 : 1), 'snow');
-  }
-  // lairs and bosses appear when you get close
-  const lair = (id, type, site, n, o) => {
-    const s = SITES[site], d = dist2(p.x, p.z, s.x, s.z), alive = R.creatures.some(c => c.lair === id && !c.dead);
-    if (d < 95 && !alive && !(G.lairs[id] > G.day)) for (let i = 0; i < n; i++) { const a = i / n * TAU + 1; const c = spawnCreature(type, s.x + Math.cos(a) * (n > 1 ? 4 : 0.5), s.z + Math.sin(a) * (n > 1 ? 4 : 0.5), { lair: id, ...(o || {}) }); }
-  };
-  lair('cave2', 'bear', 'cave2', 1); lair('wolfDen', 'wolf', 'wolfDen', 3); lair('crystalW', 'snowwolf', 'crystal', 2);
-  const boss = (type, site) => { const s = SITES[site]; if (!G.bossDead[type] && dist2(p.x, p.z, s.x, s.z) < 110 && !R.creatures.some(c => c.type === type)) spawnCreature(type, s.x, s.z); };
-  boss('grizzle', 'den'); boss('duneking', 'boneyard'); boss('frostclaw', 'summit');
-  // Wolf Moon
-  if (R.raid) {
-    const alive = R.creatures.filter(c => c.raid && !c.dead).length;
-    if (R.raid.spawned < R.raid.total && alive < 4) { const s = spawnPoint(null, 30, 46); if (s) { const c = spawnCreature('wolf', s.x, s.z, { model: 'redwolf', raid: true, hpMul: 1.15 }); c.state = 'chase'; c.warned = true; R.raid.spawned++; if (Math.random() < 0.5) sfx('howl'); } }
-    if (G.hour > 5.6 && G.hour < 12) endRaid(true);
-  } else if (G.day % 10 === 0 && G.raidDone < G.day && (G.hour >= 20.5 || G.hour < 3) && !R.sleeping) startRaid();
-}
-function startRaid() {
-  G.raidDone = G.day; const total = Math.min(14, 4 + Math.floor(G.day / 10) * 2);
-  R.raid = { total, spawned: 0, killed: 0 };
-  for (const c of R.creatures.slice()) if (c.type === 'wolf' && !c.raid && !c.lair) removeCreature(c);
-  banner('🌕 WOLF MOON', total + ' red-eyed wolves are hunting you. They are not afraid of fire tonight!'); sfx('howl'); setTimeout(() => sfx('howl'), 700); setTimeout(() => sfx('howl'), 1500);
-}
-function endRaid(dawn) {
-  if (!R.raid) return;
-  const won = !dawn && R.raid.killed >= R.raid.total;
-  for (const c of R.creatures.slice()) if (c.raid) { if (dawn) removeCreature(c); }
-  R.raid = null;
-  if (won) { banner('WOLF MOON SURVIVED!', 'The pack is beaten. +150 XP'); addXP(150); give('fang', 3); badge('moon'); sfx('discover'); }
-  else if (R.started && !R.cinematic) { toast('🌅 The sun rises. The Wolf Moon pack slinks away.', 'ok'); badge('moon'); }
-}
-
-/* ---------- Scout ---------- */
-function initScout() {
-  const m = ANIMALS.scout(), s = SITES.rayCamp;
-  R.scout = { model: m, g: m.g, x: s.x + 3, z: s.z + 2, y: 0, yaw: 0, phase: 0, moving: 0, bite: 0, barkT: 0, state: 'wait' };
-  R.scout.y = heightAt(R.scout.x, R.scout.z); m.g.position.set(R.scout.x, R.scout.y, R.scout.z); R.scene.add(m.g);
-  R.scoutPoi = {
-    id: 'scout', x: R.scout.x, y: R.scout.y + 0.5, z: R.scout.z, reach: 3.6,
-    label: () => {
-      const m = scoutMeat();
-      if (!G.scout.friend) return m ? 'Give Scout some meat' : 'Scout looks hungry. He wants meat (raw is fine!)';
-      if (G.scout.fed >= G.day) return 'Pet Scout';
-      return m ? 'Feed Scout — he\'s hungry!' : 'Scout is hungry — he needs meat';
-    },
-    act: () => {
-      const sc = R.scout, m = scoutMeat();
-      if (!G.scout.friend) {
-        if (!m) { hint('Scout sniffs your hands and whines. He wants meat — hunt a rabbit or deer. Raw meat is fine for him!'); sfx('whine'); return; }
-        take(m, 1); G.scout.friend = true; G.scout.fed = G.day; sfx('bark'); sfx('heart'); hearts(sc);
-        if (G.badges.friend) { banner('SCOUT IS BACK!', 'Don\'t forget to feed him every day this time.'); }
-        else { badge('friend'); addXP(40); banner('SCOUT JOINED YOU!', 'He will follow you, warn you of danger and fight by your side.'); }
-        tipOnce('scoutfood', 'Scout needs <b>meat every day</b> (raw is fine). If you forget, he\'ll go home!');
-        return;
-      }
-      if (G.scout.fed < G.day) {
-        if (!m) { hint('Scout is hungry! Hunt a rabbit or deer for meat — raw is fine for him.'); sfx('whine'); return; }
-        take(m, 1); G.scout.fed = G.day; sfx('eat'); sfx('bark'); hearts(sc);
-        toast('🐕 Scout gobbles up the ' + (m === 'rawmeat' ? 'raw meat' : 'meat') + '! He\'s happy until tomorrow.', 'ok');
-      } else { hearts(sc); sfx('heart'); sfx('bark'); }
-      if (G.scout.dug < G.day) {
-        G.scout.dug = G.day; const ch = nearestClosedChest();
-        if (ch && Math.random() < 0.7) toast('🐕 Scout sniffs the air and points ' + compassWord(ch.x - G.p.x, ch.z - G.p.z) + '. Treasure, ' + Math.round(dist2(ch.x, ch.z, G.p.x, G.p.z)) + ' steps away!', 'ok');
-        else { const it = pick(['stick', 'flint', 'stone', 'fibre', 'mushroom', 'herb']); give(it, 1, true); toast('🐕 Scout digs something up for you: ' + ITEMS[it].n + '!', 'ok'); }
-      } else if (G.scout.fed >= G.day) toast('🐕 Scout wags his tail.', 'ok');
-    }
-  };
-  POIS.push(R.scoutPoi);
-}
-/** Scout eats raw meat first (you can't use it without cooking), then cooked meat */
-function scoutMeat() { return inv('rawmeat') ? 'rawmeat' : inv('meat') ? 'meat' : null; }
-function scoutLeaves() {
-  G.scout.friend = false; G.scout.left = (G.scout.left || 0) + 1;
-  const s = R.scout, c = SITES.rayCamp; s.x = c.x + 3; s.z = c.z + 2;
-  if (R.report) R.report.scoutLeft = true;
-  toast('🐕 Scout got too hungry and went home to Uncle Ray\'s camp. Take him some meat to win him back!', 'warn', 12000);
-}
-function scoutHungerCheck() {
-  if (!G.scout.friend || G.scout.fed >= G.day) return;
-  if (G.hour >= 14 && G.scout.warned !== G.day) { G.scout.warned = G.day; sfx('whine'); toast('🐕 Scout is hungry! Feed him some meat today, or he\'ll go home.', 'warn', 8000); }
-  else if (G.hour >= 20 && G.scout.warned2 !== G.day) { G.scout.warned2 = G.day; sfx('whine'); toast('🐕 Scout\'s tummy is rumbling... feed him before midnight!', 'warn', 8000); }
-}
-function hearts(sc) { for (let i = 0; i < 4; i++) setTimeout(() => dmgNumber(sc.x + rnd(-0.4, 0.4), sc.y + 1 + rnd(0.3), sc.z + rnd(-0.4, 0.4), '❤', 'heart'), i * 120); }
-function scoutAlert(c) {
-  if (!G.scout.friend || R.scout.barkT > 0) return;
-  R.scout.barkT = 6; sfx('bark'); toast('🐕 Scout growls. ' + (c.boss ? c.def.n + ' is here!' : 'Something is coming — ' + compassWord(c.x - G.p.x, c.z - G.p.z) + '!'), 'warn');
-}
-function compassWord(dx, dz) { const a = Math.atan2(dx, -dz), i = Math.round(a / (Math.PI / 4)); return ['NORTH', 'NORTH-EAST', 'EAST', 'SOUTH-EAST', 'SOUTH', 'SOUTH-WEST', 'WEST', 'NORTH-WEST'][(i + 8) % 8]; }
-function updateScout(dt) {
-  const s = R.scout, p = G.p; if (!s) return; s.moving = 0; if (s.barkT > 0) s.barkT -= dt; if (s.bite > 0) s.bite -= dt;
-  if (G.scout.friend) {
-    const d = dist2(s.x, s.z, p.x, p.z);
-    if (d > 48 || R.teleScout) { R.teleScout = false; const a = p.yaw + rnd(-0.6, 0.6); s.x = p.x + Math.sin(a) * 3; s.z = p.z + Math.cos(a) * 3; }
-    let foe = null, fd = 11;
-    for (const c of R.creatures) { if (c.dead || c.def.passive || c.state === 'flee') continue; if (c.state === 'idle' && !c.boss) continue; const dd = dist2(c.x, c.z, s.x, s.z); if (dd < fd && dist2(c.x, c.z, p.x, p.z) < 14) { fd = dd; foe = c; } }
-    const go = (tx, tz, sp, stop) => { const dx = tx - s.x, dz = tz - s.z, l = Math.hypot(dx, dz); if (l > stop) { const nx = s.x + dx / l * sp * dt, nz = s.z + dz / l * sp * dt; if (heightAt(nx, nz) > -0.3) { const k = collide(nx, nz, 0.3); s.x = k[0]; s.z = k[1]; } s.moving = sp; s.yaw += angDiff(s.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 10); } return l; };
-    if (foe) { const l = go(foe.x, foe.z, 8.5, foe.def.r * foe.scale + 0.7); if (l < foe.def.r * foe.scale + 1.2 && s.bite <= 0) { s.bite = 1.1; damageCreature(foe, 6 + G.p.level, null); if (Math.random() < 0.4) sfx('bark'); } }
-    else if (d > 3.2) go(p.x, p.z, d > 9 ? 9.5 : d > 5 ? 6.5 : 4, 2.4);
-  }
-  s.y = lerp(s.y, heightAt(s.x, s.z), Math.min(1, dt * 12)); s.g.position.set(s.x, s.y, s.z); s.g.rotation.y = s.yaw;
-  const m = s.model;
-  if (s.moving > 0) { s.phase += dt * s.moving * 2.6; const k = Math.sin(s.phase) * 0.7; m.legs[0].rotation.x = k; m.legs[3].rotation.x = k; m.legs[1].rotation.x = -k; m.legs[2].rotation.x = -k; } else m.legs.forEach(l => l.rotation.x *= 0.8);
-  m.tail.rotation.y = Math.sin(R.t * (G.scout.friend ? 11 : 4)) * 0.6; m.head.rotation.x = Math.sin(R.t * 1.7) * 0.07 - (s.moving ? 0 : 0.12);
-  R.scoutPoi.x = s.x; R.scoutPoi.y = s.y + 0.5; R.scoutPoi.z = s.z;
-}
 
 /* =========================================================================
    09_story: landmarks, props, notes, treasure, quests, Uncle Ray, endings
@@ -1489,4 +1212,4 @@ function touchHelpHTML() {
 }
 // @end-moved
 
-export { spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };
+export { CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };

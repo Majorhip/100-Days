@@ -49,4 +49,7 @@ export * from './build/placement.js';
 export * from './build/use.js';
 export * from './build/update.js';
 export * from './build/sleep.js';
+export * from './creatures/creatures.js';
+export * from './creatures/spawner.js';
+export * from './creatures/scout.js';
 export * from './legacy.js';

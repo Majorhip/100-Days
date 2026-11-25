@@ -9,7 +9,9 @@ import { sfx } from '../audio/audio.js';
 import { ambientTemp, survivalStep } from '../game/survival.js';
 import { stopFishing } from '../player/fishing.js';
 import { structuresStep, nearestFlame } from './update.js';
-import { clearCreatures, nearestHostile, startRaid, badge, hint, uiFade, showMorningReport, advanceTime, saveGame } from '../legacy.js';
+import { clearCreatures, nearestHostile } from '../creatures/creatures.js';
+import { startRaid } from '../creatures/spawner.js';
+import { badge, hint, uiFade, showMorningReport, advanceTime, saveGame } from '../legacy.js';
 
 // @moved-from: original
 

@@ -19,7 +19,8 @@ import { tryCast, fishClick } from './fishing.js';
 import { STRUCT } from '../build/structures.js';
 import { placeBuild } from '../build/placement.js';
 import { structPrompt, useStructure } from '../build/use.js';
-import { nearestHostile, damageCreature, hint } from '../legacy.js';
+import { nearestHostile, damageCreature } from '../creatures/creatures.js';
+import { hint } from '../legacy.js';
 
 // @moved-from: original
 

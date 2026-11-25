@@ -59,4 +59,7 @@ window.__stranded = ALL;
 // @moved-to: src/build/use.js
 // @moved-to: src/build/update.js
 // @moved-to: src/build/sleep.js
+// @moved-to: src/creatures/creatures.js
+// @moved-to: src/creatures/spawner.js
+// @moved-to: src/creatures/scout.js
 // @moved-to: src/legacy.js
