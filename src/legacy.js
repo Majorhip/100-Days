@@ -4,18 +4,18 @@
 // The code between @moved-from and @end-moved must stay byte-identical to the original
 // (tests/golden/compare-build.mjs); changes go through tests/golden/approved-edits.mjs.
 
-import './input/keyboard.js';   // load order: runs after the previous part of the original script
+import './build/sleep.js';   // load order: runs after the previous part of the original script
 import * as THREE from 'three';
 import { TAU, clamp, lerp, dist2, rnd, pick, angDiff } from './core/math.js';
 import { $ } from './ui/dom.js';
 import { hash2 } from './core/noise.js';
-import { HOUR_SECONDS, TICK, SAVE_KEY, SAVE_VERSION, WORLD, HALF, BUILD_CELL } from './core/constants.js';
+import { HOUR_SECONDS, TICK, SAVE_KEY, SAVE_VERSION, WORLD, HALF } from './core/constants.js';
 import { box, cyl, cone, ico, sph, part, merge } from './core/geometry.js';
 import { GU, MAT_GLOW, vcMesh } from './gfx/core.js';
 import { newGameState, G, R, setG } from './state.js';
 import { AU, audioInit, sfx, audioAmbient, setVolume } from './audio/audio.js';
 import { LAKES, SITES, biomeAt, siteH, heightAt, slopeAt, shorePoint, inSite, terrainColor } from './world/terrain.js';
-import { addCollider, removeCollider, collide } from './world/collision.js';
+import { addCollider, collide } from './world/collision.js';
 import { nightAmount, puff } from './world/sky.js';
 import { GFXQ } from './gfx/quality.js';
 import { GFX } from './gfx/textures.js';
@@ -39,239 +39,19 @@ import { humanModel } from './models/people.js';
 import { planks, structureModel } from './models/structures.js';
 import { inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP } from './player/inventory.js';
 import { ambientTemp, SURV, survivalStep } from './game/survival.js';
-import { hurtPlayer, eat, quickEat, drinkCanteen, drinkHere } from './player/health.js';
-import { FLOORS, groundAt, _fwd, updatePlayer } from './player/movement.js';
+import { hurtPlayer, eat, quickEat, drinkCanteen } from './player/health.js';
+import { groundAt, _fwd, updatePlayer } from './player/movement.js';
 import { refreshViewModel, swingNow, updateViewModel } from './player/viewmodel.js';
 import { POIS, findTarget, targetPrompt, key, primaryAction, interact } from './player/targeting.js';
 import { updateArrows } from './player/bow.js';
 import { startFishing, stopFishing, updateFishing } from './player/fishing.js';
 import { setupInput, lockPointer, selectSlot } from './input/keyboard.js';
+import { STRUCT, rebuildStructures } from './build/structures.js';
+import { startBuild, cancelBuild, updateBuildGhost, placeBuild, tryDismantle } from './build/placement.js';
+import { lightFire, addFuel } from './build/use.js';
+import { structuresStep, structuresNewDay, nearestFlame, updateStructures } from './build/update.js';
 
 // @moved-from: original
-
-/* =========================================================================
-   07_build: base building — placement, structures, fire, sleep, storage
-   ========================================================================= */
-const STRUCT = {
-  campfire: { aim: 0.3, use: true, col: 0.6 }, shelter: { aim: 0.8, use: true, tall: 1 }, bench: { aim: 0.9, use: true, col: 0.8 },
-  chest: { aim: 0.4, use: true, col: 0.55 }, floor: { aim: 0.1 }, wall: { aim: 0.5, tall: 2.5 }, door: { aim: 0.5, tall: 2.5 }, roof: { aim: 3 },
-  bed: { aim: 0.5, use: true, col: 0.8 }, spikes: { aim: 0.5 }, torchpost: { aim: 1, tall: 1, col: 0.15 }, furnace: { aim: 0.9, use: true, col: 0.9 },
-  collector: { aim: 0.8, use: true, col: 0.5 }, garden: { aim: 0.4, use: true, col: 0.9 }, flag: { aim: 1, tall: 2, col: 0.12 }
-};
-const ROOFS = new Map(), WALLS = new Map();
-const cellKey = (x, z) => Math.floor(x / BUILD_CELL) + ',' + Math.floor(z / BUILD_CELL);
-
-function structColliders(s) {
-  const b = STRUCT[s.k], out = [];
-  if (s.k === 'wall') out.push(s.r ? { x: s.x, z: s.z, hw: 0.14, hd: 1.5 } : { x: s.x, z: s.z, hw: 1.5, hd: 0.14 });
-  else if (s.k === 'door') for (const o of [-1.1, 1.1]) out.push(s.r ? { x: s.x, z: s.z + o, hw: 0.14, hd: 0.4 } : { x: s.x + o, z: s.z, hw: 0.4, hd: 0.14 });
-  else if (s.k === 'spikes') for (const o of [-0.9, 0, 0.9]) out.push({ x: s.x + Math.cos(s.ry) * o, z: s.z - Math.sin(s.ry) * o, r: 0.45, spikes: true });
-  else if (b.col) out.push({ x: s.x, z: s.z, r: b.col });
-  return out;
-}
-/** create the mesh + colliders for a saved structure record */
-function spawnStructure(s) {
-  GFX.noGrassDirty = true;
-  const g = structureModel(s.k); g.position.set(s.x, s.y, s.z); g.rotation.y = s.ry || 0;
-  R.scene.add(g); s._g = g; s._cols = structColliders(s).map(addCollider);
-  if (s.k === 'floor') FLOORS.set(cellKey(s.x, s.z), s.y + 0.2);
-  if (s.k === 'roof') ROOFS.set(cellKey(s.x, s.z), s.y + 3);
-  if (s.k === 'wall' || s.k === 'door') WALLS.set(Math.round(s.x * 2) + ',' + Math.round(s.z * 2), s);
-  if (!s.d) s.d = {};
-  if (s.k === 'campfire') { if (s.d.fuel === undefined) { s.d.fuel = 0; s.d.lit = false; } g.userData.flame.visible = !!s.d.lit; }
-  if (s.k === 'chest' && !s.d.items) s.d.items = {};
-  if (s.k === 'collector' && s.d.water === undefined) s.d.water = 2;
-  if (s.k === 'garden') { if (s.d.berries === undefined) s.d.berries = 0; g.userData.berries.visible = s.d.berries > 0; }
-  if (s.k === 'bed') G.spawn = { x: s.x + Math.sin(s.ry || 0) * 1.6, z: s.z + Math.cos(s.ry || 0) * 1.6 };
-}
-function removeStructure(s) {
-  GFX.noGrassDirty = true;
-  R.scene.remove(s._g); s._g.traverse(o => { if (o.geometry && o.geometry !== UNIT_BOX) o.geometry.dispose(); });
-  s._cols.forEach(removeCollider);
-  if (s.k === 'floor') FLOORS.delete(cellKey(s.x, s.z)); if (s.k === 'roof') ROOFS.delete(cellKey(s.x, s.z));
-  if (s.k === 'wall' || s.k === 'door') WALLS.delete(Math.round(s.x * 2) + ',' + Math.round(s.z * 2));
-  G.structures.splice(G.structures.indexOf(s), 1);
-  if (s.k === 'bed') { const b = G.structures.find(q => q.k === 'bed'); G.spawn = b ? { x: b.x + 1.6, z: b.z } : null; }
-}
-function rebuildStructures() { FLOORS.clear(); ROOFS.clear(); WALLS.clear(); for (const s of G.structures) spawnStructure(s); }
-
-/* ---------- placement ---------- */
-function startBuild(id) {
-  cancelBuild(); const def = BUILD_BY_ID[id];
-  const g = structureModel(id);
-  const mat = new THREE.MeshBasicMaterial({ color: 0x66ff88, transparent: true, opacity: 0.55, depthWrite: false });
-  g.traverse(o => { if (o.isMesh) { o.material = mat; o.castShadow = false; } });
-  R.scene.add(g); R.build = { id, def, g, mat, rot: 0, ok: false, pos: null };
-  if (!R.touch) hint('Left click to place · <b>R</b> to rotate · <b>X</b> or right click to stop', 5);
-}
-function cancelBuild() { if (!R.build) return; R.scene.remove(R.build.g); R.build = null; }
-function aimPoint(maxD) {
-  const c = R.camera.position;
-  for (let d = 1.2; d <= maxD; d += 0.2) { const x = c.x + _fwd.x * d, y = c.y + _fwd.y * d, z = c.z + _fwd.z * d; if (y <= groundAt(x, z)) return { x, z }; }
-  const d = Math.min(maxD, 5); return { x: c.x + _fwd.x * d, z: c.z + _fwd.z * d };
-}
-function updateBuildGhost() {
-  const b = R.build; if (!b) return;
-  const a = aimPoint(b.def.place === 'free' ? 7 : 9), C = BUILD_CELL; let x = a.x, z = a.z, y, ry = 0, r = 0, ok = true, why = '';
-  const cx = Math.floor(x / C), cz = Math.floor(z / C), mx = (cx + 0.5) * C, mz = (cz + 0.5) * C;
-  const nbr = (map, off) => { for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const v = map.get((cx + ox) + ',' + (cz + oz)); if (v !== undefined) return v - off; } return undefined; };
-  if (b.def.place === 'cell') {
-    x = mx; z = mz;
-    const th = Math.max(heightAt(mx, mz), heightAt(mx - 1.4, mz - 1.4), heightAt(mx + 1.4, mz - 1.4), heightAt(mx - 1.4, mz + 1.4), heightAt(mx + 1.4, mz + 1.4));
-    if (b.id === 'floor') { const n = nbr(FLOORS, 0.2); y = n !== undefined && Math.abs(n - th) < 1.6 ? n : th; if (FLOORS.has(cx + ',' + cz)) { ok = false; why = 'There is already a floor here.'; } }
-    else { const f = FLOORS.get(cx + ',' + cz), n = nbr(ROOFS, 3); y = f !== undefined ? f - 0.2 : n !== undefined && Math.abs(n - th) < 1.6 ? n : th; if (ROOFS.has(cx + ',' + cz)) { ok = false; why = 'There is already a roof here.'; } }
-    ry = b.rot * Math.PI / 2;
-  } else if (b.def.place === 'edge') {
-    const u = x - mx, v = z - mz;
-    if (Math.abs(u) > Math.abs(v)) { x = cx * C + (u > 0 ? C : 0); z = mz; r = 1; } else { z = cz * C + (v > 0 ? C : 0); x = mx; r = 0; }
-    ry = r ? Math.PI / 2 : 0;
-    const f1 = FLOORS.get(cellKey(x - (r ? 0.5 : 0), z - (r ? 0 : 0.5))), f2 = FLOORS.get(cellKey(x + (r ? 0.5 : 0), z + (r ? 0 : 0.5)));
-    y = f1 !== undefined ? f1 - 0.2 : f2 !== undefined ? f2 - 0.2 : Math.max(heightAt(x, z), heightAt(x + (r ? 0 : 1.4), z + (r ? 1.4 : 0)), heightAt(x - (r ? 0 : 1.4), z - (r ? 1.4 : 0)));
-    if (WALLS.has(Math.round(x * 2) + ',' + Math.round(z * 2))) { ok = false; why = 'There is already a wall here.'; }
-  } else {
-    y = groundAt(x, z); ry = Math.round((G.p.yaw + Math.PI) / (Math.PI / 4)) * (Math.PI / 4) + b.rot * Math.PI / 2;
-    for (const s of G.structures) if (BUILD_BY_ID[s.k].place === 'free' && dist2(s.x, s.z, x, z) < 1.3) { ok = false; why = 'Too close to another object.'; }
-    if (dist2(x, z, G.p.x, G.p.z) < 1.1 && STRUCT[b.id].col) { ok = false; why = 'Step back a little.'; }
-  }
-  if (heightAt(x, z) < 0.35) { ok = false; why = 'You can\'t build in water.'; }
-  if (inSite(x, z, -3) && inSite(x, z, -3) !== 'stump') { ok = false; why = 'You can\'t build on a landmark.'; }
-  if (ok && !canAfford(b.def.cost)) { ok = false; why = 'Not enough materials.'; }
-  b.g.position.set(x, y, z); b.g.rotation.y = ry; b.mat.color.set(ok ? 0x66ff88 : 0xff5544);
-  b.ok = ok; b.why = why; b.pos = { x, y, z, ry, r };
-}
-function placeBuild() {
-  const b = R.build; if (!b || !b.pos) return;
-  if (!b.ok) { hint(b.why || 'Can\'t build there.'); sfx('deny'); return; }
-  pay(b.def.cost);
-  const s = { k: b.id, x: b.pos.x, y: b.pos.y, z: b.pos.z, ry: b.pos.ry, r: b.pos.r, d: {}, id: G.sid++ };
-  G.structures.push(s); spawnStructure(s);
-  sfx('build'); puff(s.x, s.y + 0.4, s.z, 0xc9b98a, 8, { size: 0.25 }); addXP(5); G.stats.built++;
-  s._g.scale.setScalar(0.6); R.fx.push({ kind: 'pop', m: s._g, t: 0 });
-  if (G.stats.built >= 12) badge('builder');
-  if (b.id === 'campfire') tipOnce('fire', 'Look at the campfire and press <b>E</b> to add fuel and light it.');
-  if (b.id === 'shelter' || b.id === 'bed') tipOnce('sleep', 'When it gets dark (after 7 pm), press <b>E</b> on it to sleep until morning.');
-  const keep = (b.def.place !== 'free' || b.id === 'spikes' || b.id === 'torchpost') && canAfford(b.def.cost);
-  if (!keep) cancelBuild();
-  uiDirty();
-}
-function tryDismantle() {
-  const t = R.target; if (!t || t.kind !== 'struct') { hint('Look at something you built and press X to take it apart.'); return; }
-  const s = t.ref;
-  if (s.k === 'chest' && Object.keys(s.d.items).length) { hint('Empty the chest first.'); sfx('deny'); return; }
-  const cost = BUILD_BY_ID[s.k].cost; for (const k in cost) { const n = Math.floor(cost[k] / 2); if (n > 0) give(k, n); }
-  puff(s.x, s.y + 0.5, s.z, 0xc9b98a, 10, { size: 0.3 }); sfx('thunk'); removeStructure(s); R.target = null;
-}
-
-/* ---------- using structures ---------- */
-function isRoofed(x, z) { return ROOFS.has(cellKey(x, z)); }
-function structPrompt(s) {
-  const d = s.d, x = '  <span class="dim">' + key('X') + ' take apart</span>';
-  switch (s.k) {
-    case 'campfire': return key('E') + (d.lit ? ' Campfire — cook / add fuel (' + d.fuel.toFixed(1) + 'h left)' : ' Campfire — add fuel and light');
-    case 'shelter': case 'bed': return key('E') + ' Sleep' + x;
-    case 'bench': return key('E') + ' Use Workbench' + x;
-    case 'furnace': return key('E') + ' Use Furnace' + x;
-    case 'chest': return key('E') + ' Open Chest' + x;
-    case 'collector': return key('E') + ' Drink (' + Math.floor(d.water) + ' drinks stored)' + x;
-    case 'garden': return (d.berries > 0 ? key('E') + ' Pick ' + d.berries + ' berries' : '🌱 Berry Garden — growing...') + x;
-    default: return BUILD_BY_ID[s.k].n + x;
-  }
-}
-function useStructure(s) {
-  switch (s.k) {
-    case 'campfire': openPanel('fire', s); break;
-    case 'bench': openPanel('craft', 'bench'); break;
-    case 'furnace': openPanel('craft', 'furnace'); break;
-    case 'chest': openPanel('chest', s); break;
-    case 'shelter': case 'bed': trySleep(s); break;
-    case 'collector': if (s.d.water >= 1) { s.d.water -= 1; drinkHere(34); } else { hint('The collector is empty. It fills when it rains.'); sfx('deny'); } break;
-    case 'garden': if (s.d.berries > 0) { give('berries', s.d.berries); s.d.berries = 0; s._g.userData.berries.visible = false; sfx('pickup'); } else hint('The berries are still growing. Check back tomorrow.'); break;
-  }
-}
-function lightFire(s) {
-  if (s.d.fuel <= 0) { hint('Add some sticks or wood first.'); sfx('deny'); return; }
-  if ((G.weather === 'rain' || G.weather === 'storm') && !isRoofed(s.x, s.z) && biomeAt(s.x, s.z) !== 'snow') { hint('It\'s too wet! Build a roof over the fire.'); sfx('deny'); return; }
-  s.d.lit = true; s._g.userData.flame.visible = true; sfx('ignite'); puff(s.x, s.y + 0.5, s.z, 0xffa040, 8, { size: 0.15, up: 3 });
-  if (!G.flags.fireLit) { G.flags.fireLit = true; badge('fire'); }
-}
-function douse(s, why) { s.d.lit = false; s._g.userData.flame.visible = false; if (dist2(s.x, s.z, G.p.x, G.p.z) < 25 && !R.sleeping) { sfx('hiss'); toast(why, 'warn'); } puff(s.x, s.y + 0.5, s.z, 0x888888, 6, { size: 0.3, up: 2.5, g: -1 }); }
-function addFuel(s, id) {
-  if (inv(id) < 1) return; if (s.d.fuel >= 11.5) { hint('The fire can\'t hold any more fuel.'); return; }
-  take(id, 1); s.d.fuel = Math.min(12, s.d.fuel + (id === 'wood' ? 3 : 0.75)); sfx('thunk');
-}
-/** all time-based structure logic, in game hours (also used while sleeping) */
-function structuresStep(gh) {
-  const wet = G.weather === 'rain' || G.weather === 'storm';
-  for (const s of G.structures) {
-    if (s.k === 'campfire' && s.d.lit) {
-      s.d.fuel -= gh; if (s.d.fuel <= 0) { s.d.fuel = 0; douse(s, '🔥 Your campfire burned out.'); R.report.fireOut = true; }
-      else if (wet && !isRoofed(s.x, s.z) && biomeAt(s.x, s.z) !== 'snow') { douse(s, '🌧️ The rain put out your campfire! Build a roof over it.'); R.report.fireRain = true; }
-    }
-    if (s.k === 'collector' && wet) s.d.water = Math.min(10, s.d.water + gh * 1.5);
-  }
-}
-function structuresNewDay() {
-  for (const s of G.structures) {
-    if (s.k === 'garden') { s.d.berries = Math.min(8, s.d.berries + 4); s._g.userData.berries.visible = true; }
-    if (s.k === 'collector') s.d.water = Math.min(10, s.d.water + 2);
-  }
-}
-/** nearest lit fire or torch post: used for warmth, wolf fear, lights */
-function nearestFlame(x, z, maxD, firesOnly) {
-  let best = null, bd = maxD;
-  for (const s of G.structures) {
-    if (!((s.k === 'campfire' && s.d.lit) || (!firesOnly && s.k === 'torchpost'))) continue;
-    const d = dist2(s.x, s.z, x, z); if (d < bd) { bd = d; best = s; }
-  }
-  if (!firesOnly || true) for (const f of R.worldFires) { const d = dist2(f.x, f.z, x, z); if (d < bd) { bd = d; best = f; } }
-  return best ? { s: best, d: bd } : null;
-}
-function updateStructures(dt) {
-  const p = G.p;
-  // shelter + warmth sources around the player
-  let sh = isRoofed(p.x, p.z);
-  if (!sh) for (const s of G.structures) if (s.k === 'shelter' && dist2(s.x, s.z, p.x, p.z) < 2.3) { sh = true; break; }
-  if (!sh) for (const f of R.worldRoofs) if (dist2(f.x, f.z, p.x, p.z) < f.r) { sh = true; break; }
-  if (sh && !R.sheltered && isRoofed(p.x, p.z)) badge('home');
-  R.sheltered = sh;
-  const nf = nearestFlame(p.x, p.z, 10, true); R.nearFire = nf ? nf.s : null; R.nearFireDist = nf ? nf.d : 99;
-  // flame flicker + up to 3 real lights on the closest flames
-  R.lightT = (R.lightT || 0) - dt;
-  if (R.lightT <= 0) {
-    R.lightT = 0.5; const src = [];
-    for (const s of G.structures) if ((s.k === 'campfire' && s.d.lit) || s.k === 'torchpost' || s.k === 'furnace') src.push({ x: s.x, y: s.y + (s.k === 'torchpost' ? 2.3 : 1), z: s.z, d: dist2(s.x, s.z, p.x, p.z), big: s.k === 'campfire' });
-    for (const f of R.worldFires) src.push({ x: f.x, y: f.y + 1, z: f.z, d: dist2(f.x, f.z, p.x, p.z), big: true });
-    src.sort((a, b) => a.d - b.d);
-    R.lightPool.forEach((L, i) => { const s = src[i]; if (s && s.d < 70) { L.userData.on = true; L.position.set(s.x, s.y, s.z); L.userData.base = s.big ? 1.5 : 1.0; L.distance = s.big ? 26 : 18; } else L.userData.on = false; });
-  }
-  const fl = 1 + Math.sin(R.t * 19) * 0.08 + Math.sin(R.t * 7.3) * 0.08;
-  for (const L of R.lightPool) L.intensity = L.userData.on ? L.userData.base * fl * (0.35 + nightAmount() * 0.75) : 0;
-  for (const s of G.structures) {
-    const f = s._g.userData.flame; if (f && f.visible) { const k = s.k === 'campfire' ? 1.9 : 0.9; f.scale.set(k * (1 + Math.sin(R.t * 21 + s.id) * 0.1), k * (1 + Math.sin(R.t * 15 + s.id * 2) * 0.18), k); if (s.k === 'campfire' && Math.random() < dt * 2.5) puff(s.x, s.y + 1.2, s.z, 0x777777, 1, { size: 0.16, up: 1.4, g: -1.2, speed: 0.3, life: 2.2, grow: 3 }); }
-    const c = s._g.userData.cloth; if (c) c.rotation.y = Math.sin(R.t * 2.2 + s.id) * 0.25;
-  }
-}
-
-/* ---------- sleep ---------- */
-function trySleep(s) {
-  if (G.hour >= 6 && G.hour < 19) { hint('It\'s too early to sleep. Come back after sunset (7 pm).'); sfx('deny'); return; }
-  if (R.raid) { hint('The wolves are howling. No sleep until the Wolf Moon is over!'); sfx('deny'); return; }
-  if (G.day % 10 === 0 && G.raidDone < G.day && G.hour >= 19) { startRaid(); return; }
-  if (nearestHostile(24)) { hint('You can\'t sleep — something is prowling nearby!'); sfx('deny'); return; }
-  R.sleeping = true; R.report = { rest: s.k === 'bed' ? 7 : 4, bed: s.k === 'bed' }; if (R.fish) stopFishing();
-  uiFade(true, 1000, () => {
-    clearCreatures(true);
-    const wasSheltered = true; let guard = 0;
-    while (!(G.hour >= 6 && G.hour < 6.3) && guard++ < 200) {
-      R.sheltered = wasSheltered; ambientTemp();
-      advanceTime(0.25, true); structuresStep(0.25);
-      const nf = nearestFlame(G.p.x, G.p.z, 10, true); R.nearFire = nf ? nf.s : null; R.nearFireDist = nf ? nf.d : 99;
-      survivalStep(0.25, { sleeping: true, rest: R.report.rest });
-    }
-    G.hour = 6.05; if (!G.flags.slept) { G.flags.slept = true; badge('night'); }
-    saveGame(); showMorningReport(() => { R.sleeping = false; uiFade(false, 900); });
-  });
-}
 
 /* =========================================================================
    08_creatures: animals, predators, bosses, Wolf Moon raids, Scout the dog
@@ -1709,4 +1489,4 @@ function touchHelpHTML() {
 }
 // @end-moved
 
-export { STRUCT, ROOFS, WALLS, cellKey, structColliders, spawnStructure, removeStructure, rebuildStructures, startBuild, cancelBuild, aimPoint, updateBuildGhost, placeBuild, tryDismantle, isRoofed, structPrompt, useStructure, lightFire, douse, addFuel, structuresStep, structuresNewDay, nearestFlame, updateStructures, trySleep, spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };
+export { spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };

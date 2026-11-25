@@ -16,7 +16,10 @@ import { _fwd } from './movement.js';
 import { refreshViewModel } from './viewmodel.js';
 import { shootBow } from './bow.js';
 import { tryCast, fishClick } from './fishing.js';
-import { STRUCT, placeBuild, structPrompt, useStructure, nearestHostile, damageCreature, hint } from '../legacy.js';
+import { STRUCT } from '../build/structures.js';
+import { placeBuild } from '../build/placement.js';
+import { structPrompt, useStructure } from '../build/use.js';
+import { nearestHostile, damageCreature, hint } from '../legacy.js';
 
 // @moved-from: original
 

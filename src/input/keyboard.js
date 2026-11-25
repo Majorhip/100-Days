@@ -13,7 +13,8 @@ import { quickEat, drinkCanteen } from '../player/health.js';
 import { refreshViewModel } from '../player/viewmodel.js';
 import { primaryAction, interact } from '../player/targeting.js';
 import { stopFishing } from '../player/fishing.js';
-import { cancelBuild, tryDismantle, hint, openPanel, closePanel, switchInvTab } from '../legacy.js';
+import { cancelBuild, tryDismantle } from '../build/placement.js';
+import { hint, openPanel, closePanel, switchInvTab } from '../legacy.js';
 
 // @moved-from: original
 

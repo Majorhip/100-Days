@@ -54,4 +54,9 @@ window.__stranded = ALL;
 // @moved-to: src/player/bow.js
 // @moved-to: src/player/fishing.js
 // @moved-to: src/input/keyboard.js
+// @moved-to: src/build/structures.js
+// @moved-to: src/build/placement.js
+// @moved-to: src/build/use.js
+// @moved-to: src/build/update.js
+// @moved-to: src/build/sleep.js
 // @moved-to: src/legacy.js
