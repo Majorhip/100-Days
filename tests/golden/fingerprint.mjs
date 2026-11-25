@@ -8,9 +8,9 @@
 // Without --write it compares against the golden reference and exits 1 on any difference,
 // naming which part of the world changed.
 //
-// It reads the game's top-level variables (HGT, NODES, LAKES, SITES, NODE_MESH, R) from the
-// page. That works while the game is a classic <script>; once it becomes an ES module
-// (Phase 3) the game will need a small read-only debug hook for this script to read.
+// It reads the game's variables (HGT, NODES, LAKES, SITES, NODE_MESH, R) through
+// window.__stranded: the game's read-only export from Phase 3 on, or an equivalent shim
+// that browser.mjs adds for the original classic-script file.
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,6 +25,7 @@ const sha = s => createHash('sha256').update(s).digest('hex');
 
 /** Runs inside the page. Numbers survive JSON exactly (shortest round-trip form). */
 function collect() {
+  const { GRID, CELL, HGT, NODES, NODE_MESH, LAKES, SITES, R } = window.__stranded;
   const prim = o => { const r = {}; for (const k of Object.keys(o).sort()) { const v = o[k]; if (v === null || typeof v !== 'object' && typeof v !== 'function') r[k] = v; } return r; };
   const tints = {};
   for (const t of Object.keys(NODE_MESH).sort()) { const ic = NODE_MESH[t].m.instanceColor; tints[t] = ic ? Array.from(ic.array) : null; }
@@ -41,7 +42,8 @@ function collect() {
 const { browser, close } = await launch({ gpu: false });
 let result;
 try {
-  const { page, errors } = await openGame(browser, target);
+  const { page, errors, hook } = await openGame(browser, target);
+  console.log(`reading game state via: ${hook}`);
   const data = await page.evaluate(collect);
   const parts = {};
   for (const k of Object.keys(data)) parts[k] = sha(JSON.stringify(data[k]));

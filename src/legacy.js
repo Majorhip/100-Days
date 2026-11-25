@@ -1,0 +1,3978 @@
+// Phase 3 (lift and shift): the original game script, unchanged, apart from this import
+// and the read-only export at the end. It is split into modules in Phase 4.
+import * as THREE from 'three';
+/* =========================================================================
+   STRANDED: 100 DAYS  —  full HTML edition
+   00_core: constants, maths, noise, geometry helpers, game state
+   ========================================================================= */
+'use strict';
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const sstep = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const dist2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
+const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
+const rndi = (a, b) => Math.floor(rnd(a, b + 1));
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const $ = id => document.getElementById(id);
+function angDiff(a, b) { let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d; }
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const WORLD_SEED = 20260821;
+const wr = mulberry32(WORLD_SEED);           // world-generation RNG (stable island)
+const wrr = (a, b) => a + wr() * (b - a);
+
+/* ---- value noise ---- */
+function hash2(ix, iz) {
+  let h = Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + WORLD_SEED | 0;
+  h = Math.imul(h ^ h >>> 13, 1274126177);
+  return ((h ^ h >>> 16) >>> 0) / 4294967296;
+}
+function vnoise(x, z) {
+  const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz;
+  const u = fx * fx * (3 - 2 * fx), v = fz * fz * (3 - 2 * fz);
+  return lerp(lerp(hash2(ix, iz), hash2(ix + 1, iz), u), lerp(hash2(ix, iz + 1), hash2(ix + 1, iz + 1), u), v);
+}
+function fbm(x, z, oct) {
+  let a = 0.5, f = 1, s = 0, n = 0;
+  for (let i = 0; i < oct; i++) { s += a * vnoise(x * f, z * f); n += a; a *= 0.5; f *= 2.03; }
+  return s / n;
+}
+
+/* ---- time constants: every rate in the game is per GAME HOUR ---- */
+const DAY_LENGTH_SECONDS = 480;                    // 8 real minutes = 24 game hours
+const HOUR_SECONDS = DAY_LENGTH_SECONDS / 24;      // 20 s
+const TICK = 1 / 30;                               // fixed simulation tick
+const SAVE_KEY = 'stranded100_v3';
+const SAVE_VERSION = 3;
+
+/* ---- world constants ---- */
+const WORLD = 720, HALF = 360, GRID = 200, CELL = WORLD / GRID;
+const BUILD_CELL = 3;
+
+/* ---- geometry helpers (flat-shaded, vertex-coloured low poly) ---- */
+const _tmpM = new THREE.Matrix4(), _tmpQ = new THREE.Quaternion(), _tmpE = new THREE.Euler(),
+  _tmpP = new THREE.Vector3(), _tmpS = new THREE.Vector3(), _tmpC = new THREE.Color();
+const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+const cyl = (rt, rb, h, seg = 6) => new THREE.CylinderGeometry(rt, rb, h, seg, 1);
+const cone = (r, h, seg = 6) => new THREE.ConeGeometry(r, h, seg, 1);
+const ico = (r, d = 0) => new THREE.IcosahedronGeometry(r, d);
+const sph = (r, w = 8, h = 6) => new THREE.SphereGeometry(r, w, h);
+let _jitSeed = 1;
+function _jr() { _jitSeed = (_jitSeed * 16807) % 2147483647; return _jitSeed / 2147483647; }
+/** one coloured, transformed piece of a model. jit = per-triangle brightness variation */
+function part(geo, color, pos, rot, scl, jit = 0.06) {
+  const g = geo.index ? geo.toNonIndexed() : geo.clone();
+  _tmpP.set(pos ? pos[0] : 0, pos ? pos[1] : 0, pos ? pos[2] : 0);
+  _tmpE.set(rot ? rot[0] : 0, rot ? rot[1] : 0, rot ? rot[2] : 0);
+  _tmpQ.setFromEuler(_tmpE);
+  if (typeof scl === 'number') _tmpS.set(scl, scl, scl); else _tmpS.set(scl ? scl[0] : 1, scl ? scl[1] : 1, scl ? scl[2] : 1);
+  g.applyMatrix4(_tmpM.compose(_tmpP, _tmpQ, _tmpS));
+  const n = g.attributes.position.count, c = new Float32Array(n * 3);
+  _tmpC.set(color);
+  for (let i = 0; i < n; i += 3) {
+    const k = 1 + (_jr() - 0.5) * 2 * jit;
+    for (let j = 0; j < 3; j++) { c[(i + j) * 3] = _tmpC.r * k; c[(i + j) * 3 + 1] = _tmpC.g * k; c[(i + j) * 3 + 2] = _tmpC.b * k; }
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  return g;
+}
+function merge(parts) {
+  let n = 0; for (const p of parts) n += p.attributes.position.count;
+  const pos = new Float32Array(n * 3), col = new Float32Array(n * 3); let o = 0;
+  for (const p of parts) {
+    pos.set(p.attributes.position.array, o * 3); col.set(p.attributes.color.array, o * 3);
+    o += p.attributes.position.count; p.dispose();
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  return g;
+}
+/* =========================================================================
+   02a_gfx_core: shared shader uniforms, upgraded fog, and the lit-material
+   factory every model uses. (Graphics only — no gameplay rules live here.)
+   ========================================================================= */
+const GU = {
+  uTime: { value: 0 },
+  uNight: { value: 0 },
+  uWet: { value: 0 },                                   // 0 dry .. 1 soaked (rain)
+  uWind: { value: new THREE.Vector3(1, 0, 0.35).normalize() },
+  uWindAmp: { value: 0.5 },
+  uPlayer: { value: new THREE.Vector3() },
+  uCamPos: { value: new THREE.Vector3() },             // camera position (three.js skips cameraPosition for Lambert/Basic)
+  uSkyHor: { value: new THREE.Color(0xc6e6ff) },
+  uSkyTop: { value: new THREE.Color(0x3b8ee6) },
+  uSunCol: { value: new THREE.Color(1, 1, 1) },
+  uHgt: { value: null },                                // terrain heightmap (R32F)
+  uNoise: { value: null },                              // tileable RGBA noise
+  uAO: { value: 1 },                                    // contact-shadow strength (quality)
+  uRim: { value: 1 },
+  uCloudSh: { value: 0.3 },                             // strength of drifting cloud shadows
+  uCloudCov: { value: 0.2 },
+  uBiome: { value: null },                              // r = snow weight, g = desert weight
+  // fog extras (names prefixed fg so they never clash with material uniforms)
+  fgSunDir: { value: new THREE.Vector3(0, 1, 0) },
+  fgSunCol: { value: new THREE.Color(1, 0.9, 0.7) },
+  fgSunStr: { value: 0.5 },
+  fgH: { value: new THREE.Vector3(2, 0.2, 0) }          // x base height, y falloff, z density
+};
+/* the terrain heightmap lookup, identical to heightAt() so GPU and game agree */
+const GLSL_HGT = `
+uniform sampler2D uHgt;
+float gHT(float ix, float iz){ return texture2D(uHgt, (vec2(ix, iz) + 0.5) / ${(GRID + 1).toFixed(1)}).r; }
+float terrainH(vec2 p){
+  vec2 f = clamp((p + ${HALF.toFixed(1)}) / ${CELL.toFixed(4)}, 0.0, ${(GRID - 0.001).toFixed(3)});
+  vec2 i = floor(f); f -= i;
+  float h00 = gHT(i.x, i.y), h10 = gHT(i.x + 1.0, i.y), h01 = gHT(i.x, i.y + 1.0), h11 = gHT(i.x + 1.0, i.y + 1.0);
+  return (f.x + f.y <= 1.0) ? h00 + (h10 - h00) * f.x + (h01 - h00) * f.y : h11 + (h01 - h11) * (1.0 - f.x) + (h10 - h11) * (1.0 - f.y);
+}
+`;
+
+/* moving cloud shadows: sample the cloud layer where the sun's ray through this point meets it */
+const GLSL_CLOUDSH = `
+float cloudShadow(vec3 wp, vec3 sd){
+  vec2 p = (wp.xz + sd.xz / max(sd.y, 0.25) * (140.0 - wp.y)) * 0.0032 + uTime * vec2(0.0042, 0.0016);
+  float n = texture2D(uNoise, p).g * 0.65 + texture2D(uNoise, p * 2.3 + 0.37).g * 0.35;
+  return 1.0 - uCloudSh * smoothstep(0.6 - uCloudCov * 0.25, 0.72 - uCloudCov * 0.2, n);
+}
+`;
+/* fog: world-space distance (no shifting when you turn), low-lying mist, and a warm glow toward the sun */
+THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\n varying float fogDepth; varying vec3 vFogW;\n#endif';
+THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\n fogDepth = -mvPosition.z;\n vFogW = (mvPosition.xyz - viewMatrix[3].xyz) * mat3(viewMatrix);\n#endif';
+THREE.ShaderChunk.fog_pars_fragment = '#ifdef USE_FOG\n uniform vec3 fogColor; varying float fogDepth; varying vec3 vFogW;\n uniform float fogNear; uniform float fogFar;\n uniform vec3 uCamPos; uniform vec3 fgSunDir; uniform vec3 fgSunCol; uniform float fgSunStr; uniform vec3 fgH;\n#endif';
+THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
+  vec3 fgV = vFogW - uCamPos; float fgD = length(fgV);
+  float fogFactor = pow(smoothstep(fogNear, fogFar, fgD), 1.3);
+  float fgHF = fgH.z * exp(-max(vFogW.y - fgH.x, 0.0) * fgH.y) * (1.0 - exp(-fgD * 0.02));
+  fogFactor = clamp(fogFactor + fgHF * (1.0 - fogFactor), 0.0, 1.0);
+  float fgS = pow(max(dot(fgV / max(fgD, 0.001), fgSunDir), 0.0), 6.0) * fgSunStr;
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(fogColor, fgSunCol, clamp(fgS, 0.0, 1.0)), fogFactor);
+#endif`;
+
+/** hand every shader the shared uniforms (objects are shared, so one update reaches all materials) */
+function gfxInject(sh) { for (const k in GU) sh.uniforms[k] = GU[k]; }
+THREE.Material.prototype.onBeforeCompile = function (sh) { gfxInject(sh); };
+
+/* vertex snippet: bend instanced plants with the wind. K = bend per height², F = leaf flutter */
+function windGLSL(K, F) {
+  return `
+  { vec3 gIP = modelMatrix[3].xyz; vec2 gLW = uWind.xz;
+  #ifdef USE_INSTANCING
+    gIP = (modelMatrix * instanceMatrix[3]).xyz;
+    vec2 gc0 = instanceMatrix[0].xz, gc2 = instanceMatrix[2].xz; float gs2 = max(dot(gc0, gc0), 1e-4);
+    gLW = vec2(dot(uWind.xz, gc0), dot(uWind.xz, gc2)) / gs2;
+  #endif
+    float gH = max(position.y, 0.0);
+    float gPh = uTime * 1.3 + dot(gIP.xz, vec2(0.09, 0.06));
+    float gGust = 0.55 + 0.45 * sin(gPh) * sin(gPh * 0.41 + 1.7);
+    float gB = gH * gH * ${K.toFixed(4)} * uWindAmp * gGust;
+    transformed.xz += gLW * gB;
+    transformed += ${F.toFixed(4)} * uWindAmp * sin(uTime * 5.5 + dot(position, vec3(3.1, 2.3, 1.7)) + gIP.x) * smoothstep(0.6, 2.0, gH) * vec3(0.6, 0.3, 0.6);
+  }`;
+}
+const WIND_UNI = 'uniform float uTime; uniform vec3 uWind; uniform float uWindAmp;\n';
+
+/**
+ * Lit material for all models: per-pixel lighting (so campfires light things properly),
+ * soft contact shadows where objects meet the ground, a sky-coloured rim light,
+ * optional wind sway and back-lit leaves.
+ * o: { color, vc, side, emissive, emissiveIntensity, wind:[K,F], foliage, rim, ao, key }
+ */
+function litMat(o) {
+  o = o || {};
+  const m = new THREE.MeshPhongMaterial({
+    color: o.color === undefined ? 0xffffff : o.color, vertexColors: !!o.vc, side: o.side || THREE.FrontSide,
+    specular: o.spec || 0x000000, shininess: o.shininess || 6,
+    emissive: o.emissive || 0, emissiveIntensity: o.emissiveIntensity === undefined ? 1 : o.emissiveIntensity
+  });
+  const key = 'lit|' + (o.wind ? o.wind.join(',') : '') + '|' + (o.foliage ? 'f' : '') + (o.rim === false ? '' : 'r') + (o.ao === false ? '' : 'a') + (o.snow ? 's' : '');
+  m.customProgramCacheKey = () => key;
+  m.onBeforeCompile = sh => litPatch(sh, o);
+  if (o.wind) {
+    const d = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+    d.customProgramCacheKey = () => 'depth' + key;
+    d.onBeforeCompile = sh => { gfxInject(sh); sh.vertexShader = WIND_UNI + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>' + windGLSL(o.wind[0], o.wind[1])); };
+    m.userData.depth = d;
+  }
+  return m;
+}
+function litPatch(sh, o) {
+  gfxInject(sh);
+  let v = sh.vertexShader, f = sh.fragmentShader;
+  v = 'varying vec3 vGW; varying float vGLY;\n' + (o.wind ? WIND_UNI : '') + v;
+  if (o.wind) v = v.replace('#include <begin_vertex>', '#include <begin_vertex>' + windGLSL(o.wind[0], o.wind[1]));
+  v = v.replace('#include <fog_vertex>', `#include <fog_vertex>
+  { vec4 gw = vec4(transformed, 1.0);
+  #ifdef USE_INSTANCING
+    gw = instanceMatrix * gw;
+  #endif
+    vGW = (modelMatrix * gw).xyz; vGLY = position.y; }`);
+  f = 'varying vec3 vGW; varying float vGLY;\nuniform float uNight; uniform float uAO; uniform float uRim; uniform vec3 uSkyHor; uniform vec3 uSunCol; uniform sampler2D uNoise; uniform float uTime; uniform float uCloudSh; uniform float uCloudCov; uniform sampler2D uBiome;\n#ifndef USE_FOG\nuniform vec3 fgSunDir;\n#endif\n' +
+    (o.ao === false ? '' : GLSL_HGT) + GLSL_CLOUDSH + f;
+  if (o.snow) f = f.replace('#include <color_fragment>', `#include <color_fragment>
+  { vec3 gFN = normalize(cross(dFdx(vGW), dFdy(vGW)));
+    float gSnow = texture2D(uBiome, (vGW.xz + ${HALF.toFixed(1)}) / ${WORLD.toFixed(1)}).r;
+    float gCap = smoothstep(0.45, 0.8, gFN.y) * smoothstep(0.35, 0.7, gSnow);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.94, 1.0), gCap * 0.85); }`);
+  f = f.replace('#include <envmap_fragment>', `#include <envmap_fragment>
+  outgoingLight *= cloudShadow(vGW, fgSunDir);
+  ${o.ao === false ? '' : `
+  { float gUp = vGW.y - terrainH(vGW.xz);
+    float gAO = mix(0.52, 1.0, smoothstep(0.0, 0.85, gUp));
+    outgoingLight *= mix(1.0, gAO, uAO * step(gUp, 4.0)); }`}
+  ${o.rim === false ? '' : `
+  { float gR = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
+    outgoingLight += uSkyHor * gR * 0.22 * uRim * diffuseColor.rgb * (1.0 - uNight * 0.6) + vec3(0.25, 0.35, 0.6) * gR * 0.12 * uNight * uRim; }`}
+  ${o.foliage ? `
+  { vec3 gVD = normalize(vGW - cameraPosition);
+    float gLeaf = smoothstep(0.02, 0.12, diffuseColor.g - max(diffuseColor.r, diffuseColor.b));
+    float gT = pow(max(dot(gVD, fgSunDir), 0.0), 5.0) * gLeaf * (1.0 - uNight);
+    outgoingLight += uSunCol * diffuseColor.rgb * gT * 0.9;
+    outgoingLight *= mix(0.62, 1.0, smoothstep(0.2, 1.6, vGLY)); }` : ''}`);
+  sh.vertexShader = v; sh.fragmentShader = f;
+}
+/** apply the swaying shadow material to an instanced plant mesh */
+function windShadow(mesh) { if (mesh.material.userData.depth) mesh.customDepthMaterial = mesh.material.userData.depth; return mesh; }
+
+const MAT_VC = litMat({ vc: true, snow: true });
+const MAT_VC_TOOL = litMat({ vc: true });
+const MAT_VC_DS = litMat({ vc: true, side: THREE.DoubleSide, snow: true });
+const MAT_GLOW = litMat({ vc: true, emissive: 0x2a8fb0, emissiveIntensity: 0.7 });
+function vcMesh(parts, mat) {
+  const m = new THREE.Mesh(merge(parts), mat || MAT_VC);
+  m.castShadow = true; m.receiveShadow = true; return m;
+}
+
+/* ---- game state (everything in G is saved) ---- */
+function newGameState() {
+  return {
+    v: SAVE_VERSION,
+    day: 1, hour: 7.0,
+    weather: 'clear', weatherHrs: 9,
+    p: { x: -14, z: 246, y: 0, yaw: Math.PI, pitch: 0, hp: 100, maxHp: 100, food: 80, water: 80, warm: 100, stam: 100, xp: 0, level: 1, held: 'hands', armor: null },
+    inv: {},
+    stats: { wood: 0, kills: 0, crafted: 0, built: 0, fish: 0, chests: 0, blackouts: 0, dist: 0, bosses: 0, cooked: 0 },
+    quest: 0, flags: {}, notes: [], found: {}, chests: {}, bossDead: {}, badges: {},
+    structures: [], nodeState: {},           // nodeState: index -> day it respawns
+    lairs: {},                               // lair id -> respawn day
+    scout: { friend: false, dug: 0, fed: 0 },
+    spawn: null, pack: null,                 // dropped backpack after a blackout
+    fog: null, raidDone: 0, ending: null, sid: 1
+  };
+}
+let G = newGameState();
+/* runtime-only state (never saved) */
+const R = {
+  started: false, paused: true, panel: null, t: 0, acc: 0, fps: 60, keys: {}, mouseDown: false,
+  build: null, sleeping: false, cinematic: false, quality: 3, sens: 1, vol: 0.7, music: true,
+  shake: 0, swing: 0, swingHit: false, target: null, creatures: [], arrows: [], fx: [],
+  nearFire: null, sheltered: false, temp: 20, raid: null, boss: null, focus: null, focusT: 0,
+  fish: null, tips: {}, lastSave: 0, locked: false, dragLook: false,
+  report: {}, stepAcc: 0, bob: 0, ground: 0, eye: 1.62, bowCd: 0, invuln: 0, nums: [], worldFires: [], worldRoofs: [], worldStations: [], lightPool: [], biome: 'forest', stepKind: 'grass'
+};
+
+/* =========================================================================
+   01_audio: every sound is synthesised with WebAudio — no files needed
+   ========================================================================= */
+const AU = { ctx: null, master: null, noise: null, loops: {}, ready: false, musicT: 0 };
+function audioInit() {
+  if (AU.ready) return;
+  try {
+    const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+    AU.ctx = new C(); AU.master = AU.ctx.createGain(); AU.master.gain.value = R.vol; AU.master.connect(AU.ctx.destination);
+    const len = AU.ctx.sampleRate * 2, buf = AU.ctx.createBuffer(1, len, AU.ctx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    AU.noise = buf; AU.ready = true;
+    AU.loops.wind = noiseLoop('lowpass', 420, 0.0);
+    AU.loops.rain = noiseLoop('highpass', 1800, 0.0);
+    AU.loops.fire = noiseLoop('bandpass', 900, 0.0);
+  } catch (e) { AU.ready = false; }
+}
+function noiseLoop(type, freq, vol) {
+  const s = AU.ctx.createBufferSource(); s.buffer = AU.noise; s.loop = true;
+  const f = AU.ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq;
+  const g = AU.ctx.createGain(); g.gain.value = vol;
+  s.connect(f); f.connect(g); g.connect(AU.master); s.start();
+  return { g, f };
+}
+function tone(type, f0, f1, dur, vol = 0.2, delay = 0, attack = 0.005) {
+  if (!AU.ready) return;
+  const t = AU.ctx.currentTime + delay, o = AU.ctx.createOscillator(), g = AU.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t);
+  if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(AU.master); o.start(t); o.stop(t + dur + 0.05);
+}
+function burst(ftype, freq, dur, vol = 0.25, delay = 0, q = 1) {
+  if (!AU.ready) return;
+  const t = AU.ctx.currentTime + delay, s = AU.ctx.createBufferSource(); s.buffer = AU.noise;
+  s.playbackRate.value = 0.8 + Math.random() * 0.4;
+  const f = AU.ctx.createBiquadFilter(); f.type = ftype; f.frequency.value = freq; f.Q.value = q;
+  const g = AU.ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(f); f.connect(g); g.connect(AU.master); s.start(t, Math.random()); s.stop(t + dur + 0.05);
+}
+const SFX = {
+  click() { tone('triangle', 700, 900, 0.06, 0.12); },
+  deny() { tone('square', 180, 140, 0.14, 0.1); },
+  pickup() { tone('sine', 620, 620, 0.07, 0.16); tone('sine', 930, 930, 0.09, 0.16, 0.06); },
+  chop() { burst('lowpass', 1100, 0.09, 0.5); tone('sine', 150, 70, 0.12, 0.3); },
+  mine() { burst('highpass', 2500, 0.06, 0.3); tone('triangle', 1250 + rnd(200), 900, 0.09, 0.14); tone('sine', 110, 60, 0.08, 0.25); },
+  swish() { burst('bandpass', 1400, 0.14, 0.12, 0, 2); },
+  hit() { burst('bandpass', 500, 0.1, 0.5, 0, 1.5); tone('square', 160, 90, 0.08, 0.12); },
+  hurt() { tone('sawtooth', 240, 90, 0.26, 0.2); burst('lowpass', 500, 0.15, 0.3); },
+  treefall() { burst('lowpass', 500, 0.7, 0.5); tone('sine', 90, 40, 0.5, 0.35, 0.25); burst('highpass', 3000, 0.4, 0.12, 0.1); },
+  craft() { [523, 659, 784].forEach((f, i) => tone('triangle', f, f, 0.14, 0.16, i * 0.07)); },
+  build() { burst('lowpass', 900, 0.08, 0.45); burst('lowpass', 700, 0.08, 0.45, 0.13); tone('sine', 130, 80, 0.1, 0.25, 0.13); },
+  eat() { for (let i = 0; i < 3; i++) burst('lowpass', 1300, 0.07, 0.3, i * 0.13); },
+  drink() { for (let i = 0; i < 3; i++) tone('sine', 300 + i * 60, 520 + i * 60, 0.1, 0.14, i * 0.12); },
+  splash() { burst('highpass', 1500, 0.35, 0.3); burst('lowpass', 600, 0.25, 0.3); },
+  bow() { tone('sawtooth', 240, 100, 0.14, 0.14); burst('highpass', 3000, 0.1, 0.12); },
+  thunk() { burst('lowpass', 800, 0.07, 0.35); },
+  step(kind) {
+    if (kind === 'snow') burst('highpass', 2600, 0.07, 0.07); else if (kind === 'sand') burst('bandpass', 1500, 0.07, 0.06);
+    else if (kind === 'water') burst('highpass', 1200, 0.16, 0.12); else if (kind === 'wood') { burst('lowpass', 500, 0.06, 0.16); }
+    else burst('lowpass', 650, 0.06, 0.1);
+  },
+  howl() { if (!AU.ready) return; const t = AU.ctx.currentTime, o = AU.ctx.createOscillator(), g = AU.ctx.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(380, t); o.frequency.linearRampToValueAtTime(640, t + 0.5); o.frequency.linearRampToValueAtTime(600, t + 1.2); o.frequency.linearRampToValueAtTime(420, t + 1.9); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.13, t + 0.3); g.gain.linearRampToValueAtTime(0.1, t + 1.3); g.gain.exponentialRampToValueAtTime(0.0001, t + 2); o.connect(g); g.connect(AU.master); o.start(t); o.stop(t + 2.1); },
+  growl() { tone('sawtooth', 85, 60, 0.5, 0.18); burst('lowpass', 300, 0.5, 0.25); },
+  roar() { tone('sawtooth', 110, 45, 1.1, 0.3); burst('lowpass', 420, 1.1, 0.5); tone('square', 70, 40, 0.9, 0.12); },
+  bark() { tone('square', 520, 330, 0.08, 0.14); tone('square', 480, 300, 0.08, 0.14, 0.14); },
+  whine() { tone('sine', 900, 1300, 0.25, 0.08); },
+  squeak() { tone('sine', 1500, 2200, 0.08, 0.08); },
+  hiss() { burst('highpass', 4000, 0.35, 0.18); },
+  thunder() { burst('lowpass', 180, 2.4, 0.9); burst('lowpass', 90, 3, 0.7, 0.2); },
+  zap() { burst('highpass', 3500, 0.2, 0.4); tone('sawtooth', 1200, 100, 0.25, 0.2); },
+  discover() { [392, 523, 659, 784, 1047].forEach((f, i) => tone('triangle', f, f, 0.32, 0.15, i * 0.09)); },
+  levelup() { [523, 659, 784, 1047, 1319].forEach((f, i) => { tone('square', f, f, 0.18, 0.07, i * 0.08); tone('triangle', f / 2, f / 2, 0.3, 0.12, i * 0.08); }); },
+  quest() { [659, 784, 988].forEach((f, i) => tone('sine', f, f, 0.22, 0.16, i * 0.1)); },
+  chest() { tone('triangle', 330, 330, 0.1, 0.15); [523, 659, 784, 1047].forEach((f, i) => tone('sine', f, f, 0.4, 0.14, 0.12 + i * 0.07)); },
+  page() { burst('highpass', 2500, 0.18, 0.12); },
+  sizzle() { burst('highpass', 3800, 0.7, 0.16); },
+  ignite() { burst('bandpass', 900, 0.5, 0.35); tone('sine', 200, 400, 0.3, 0.08); },
+  blackout() { tone('sine', 300, 60, 1.4, 0.25); },
+  radio() { burst('bandpass', 2000, 0.5, 0.2, 0, 4); tone('square', 880, 880, 0.08, 0.06, 0.5); tone('square', 660, 660, 0.08, 0.06, 0.62); },
+  horn() { tone('sawtooth', 110, 110, 1.6, 0.2, 0, 0.2); tone('sawtooth', 165, 165, 1.6, 0.14, 0, 0.2); },
+  bite() { tone('sine', 880, 1320, 0.12, 0.2); tone('sine', 1320, 880, 0.12, 0.2, 0.12); },
+  heart() { tone('sine', 880, 1100, 0.15, 0.12); tone('sine', 1100, 1400, 0.2, 0.12, 0.12); }
+};
+function sfx(name, arg) { if (AU.ready && SFX[name]) { try { SFX[name](arg); } catch (e) { } } }
+
+/* ambient bed: wind, rain, fire crackle, birds, crickets and a sparse pentatonic melody */
+function audioAmbient(dt) {
+  if (!AU.ready) return;
+  const t = AU.ctx.currentTime, night = nightAmount(), b = R.biome;
+  const rain = G.weather === 'rain' ? 0.16 : G.weather === 'storm' ? 0.26 : 0;
+  AU.loops.rain.g.gain.setTargetAtTime(b === 'snow' ? rain * 0.25 : rain, t, 0.8);
+  const wind = 0.035 + (b === 'snow' ? 0.11 : b === 'desert' ? 0.06 : 0.02) + (G.weather === 'storm' ? 0.1 : 0) + Math.sin(R.t * 0.31) * 0.02;
+  AU.loops.wind.g.gain.setTargetAtTime(Math.max(0, wind), t, 1.2);
+  AU.loops.wind.f.frequency.setTargetAtTime(380 + Math.sin(R.t * 0.2) * 140, t, 1);
+  const fd = R.nearFireDist === undefined ? 99 : R.nearFireDist;
+  AU.loops.fire.g.gain.setTargetAtTime(fd < 14 ? 0.07 * (1 - fd / 14) : 0, t, 0.3);
+  if (fd < 10 && Math.random() < dt * 5) burst('highpass', 2500 + rnd(2500), 0.03, 0.12 * (1 - fd / 10));
+  if (R.paused || R.sleeping) return;
+  if (b !== 'snow' && rain === 0) {
+    if (night < 0.3 && b === 'forest' && Math.random() < dt * 0.35) { const f = 2200 + rnd(1600); tone('sine', f, f * rnd(1.1, 1.4), 0.09, 0.03); tone('sine', f * 1.2, f, 0.08, 0.03, 0.12); }
+    if (night > 0.7 && Math.random() < dt * 1.6) { for (let i = 0; i < 3; i++) tone('sine', 4300, 4300, 0.03, 0.012, i * 0.06); }
+  }
+  if (R.music) {
+    AU.musicT -= dt;
+    if (AU.musicT <= 0) {
+      const scale = night > 0.5 ? [196, 220, 262, 294, 330] : [262, 294, 330, 392, 440, 523];
+      const f = pick(scale) * (Math.random() < 0.25 ? 0.5 : 1);
+      tone('sine', f, f, 2.6, 0.035, 0, 0.5); tone('triangle', f * 1.5, f * 1.5, 2.2, 0.012, 0.3, 0.6);
+      AU.musicT = rnd(1.4, 4.5) * (R.boss ? 0.35 : 1);
+    }
+  }
+}
+function setVolume(v) { R.vol = v; if (AU.ready) AU.master.gain.value = v; }
+
+/* =========================================================================
+   02_world: Kestrel Island — terrain, three biomes, water, sky, weather FX
+   ========================================================================= */
+const PEAK = { x: -20, z: -190 };
+const LAKES = [
+  { id: 'mirror', x: 45, z: 125, r: 30, d: 3.2 },
+  { id: 'pond', x: -42, z: 168, r: 11, d: 2.2 },
+  { id: 'oasis', x: 175, z: -25, r: 16, d: 2.6 }
+];
+/* flattened building sites for landmarks: h = forced height (optional) */
+const SITES = {
+  rayCamp: { x: -72, z: 150, r: 12 },
+  tower: { x: 0, z: 25, r: 9 },
+  den: { x: -175, z: 45, r: 15 },
+  grotto: { x: -205, z: 148, r: 7 },
+  wolfDen: { x: -122, z: 205, r: 9 },
+  circle: { x: 148, z: 168, r: 11 },
+  outpost: { x: 195, z: 60, r: 10 },
+  mine: { x: 214, z: 96, r: 10 },
+  boneyard: { x: 222, z: -72, r: 18 },
+  cabin: { x: -95, z: -118, r: 10 },
+  icelake: { x: 72, z: -135, r: 25, ice: true },
+  crystal: { x: -100, z: -186, r: 9 },
+  summit: { x: PEAK.x, z: PEAK.z, r: 16 },
+  stump: { x: 78, z: 206, r: 5 },
+  cave2: { x: 95, z: 40, r: 8 }
+};
+function biomeW(x, z) {
+  const n1 = fbm(x * 0.006 + 31, z * 0.006 + 7, 3), n2 = fbm(x * 0.006 + 5, z * 0.006 + 91, 3);
+  const snow = sstep(-62, -112, z + (n1 - 0.5) * 50);
+  const desert = sstep(92, 142, x + (n2 - 0.5) * 60) * (1 - snow);
+  return { snow, desert, forest: Math.max(0, 1 - snow - desert) };
+}
+function biomeAt(x, z) { const w = biomeW(x, z); return w.snow > 0.5 ? 'snow' : w.desert > 0.5 ? 'desert' : 'forest'; }
+function shoreR(x, z) {
+  const a = Math.atan2(z, x);
+  return 292 + (fbm(Math.cos(a) * 1.6 + 3, Math.sin(a) * 1.6 + 3, 3) - 0.5) * 64;
+}
+function rawH(x, z) {
+  const d = Math.hypot(x, z), edge = shoreR(x, z) - d;
+  if (edge < 0) return Math.max(-7, edge * 0.14);
+  const w = biomeW(x, z);
+  const hill = 13 * Math.exp(-(((x - 0) ** 2 + (z - 25) ** 2) / (42 * 42)));
+  const m = fbm(x * 0.017 + 200, z * 0.017 + 100, 2);
+  const mesa = sstep(0.60, 0.66, m) * 9;
+  const dp = Math.hypot(x - PEAK.x, z - PEAK.z);
+  const peak = dp < 150 ? 62 * Math.pow(1 - dp / 150, 1.55) : 0;
+  const base = 2.0
+    + w.forest * (fbm(x * 0.012, z * 0.012, 4) * 13 + hill)
+    + w.desert * (1.5 + fbm(x * 0.022 + 50, z * 0.022, 2) * 3.2 + mesa)
+    + w.snow * (5 + fbm(x * 0.014, z * 0.014 + 40, 4) * 12 + peak);
+  return base * sstep(6, 52, edge) + Math.min(edge, 9) * 0.19;
+}
+function siteH(s) { if (s.h === undefined) s.h = Math.max(2.8, rawH(s.x, s.z)); return s.h; }
+function finalH(x, z) {
+  let h = rawH(x, z);
+  for (const L of LAKES) {
+    const d = Math.hypot(x - L.x, z - L.z);
+    if (d < L.r * 2.6) { const t = sstep(L.r * 2.6, L.r * 0.55, d); h = lerp(h, lerp(1.6, -L.d, sstep(L.r * 1.05, L.r * 0.55, d)), t); }
+  }
+  for (const k in SITES) {
+    const s = SITES[k], d = Math.hypot(x - s.x, z - s.z);
+    if (d < s.r * 1.9) h = lerp(h, siteH(s), sstep(s.r * 1.9, s.r, d));
+  }
+  return h;
+}
+const HGT = new Float32Array((GRID + 1) * (GRID + 1));
+function heightAt(x, z) {
+  let fx = clamp((x + HALF) / CELL, 0, GRID - 0.001), fz = clamp((z + HALF) / CELL, 0, GRID - 0.001);
+  const ix = fx | 0, iz = fz | 0; fx -= ix; fz -= iz;
+  const i = iz * (GRID + 1) + ix, h00 = HGT[i], h10 = HGT[i + 1], h01 = HGT[i + GRID + 1], h11 = HGT[i + GRID + 2];
+  return fx + fz <= 1 ? h00 + (h10 - h00) * fx + (h01 - h00) * fz : h11 + (h01 - h11) * (1 - fx) + (h10 - h11) * (1 - fz);
+}
+function slopeAt(x, z) { return Math.hypot(heightAt(x + 1, z) - heightAt(x - 1, z), heightAt(x, z + 1) - heightAt(x, z - 1)) / 2; }
+/** walk from the sea toward the island centre along an angle and return the first dry spot */
+function shorePoint(ang, inland) {
+  for (let d = 340; d > 40; d -= 1.5) {
+    const x = Math.cos(ang) * d, z = Math.sin(ang) * d;
+    if (heightAt(x, z) > 0.9) { const dd = d - (inland || 0); return { x: Math.cos(ang) * dd, z: Math.sin(ang) * dd }; }
+  }
+  return { x: 0, z: 0 };
+}
+function inSite(x, z, pad) {
+  for (const k in SITES) { const s = SITES[k]; if (Math.hypot(x - s.x, z - s.z) < s.r + (pad || 0)) return k; }
+  return null;
+}
+
+/* ---------- terrain mesh ---------- */
+function terrainColor(x, z, h, ny, out) {
+  const w = biomeW(x, z), n = fbm(x * 0.05 + 9, z * 0.05 + 9, 2);
+  let r, g, b;
+  const fr = 0.30 + n * 0.10, fg = 0.52 + n * 0.12, fb = 0.22 + n * 0.05;      // forest grass
+  const dr = 0.86 - n * 0.08, dg = 0.66 - n * 0.08, db = 0.40 - n * 0.06;      // desert sand
+  const sr = 0.90 + n * 0.06, sg = 0.93 + n * 0.05, sb = 0.98;                 // snow
+  r = fr * w.forest + dr * w.desert + sr * w.snow; g = fg * w.forest + dg * w.desert + sg * w.snow; b = fb * w.forest + db * w.desert + sb * w.snow;
+  if (w.desert > 0.5 && h > 9.5 && ny > 0.85) { r = 0.74; g = 0.44; b = 0.27; }                 // mesa tops
+  if (ny < 0.80) {                                                                              // cliffs
+    const t = sstep(0.80, 0.62, ny);
+    const cr = 0.46 * w.forest + 0.62 * w.desert + 0.47 * w.snow, cg = 0.43 * w.forest + 0.37 * w.desert + 0.51 * w.snow, cb = 0.38 * w.forest + 0.25 * w.desert + 0.58 * w.snow;
+    r = lerp(r, cr, t); g = lerp(g, cg, t); b = lerp(b, cb, t);
+  }
+  if (h < 1.9 && w.snow < 0.6) { const t = sstep(1.9, 1.1, h); r = lerp(r, 0.88, t); g = lerp(g, 0.80, t); b = lerp(b, 0.58, t); }   // beach
+  if (h < 0.0) { const t = sstep(0, -1.5, h); r = lerp(r, 0.30, t); g = lerp(g, 0.34, t); b = lerp(b, 0.30, t); }
+  const ic = SITES.icelake; if (Math.hypot(x - ic.x, z - ic.z) < ic.r * 0.97) { r = 0.66 + n * 0.1; g = 0.86; b = 0.95; }
+  out[0] = r; out[1] = g; out[2] = b;
+}
+/* ---------- spatial hash for colliders and nodes ---------- */
+const SH_CELL = 8, SH = new Map();
+const shKey = (x, z) => (Math.floor(x / SH_CELL) + 512) * 1024 + (Math.floor(z / SH_CELL) + 512);
+function shCell(x, z) { const k = shKey(x, z); let c = SH.get(k); if (!c) { c = { cols: [], nodes: [] }; SH.set(k, c); } return c; }
+/** collider: circle {x,z,r} or box {x,z,hw,hd}; top = optional height (jump-over) */
+function addCollider(c) {
+  const ext = c.r !== undefined ? c.r : Math.max(c.hw, c.hd); c.cells = [];
+  for (let x = c.x - ext; x <= c.x + ext + SH_CELL; x += SH_CELL) for (let z = c.z - ext; z <= c.z + ext + SH_CELL; z += SH_CELL) {
+    const cell = shCell(Math.min(x, c.x + ext), Math.min(z, c.z + ext));
+    if (!cell.cols.includes(c)) { cell.cols.push(c); c.cells.push(cell); }
+  }
+  return c;
+}
+function removeCollider(c) { if (!c || !c.cells) return; for (const cell of c.cells) { const i = cell.cols.indexOf(c); if (i >= 0) cell.cols.splice(i, 1); } c.cells = null; }
+/** push a circle (x,z,rad) out of all nearby colliders; returns [x,z] */
+const _col = [0, 0];
+function collide(x, z, rad) {
+  for (let pass = 0; pass < 2; pass++) {
+    for (let gx = -1; gx <= 1; gx++) for (let gz = -1; gz <= 1; gz++) {
+      const cell = SH.get(shKey(x + gx * SH_CELL, z + gz * SH_CELL)); if (!cell) continue;
+      for (const c of cell.cols) {
+        if (c.off) continue;
+        if (c.r !== undefined) {
+          const dx = x - c.x, dz = z - c.z, d = Math.hypot(dx, dz), m = c.r + rad;
+          if (d < m) { if (d < 0.0001) { x += m; } else { x = c.x + dx / d * m; z = c.z + dz / d * m; } }
+        } else {
+          const nx = clamp(x, c.x - c.hw, c.x + c.hw), nz = clamp(z, c.z - c.hd, c.z + c.hd);
+          let dx = x - nx, dz = z - nz; const d = Math.hypot(dx, dz);
+          if (d < rad) {
+            if (d < 0.0001) {                       // centre is inside the box: push out the nearest side
+              const px = c.hw - Math.abs(x - c.x), pz = c.hd - Math.abs(z - c.z);
+              if (px < pz) x = c.x + Math.sign(x - c.x || 1) * (c.hw + rad); else z = c.z + Math.sign(z - c.z || 1) * (c.hd + rad);
+            } else { x = nx + dx / d * rad; z = nz + dz / d * rad; }
+          }
+        }
+      }
+    }
+  }
+  _col[0] = x; _col[1] = z; return _col;
+}
+
+/* ---------- sky, sun, moon, stars, lights ---------- */
+const SKY_KEYS = [  // hour, top, horizon, sun colour, sun intensity, ambient intensity
+  [0, 0x060b22, 0x16233f, 0x8fa8ff, 0.34, 0.42],
+  [4.5, 0x0a1230, 0x1c2c4f, 0x8fa8ff, 0.34, 0.42],
+  [5.8, 0x35519a, 0xff9d66, 0xffb070, 0.55, 0.50],
+  [7.2, 0x4d9be6, 0xffe1b0, 0xfff0d0, 0.95, 0.66],
+  [12, 0x3b8ee6, 0xc6e6ff, 0xffffff, 1.08, 0.74],
+  [17, 0x3f8fe0, 0xd6e3f0, 0xfff2d8, 1.0, 0.70],
+  [18.8, 0x4a4f9c, 0xff8448, 0xff9a55, 0.7, 0.56],
+  [20.2, 0x141c48, 0x4a3560, 0x9aa8ff, 0.36, 0.44],
+  [21.5, 0x060b22, 0x16233f, 0x8fa8ff, 0.34, 0.42],
+  [24, 0x060b22, 0x16233f, 0x8fa8ff, 0.34, 0.42]
+];
+const _c1 = new THREE.Color(), _c2 = new THREE.Color();
+function nightAmount() { const h = G.hour; return h < 5 ? 1 : h < 7 ? 1 - (h - 5) / 2 : h < 18.5 ? 0 : h < 20.5 ? (h - 18.5) / 2 : 1; }
+function puff(x, y, z, color, n = 8, o = {}) {
+  for (let i = 0; i < n; i++) {
+    const p = R.fxPool.find(q => q.life <= 0); if (!p) return;
+    const sp = o.speed === undefined ? 2.2 : o.speed;
+    p.m.position.set(x + rnd(-0.3, 0.3), y + rnd(-0.2, 0.3), z + rnd(-0.3, 0.3)); p.m.material.color.set(color); p.m.material.opacity = 1;
+    p.vx = rnd(-1, 1) * sp; p.vz = rnd(-1, 1) * sp; p.vy = rnd(0.4, 1.6) * (o.up === undefined ? 1.6 : o.up); p.g = o.g === undefined ? 3 : o.g;
+    p.max = p.life = rnd(0.45, 0.9) * (o.life || 1); p.s0 = (o.size || 0.3) * rnd(0.7, 1.3); p.s1 = p.s0 * (o.grow === undefined ? 2.2 : o.grow);
+    p.m.scale.setScalar(p.s0); p.m.visible = true;
+  }
+}
+/* =========================================================================
+   02b_gfx: the graphics engine — textures, terrain, water, sky, grass,
+   flames, particles, wildlife flourishes, post-processing, quality tiers.
+   Everything here is visual only; the game rules never read from it.
+   ========================================================================= */
+
+/* ---------- quality tiers ---------- */
+const GFXQ = {
+  1: { n: 'Low', pr: 1, post: false, msaa: 0, shadow: 0, shExt: 60, grass: 0, gR: 0, tufts: true, lights: 3, rays: false, ao: 0, part: 0.45, fireShadow: false, fog: 0.9 },
+  2: { n: 'Medium', pr: 1, post: true, msaa: 4, shadow: 2048, shExt: 70, grass: 50000, gR: 32, tufts: false, lights: 4, rays: false, ao: 1, part: 0.7, fireShadow: false, fog: 1.0 },
+  3: { n: 'High', pr: 1.5, post: true, msaa: 4, shadow: 4096, shExt: 85, grass: 120000, gR: 44, tufts: false, lights: 6, rays: true, ao: 1, part: 1, fireShadow: false, fog: 1.1 },
+  4: { n: 'Ultra', pr: 2, post: true, msaa: 8, shadow: 4096, shExt: 105, grass: 230000, gR: 60, tufts: false, lights: 8, rays: true, ao: 1, part: 1.35, fireShadow: true, fog: 1.25 }
+};
+
+/* ---------- procedural textures ---------- */
+function makeNoiseTex() {
+  const S = 256, data = new Uint8Array(S * S * 4), lat = {};
+  let seed = 9173;
+  const latt = P => { if (lat[P]) return lat[P]; const a = new Float32Array(P * P); for (let i = 0; i < a.length; i++) { seed = (seed * 16807) % 2147483647; a[i] = seed / 2147483647; } return (lat[P] = a); };
+  const vn = (P, x, y) => {
+    const a = latt(P), ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy, ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+    const g = (i, j) => a[(((j % P) + P) % P) * P + (((i % P) + P) % P)];
+    return lerp(lerp(g(ix, iy), g(ix + 1, iy), ux), lerp(g(ix, iy + 1), g(ix + 1, iy + 1), ux), uy);
+  };
+  const fb = (u, v, P0, oct) => { let s = 0, a = 0.5, n = 0; for (let o = 0; o < oct; o++) { const P = P0 << o; s += a * vn(P, u * P, v * P); n += a; a *= 0.5; } return s / n; };
+  // tileable cellular noise for caustics / sparkle
+  const CN = 10, pts = []; for (let i = 0; i < CN * CN; i++) { seed = (seed * 16807) % 2147483647; const r1 = seed / 2147483647; seed = (seed * 16807) % 2147483647; pts.push([r1, seed / 2147483647]); }
+  const cell = (u, v) => {
+    const x = u * CN, y = v * CN, ix = Math.floor(x), iy = Math.floor(y); let best = 9;
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) { const cx = ix + i, cy = iy + j, p = pts[(((cy % CN) + CN) % CN) * CN + (((cx % CN) + CN) % CN)]; const d = Math.hypot(cx + p[0] - x, cy + p[1] - y); if (d < best) best = d; }
+    return Math.min(1, best);
+  };
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const u = x / S, v = y / S, i = (y * S + x) * 4;
+    data[i] = fb(u, v, 16, 3) * 255; data[i + 1] = fb(u, v, 4, 4) * 255; data[i + 2] = fb(u, v, 8, 3) * 255; data[i + 3] = cell(u, v) * 255;
+  }
+  const t = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true;
+  return t;
+}
+function makeSoftTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+  const g = x.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.45, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64); const t = new THREE.CanvasTexture(c); return t;
+}
+const GFX = { noGrassDirty: true };
+
+/* ---------- terrain: smooth shading, baked forest shade, detail, wetness, sparkle, caustics ---------- */
+function terrainMaterial() {
+  const m = new THREE.MeshPhongMaterial({ vertexColors: true, specular: 0x8a96a6, shininess: 38 });
+  m.customProgramCacheKey = () => 'terrain';
+  m.onBeforeCompile = sh => {
+    gfxInject(sh);
+    sh.vertexShader = 'attribute vec4 aT; varying vec4 vT; varying vec3 vTW;\n' + sh.vertexShader.replace('#include <fog_vertex>', '#include <fog_vertex>\n vT = aT; vTW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = 'varying vec4 vT; varying vec3 vTW; uniform sampler2D uNoise; uniform float uTime; uniform float uWet; uniform float uNight; uniform vec3 uSunCol; uniform float uCloudSh; uniform float uCloudCov;\n#ifndef USE_FOG\nuniform vec3 fgSunDir;\n#endif\n' + GLSL_CLOUDSH + sh.fragmentShader
+      .replace('#include <color_fragment>', `#include <color_fragment>
+  vec2 tp = vTW.xz;
+  vec4 nA = texture2D(uNoise, tp * 0.045), nB = texture2D(uNoise, tp * 0.21), nC = texture2D(uNoise, tp * 0.008);
+  float green = (1.0 - vT.x) * (1.0 - vT.y) * (1.0 - vT.z);
+  diffuseColor.rgb *= 0.84 + 0.2 * nA.r + 0.14 * (nB.r - 0.5) + 0.1 * (nC.g - 0.5);
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 1.04, 0.72), green * smoothstep(0.45, 0.72, nC.b) * 0.7);
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.82, 0.95, 0.9), green * (1.0 - smoothstep(0.3, 0.55, nC.r)) * 0.5);
+  float wetM = uWet * (1.0 - vT.x);
+  float shoreWet = vT.z * (1.0 - smoothstep(0.6, 1.6, vTW.y)) * 0.6;
+  diffuseColor.rgb *= 1.0 - 0.3 * max(wetM, shoreWet);
+  if (vTW.y < 0.1) {
+    float dpt = clamp(-vTW.y, 0.0, 6.0);
+    vec2 cu = tp * 0.18 + vec2(uTime * 0.03, uTime * 0.02);
+    float ca = texture2D(uNoise, cu).a, cb = texture2D(uNoise, tp * 0.23 - vec2(uTime * 0.025, -uTime * 0.018)).a;
+    float caus = pow(1.0 - min(ca, cb), 6.0) * 1.6 * smoothstep(0.0, 0.6, dpt) * (1.0 - uNight * 0.8);
+    diffuseColor.rgb = diffuseColor.rgb * mix(vec3(1.0), vec3(0.55, 0.82, 0.9), smoothstep(0.0, 3.0, dpt)) + vec3(0.6, 0.9, 1.0) * caus * 0.35;
+  }`)
+      .replace('#include <specularmap_fragment>', `float specularStrength = max(wetM, shoreWet) * 0.8 + vT.x * 0.12;`)
+      .replace('#include <envmap_fragment>', `#include <envmap_fragment>
+  { vec3 vd = normalize(vTW - cameraPosition);
+    float sp = texture2D(uNoise, tp * 1.9 + vd.xz * 0.35).r * texture2D(uNoise, tp * 2.7 - vd.xz * 0.27).b;
+    float spark = smoothstep(0.42, 0.5, sp) * vT.x * (1.0 - uNight * 0.85) * (1.0 - smoothstep(2.0, 25.0, length(vTW - cameraPosition)));
+    outgoingLight += uSunCol * spark * 3.0 * cloudShadow(vTW, fgSunDir); }
+  outgoingLight *= cloudShadow(vTW, fgSunDir);`);
+  };
+  return m;
+}
+function buildTerrain(scene) {
+  for (let iz = 0; iz <= GRID; iz++) for (let ix = 0; ix <= GRID; ix++) HGT[iz * (GRID + 1) + ix] = finalH(-HALF + ix * CELL, -HALF + iz * CELL);
+  const N1 = GRID + 1, nV = N1 * N1, pos = new Float32Array(nV * 3), col = new Float32Array(nV * 3), tt = new Float32Array(nV * 4), c = [0, 0, 0];
+  const H = (ix, iz) => HGT[clamp(iz, 0, GRID) * N1 + clamp(ix, 0, GRID)];
+  for (let iz = 0; iz <= GRID; iz++) for (let ix = 0; ix <= GRID; ix++) {
+    const i = iz * N1 + ix, x = -HALF + ix * CELL, z = -HALF + iz * CELL, h = HGT[i];
+    const nx = H(ix - 1, iz) - H(ix + 1, iz), nz = H(ix, iz - 1) - H(ix, iz + 1), ny = 2 * CELL, nl = Math.hypot(nx, ny, nz);
+    terrainColor(x, z, h, ny / nl, c);
+    pos[i * 3] = x; pos[i * 3 + 1] = h; pos[i * 3 + 2] = z;
+    col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
+    const w = biomeW(x, z), ic = SITES.icelake, onIce = Math.hypot(x - ic.x, z - ic.z) < ic.r;
+    tt[i * 4] = onIce ? 0.35 : w.snow; tt[i * 4 + 1] = w.desert; tt[i * 4 + 2] = sstep(2.3, 1.2, h) * (1 - w.snow); tt[i * 4 + 3] = 0;
+  }
+  const idx = new Uint32Array(GRID * GRID * 6); let o = 0;
+  for (let iz = 0; iz < GRID; iz++) for (let ix = 0; ix < GRID; ix++) {
+    const a = iz * N1 + ix, b = (iz + 1) * N1 + ix, cc = a + 1, d = b + 1;
+    idx[o++] = a; idx[o++] = b; idx[o++] = cc; idx[o++] = cc; idx[o++] = b; idx[o++] = d;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('aT', new THREE.BufferAttribute(tt, 4));
+  g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
+  const m = new THREE.Mesh(g, terrainMaterial()); m.receiveShadow = true; scene.add(m); R.terrain = m;
+  GFX.baseCol = col.slice();
+  // heightmap for the GPU (grass placement, water depth, contact shadows)
+  const ht = new THREE.DataTexture(HGT, N1, N1, THREE.RedFormat, THREE.FloatType);
+  ht.magFilter = ht.minFilter = THREE.NearestFilter; ht.needsUpdate = true; GU.uHgt.value = ht;
+  GU.uNoise.value = GU.uNoise.value || makeNoiseTex();
+  // sea + lakes
+  R.water = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400, 1, 1).rotateX(-Math.PI / 2), waterMaterial());
+  R.water.renderOrder = 2; R.water.frustumCulled = false; scene.add(R.water);
+  const fl = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x0e3a58 }));
+  fl.position.y = -7.5; scene.add(fl);
+}
+/** after trees are placed: darken the forest floor under canopies, wear the ground at camps; build the grass mask */
+function gfxBakeTerrain() {
+  const N1 = GRID + 1, g = R.terrain.geometry, col = g.attributes.color.array, base = GFX.baseCol, shade = new Float32Array(N1 * N1).fill(1);
+  for (const n of NODES) {
+    const k = n.t === 'oak' ? 0.16 : n.t === 'pine' || n.t === 'snowpine' ? 0.13 : n.t === 'palm' ? 0.07 : n.t === 'bush' ? 0.05 : 0; if (!k) continue;
+    const r = (n.t === 'oak' ? 5.5 : 4.5) * n.s, i0 = Math.floor((n.x - r + HALF) / CELL), i1 = Math.ceil((n.x + r + HALF) / CELL), j0 = Math.floor((n.z - r + HALF) / CELL), j1 = Math.ceil((n.z + r + HALF) / CELL);
+    for (let j = Math.max(0, j0); j <= Math.min(GRID, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(GRID, i1); i++) {
+      const d = Math.hypot(-HALF + i * CELL - n.x, -HALF + j * CELL - n.z); if (d < r) shade[j * N1 + i] *= 1 - k * sstep(r, r * 0.25, d);
+    }
+  }
+  const mask = new Uint8Array(N1 * N1 * 4);
+  for (let j = 0; j <= GRID; j++) for (let i = 0; i <= GRID; i++) {
+    const v = j * N1 + i, x = -HALF + i * CELL, z = -HALF + j * CELL, h = HGT[v], s = Math.max(0.55, shade[v]);
+    let r = base[v * 3] * s, gg = base[v * 3 + 1] * s, b = base[v * 3 + 2] * s * 0.97;
+    let wear = 0; for (const key in SITES) { const st = SITES[key]; if (st.ice) continue; const d = Math.hypot(x - st.x, z - st.z); if (d < st.r * 1.25) wear = Math.max(wear, sstep(st.r * 1.25, st.r * 0.6, d)); }
+    const w = biomeW(x, z);
+    if (wear > 0) { const er = w.snow > 0.5 ? 0.78 : 0.46, eg = w.snow > 0.5 ? 0.8 : 0.39, eb = w.snow > 0.5 ? 0.84 : 0.27; r = lerp(r, er, wear * 0.55); gg = lerp(gg, eg, wear * 0.55); b = lerp(b, eb, wear * 0.55); }
+    // inland lakes get muddy, grassy banks instead of beach sand
+    for (const Lk of LAKES) { if (w.desert > 0.5) continue; const d = Math.hypot(x - Lk.x, z - Lk.z); if (d < Lk.r * 2.7 && h < 2.4) { const t = sstep(Lk.r * 2.7, Lk.r * 1.6, d) * sstep(2.4, 1.2, h) * 0.85, mud = h < 0.4 ? [0.34, 0.33, 0.24] : [0.33, 0.45, 0.22]; r = lerp(r, mud[0] * s, t); gg = lerp(gg, mud[1] * s, t); b = lerp(b, mud[2] * s, t); } }
+    col[v * 3] = r; col[v * 3 + 1] = gg; col[v * 3 + 2] = b;
+    // grass density + colour
+    const sl = Math.hypot(H2(i - 1, j) - H2(i + 1, j), H2(i, j - 1) - H2(i, j + 1)) / (2 * CELL);
+    const patch = fbm(x * 0.03 + 11, z * 0.03 + 5, 2), ic = SITES.icelake, ice = Math.hypot(x - ic.x, z - ic.z) < ic.r * 1.1;
+    let dens = sstep(0.4, 0.75, w.forest) * sstep(1.9, 2.7, h) * sstep(0.75, 0.45, sl) * clamp(0.35 + patch * 1.1, 0, 1);
+    dens = Math.max(dens, w.desert * sstep(2.2, 3, h) * sstep(0.62, 0.7, patch) * 0.5);
+    dens *= (1 - sstep(0.25, 0.5, w.snow)) * (ice ? 0 : 1) * (1 - wear * 0.9) * (shade[v] < 0.8 ? 0.55 : 1);
+    const dry = w.desert;
+    mask[v * 4] = clamp(lerp(base[v * 3] * 1.0, 0.78, dry) * s * 255, 0, 255);
+    mask[v * 4 + 1] = clamp(lerp(base[v * 3 + 1] * 1.04, 0.66, dry) * s * 255, 0, 255);
+    mask[v * 4 + 2] = clamp(lerp(base[v * 3 + 2] * 0.8, 0.38, dry) * s * 255, 0, 255);
+    mask[v * 4 + 3] = dens * 255;
+  }
+  g.attributes.color.needsUpdate = true;
+  const bio = new Uint8Array(N1 * N1 * 4); for (let j = 0; j <= GRID; j++) for (let i = 0; i <= GRID; i++) { const w = biomeW(-HALF + i * CELL, -HALF + j * CELL), v = (j * N1 + i) * 4; bio[v] = w.snow * 255; bio[v + 1] = w.desert * 255; bio[v + 3] = 255; }
+  const bt = new THREE.DataTexture(bio, N1, N1, THREE.RGBAFormat); bt.magFilter = bt.minFilter = THREE.LinearFilter; bt.needsUpdate = true; GU.uBiome.value = bt;
+  const mt = new THREE.DataTexture(mask, N1, N1, THREE.RGBAFormat); mt.magFilter = mt.minFilter = THREE.LinearFilter; mt.needsUpdate = true; GFX.grassMask = mt;
+  const NG = 360; GFX.noGrass = new Uint8Array(NG * NG); GFX.noGrassTex = new THREE.DataTexture(GFX.noGrass, NG, NG, THREE.RedFormat, THREE.UnsignedByteType);
+  GFX.noGrassTex.magFilter = GFX.noGrassTex.minFilter = THREE.LinearFilter; GFX.NG = NG;
+  gfxStampGrass();
+}
+function H2(i, j) { return HGT[clamp(j, 0, GRID) * (GRID + 1) + clamp(i, 0, GRID)]; }
+/** keep grass out of buildings, floors and fires */
+function gfxStampGrass() {
+  if (!GFX.noGrass) return;
+  const NG = GFX.NG, a = GFX.noGrass, cs = WORLD / NG; a.fill(255);
+  const stamp = (x, z, r, v) => {
+    const i0 = Math.floor((x - r + HALF) / cs), i1 = Math.ceil((x + r + HALF) / cs), j0 = Math.floor((z - r + HALF) / cs), j1 = Math.ceil((z + r + HALF) / cs);
+    for (let j = Math.max(0, j0); j <= Math.min(NG - 1, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(NG - 1, i1); i++) {
+      const d = Math.hypot(-HALF + (i + 0.5) * cs - x, -HALF + (j + 0.5) * cs - z); if (d < r) a[j * NG + i] = Math.min(a[j * NG + i], v !== undefined ? v : d < r - cs ? 0 : 110);
+    }
+  };
+  for (const s of G.structures) stamp(s.x, s.z, s.k === 'floor' || s.k === 'wall' || s.k === 'door' || s.k === 'roof' ? 2.4 : s.k === 'shelter' ? 2.8 : s.k === 'garden' ? 2.2 : 1.7);
+  for (const c of CHESTS) stamp(c.x, c.z, 1.4);
+  // keep small pickups (sticks, stones, flint, mushrooms, herbs) easy to spot
+  for (const n of NODES) if (NT[n.t].cls === 'pick' && n.t !== 'reed') stamp(n.x, n.z, 1.6, 35);
+  GFX.noGrassTex.needsUpdate = true; GFX.noGrassDirty = false;
+}
+
+/* ---------- water ---------- */
+function waterMaterial() {
+  const u = THREE.UniformsUtils.merge([THREE.UniformsLib.fog]);
+  const m = new THREE.ShaderMaterial({
+    transparent: true, fog: true, depthWrite: false, uniforms: u,
+    vertexShader: `varying vec3 vW;
+      #include <fog_pars_vertex>
+      void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vec4 mvPosition = viewMatrix * w; gl_Position = projectionMatrix * mvPosition;
+      #include <fog_vertex>
+      }`,
+    fragmentShader: `uniform sampler2D uNoise; uniform float uTime; uniform float uWet; uniform float uNight; uniform vec3 uSkyTop; uniform vec3 uSkyHor; uniform vec3 uSunCol; uniform vec3 uWSun; uniform float uWindAmp;
+      varying vec3 vW;
+      ${GLSL_HGT}
+      #include <fog_pars_fragment>
+      void main(){
+        vec2 p = vW.xz;
+        float th = (abs(p.x) < ${HALF.toFixed(1)} && abs(p.y) < ${HALF.toFixed(1)}) ? terrainH(p) : -7.0;
+        float depth = max(vW.y - th, 0.0);
+        float t = uTime;
+        vec4 a = texture2D(uNoise, p * 0.035 + vec2(t * 0.012, t * 0.008));
+        vec4 b = texture2D(uNoise, p * 0.09 - vec2(t * 0.017, -t * 0.011));
+        vec4 cN = texture2D(uNoise, p * 0.32 + vec2(t * 0.05, t * 0.03));
+        float k = 0.35 + uWindAmp * 0.25 + uWet * 0.3;
+        vec3 N = normalize(vec3((a.r - 0.5) + (b.b - 0.5) + (cN.r - 0.5) * uWet * 1.4, 1.6 / k, (a.b - 0.5) + (b.r - 0.5) + (cN.b - 0.5) * uWet * 1.4));
+        vec3 V = normalize(cameraPosition - vW); float dist = length(cameraPosition - vW);
+        float F = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
+        vec3 Rf = reflect(-V, N); Rf.y = abs(Rf.y);
+        vec3 sky = mix(uSkyHor, uSkyTop, pow(clamp(Rf.y, 0.0, 1.0), 0.45));
+        float light = mix(1.0, 0.28, uNight) * (1.0 - uWet * 0.25);
+        vec3 shallow = vec3(0.18, 0.62, 0.6), deep = vec3(0.03, 0.2, 0.34);
+        vec3 col = mix(shallow, deep, smoothstep(0.0, 4.5, depth)) * light;
+        col = mix(col, sky, clamp(F * 0.85, 0.0, 1.0));
+        float sd = max(dot(Rf, uWSun), 0.0);
+        col += uSunCol * (pow(sd, 700.0) * 9.0 + pow(sd, 70.0) * 0.25) * (1.0 - uWet * 0.8) * (1.0 - uNight * 0.6);
+        float fn = texture2D(uNoise, p * 0.4 + vec2(t * 0.04, 0.0)).g;
+        float foamLine = (1.0 - smoothstep(0.0, 0.55, depth + (fn - 0.5) * 0.5)) * (0.65 + 0.35 * sin(t * 1.6 - depth * 18.0 + fn * 6.0));
+        col = mix(col, vec3(0.92, 0.96, 1.0) * light, clamp(foamLine, 0.0, 1.0) * 0.85);
+        float alpha = mix(0.22, 0.93, smoothstep(0.0, 2.8, depth));
+        alpha = max(alpha, clamp(foamLine, 0.0, 1.0) * 0.9); alpha = mix(alpha, 1.0, F * 0.6);
+        alpha = mix(alpha, 0.96, smoothstep(60.0, 200.0, dist));
+        gl_FragColor = vec4(col, alpha);
+        #include <fog_fragment>
+      }`
+  });
+  m.uniforms.uWSun = { value: GU.fgSunDir.value };
+  m.onBeforeCompile = sh => { gfxInject(sh); sh.uniforms.uWSun = m.uniforms.uWSun; };
+  return m;
+}
+
+/* ---------- sky: gradient, sun and moon, clouds that thicken with weather, stars, milky way, aurora ---------- */
+function buildSky(scene) {
+  GU.uNoise.value = GU.uNoise.value || makeNoiseTex();
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { top: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color() }, glow: { value: 1 },
+      moonDir: { value: new THREE.Vector3(0, -1, 0) }, uCloud: { value: 0.2 }, uAurora: { value: 0 }, uMoonC: { value: new THREE.Color(0.6, 0.7, 1) } },
+    vertexShader: 'varying vec3 vD; void main(){ vD = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: `uniform vec3 top; uniform vec3 hor; uniform vec3 sunDir; uniform vec3 sunCol; uniform float glow; uniform vec3 moonDir; uniform float uCloud; uniform float uAurora; uniform vec3 uMoonC;
+      uniform float uNight; uniform float uTime; uniform sampler2D uNoise; varying vec3 vD;
+      float hash3(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+      float cfbm(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++){ s += a * texture2D(uNoise, p).g; p = p * 2.07 + vec2(0.13, 0.29); a *= 0.5; } return s / 0.9375; }
+      void main(){
+        vec3 d = normalize(vD); float h = clamp(d.y, 0.0, 1.0);
+        vec3 c = mix(hor, top, pow(h, 0.45));
+        c = mix(c, hor * 0.82, (1.0 - smoothstep(-0.3, 0.0, d.y)));
+        float s = max(dot(d, sunDir), 0.0);
+        float stars = 0.0;
+        if (uNight > 0.01 && d.y > -0.05) {
+          vec3 sp = d * 230.0, cell = floor(sp); float r = hash3(cell);
+          vec3 f = fract(sp) - 0.5 - (vec3(hash3(cell + 7.1), hash3(cell + 3.7), hash3(cell + 1.3)) - 0.5) * 0.5;
+          float mw = exp(-pow(dot(d, normalize(vec3(0.35, 0.3, -0.88))), 2.0) * 12.0);
+          float thr = 0.972 - mw * 0.025, tw = 0.6 + 0.4 * sin(uTime * (1.5 + r * 4.0) + r * 70.0);
+          stars = step(thr, r) * (1.0 - smoothstep(0.0, 0.24, length(f))) * tw * (0.5 + 2.2 * (r - thr) / (1.0 - thr));
+          vec3 mwc = vec3(0.5, 0.55, 0.85) * mw * (0.2 + 0.6 * texture2D(uNoise, d.xz * 1.1 + d.y * 0.7).g) * 0.32;
+          c += (vec3(0.95, 0.97, 1.1) * stars * 1.5 + mwc) * uNight * smoothstep(-0.02, 0.18, d.y);
+        }
+        if (uAurora > 0.01 && d.y > 0.0) {
+          float az = atan(d.x, -d.z), el = asin(d.y);
+          vec3 ac = vec3(0.0);
+          for (int i = 0; i < 2; i++) {
+            float fi = float(i);
+            float base = 0.16 + fi * 0.07 + 0.09 * (texture2D(uNoise, vec2(az * 0.12 + uTime * 0.0035 + fi * 0.37, 0.3 + fi * 0.2)).g - 0.5) * 2.0;
+            float up = el - base;
+            float curtain = smoothstep(-0.015, 0.012, up) * exp(-max(up, 0.0) * (6.0 + fi * 3.0));
+            float rays = texture2D(uNoise, vec2(az * 1.6 + fi * 0.5 + uTime * 0.006, 0.1)).r;
+            rays = 0.35 + 0.65 * pow(rays, 2.0) * (0.6 + 0.4 * sin(az * 30.0 + uTime * 0.5 + fi));
+            vec3 colA = mix(vec3(0.08, 1.0, 0.55), vec3(0.65, 0.25, 1.0), clamp(up * 4.0, 0.0, 1.0));
+            ac += colA * curtain * rays * (1.0 - fi * 0.35);
+          }
+          float north = (1.0 - smoothstep(-0.55, 0.25, d.z));
+          c += ac * north * uAurora * uNight * 1.3;
+        }
+        if (uNight > 0.3 && d.y > 0.15) {
+          float st = uTime / 7.0, seg = floor(st), fr = fract(st);
+          float h1 = hash3(vec3(seg, 1.7, 3.1)), h2 = hash3(vec3(seg, 5.3, 0.9)), h3 = hash3(vec3(seg, 2.2, 7.7));
+          if (h3 > 0.35 && fr < 0.1) {
+            vec2 sp = d.xz / (d.y + 1.0);
+            vec2 p0 = vec2(h1 - 0.5, h2 - 0.5) * 0.9, dir = normalize(vec2(h2 - 0.4, -0.6 - h1 * 0.4));
+            vec2 head = p0 + dir * (fr / 0.1) * 0.35;
+            vec2 pa = sp - head; float along = clamp(dot(pa, -dir), 0.0, 0.12); float dd = length(pa + dir * along);
+            float ss = (1.0 - smoothstep(0.0, 0.0025, dd)) * (1.0 - along / 0.12) * sin(fr / 0.1 * 3.14159);
+            c += vec3(1.6, 1.7, 2.0) * ss * uNight;
+          }
+        }
+        float cl = 0.0;
+        if (d.y > 0.0) {
+          vec2 cp = d.xz / (d.y + 0.1) * 0.06 + uTime * vec2(0.0016, 0.0006);
+          float n = cfbm(cp);
+          float cov = mix(0.6, 0.18, uCloud);
+          cl = smoothstep(cov, cov + 0.2, n) * smoothstep(0.0, 0.16, d.y);
+          float n2 = cfbm(cp + sunDir.xz * 0.012);
+          float lit = clamp(0.62 + (n - n2) * 5.0, 0.0, 1.0);
+          float gold = 1.0 - smoothstep(0.0, 0.45, sunDir.y);
+          vec3 cDay = mix(vec3(0.6, 0.64, 0.72), vec3(1.03), lit);
+          cDay = mix(cDay, cDay * sunCol * 1.15, gold * 0.75);
+          vec3 cNight = vec3(0.06, 0.07, 0.12) + vec3(0.1, 0.12, 0.18) * lit;
+          vec3 cc = mix(cDay, cNight, uNight);
+          cc = mix(cc, cc * vec3(0.5, 0.53, 0.58), uCloud * uCloud);
+          cc += sunCol * pow(s, 10.0) * (1.0 - smoothstep(0.3, 0.9, cl)) * 1.4 * (1.0 - uNight);
+          cc += uMoonC * pow(max(dot(d, moonDir), 0.0), 10.0) * 0.35 * uNight * (1.0 - cl);
+          c = mix(c, cc, cl * 0.96);
+        }
+        float disc = smoothstep(0.99935, 0.99972, s);
+        c += sunCol * (disc * 9.0 * (1.0 - cl) + pow(s, 220.0) * 0.7 * (1.0 - cl * 0.7) + pow(s, 12.0) * 0.18 + pow(s, 3.0) * 0.05) * glow;
+        float m = max(dot(d, moonDir), 0.0);
+        c += uMoonC * (pow(m, 90.0) * 0.4 + pow(m, 14.0) * 0.07) * uNight * (1.0 - cl * 0.6);
+        gl_FragColor = vec4(c, cl);
+      }`
+  });
+  R.sky = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 20), mat); R.sky.frustumCulled = false; R.sky.renderOrder = -10; scene.add(R.sky);
+  R.stars = null; R.clouds = [];
+  R.moon = new THREE.Mesh(new THREE.SphereGeometry(26, 20, 14), new THREE.MeshBasicMaterial({ color: 0xe8ecff, fog: false })); R.moon.renderOrder = -9; scene.add(R.moon);
+  R.hemi = new THREE.HemisphereLight(0xbfd9ff, 0x4a5a3a, 0.7); scene.add(R.hemi);
+  R.sun = new THREE.DirectionalLight(0xffffff, 1); R.sun.castShadow = true;
+  const sc = R.sun.shadow.camera; sc.left = -75; sc.right = 75; sc.top = 75; sc.bottom = -75; sc.near = 10; sc.far = 460;
+  R.sun.shadow.mapSize.set(2048, 2048); R.sun.shadow.bias = -0.00045; R.sun.shadow.normalBias = 0.3;
+  scene.add(R.sun); scene.add(R.sun.target);
+  R.flash = new THREE.AmbientLight(0xcfe0ff, 0); scene.add(R.flash);
+  scene.fog = new THREE.Fog(0xc6e6ff, 70, 420);
+}
+const _sunDir = new THREE.Vector3(), _shR = new THREE.Vector3(), _shU = new THREE.Vector3(), _shC = new THREE.Vector3(), _UP = new THREE.Vector3(0, 1, 0);
+function updateSky(dt) {
+  const h = G.hour; let i = 0; while (i < SKY_KEYS.length - 2 && SKY_KEYS[i + 1][0] <= h) i++;
+  const a = SKY_KEYS[i], b = SKY_KEYS[i + 1], t = clamp((h - a[0]) / (b[0] - a[0]), 0, 1), u = R.sky.material.uniforms;
+  const wet = R.overcast || 0, snowB = R.biome === 'snow' ? 0.35 : 0, night = nightAmount();
+  const raid = R.raid ? 1 : 0, Q = R.Q || GFXQ[3];
+  u.top.value.copy(_c1.set(a[1])).lerp(_c2.set(b[1]), t).lerp(_c2.set(night > 0.5 ? 0x0c1020 : 0x6f7f90), wet * 0.85).lerp(_c2.set(0x3a0a12), raid * 0.5 * night);
+  u.hor.value.copy(_c1.set(a[2])).lerp(_c2.set(b[2]), t).lerp(_c2.set(night > 0.5 ? 0x1a2030 : 0xa4adb6), wet * 0.9).lerp(_c2.set(0xe8f0f8), snowB * (1 - night)).lerp(_c2.set(0x5a1420), raid * 0.5 * night);
+  u.sunCol.value.copy(_c1.set(a[3])).lerp(_c2.set(b[3]), t); u.glow.value = 1 - wet * 0.9;
+  const dayT = (h - 6) / 14, isDay = h >= 5.6 && h <= 20.4;
+  let ang = isDay ? clamp(dayT, -0.03, 1.03) * Math.PI : ((h >= 20.4 ? h - 20.4 : h + 3.6) / 9.2) * Math.PI;
+  _sunDir.set(Math.cos(ang), Math.sin(ang) * 0.92 + 0.08, 0.35).normalize();
+  u.sunDir.value.copy(isDay ? _sunDir : _sunDir.clone().negate().setY(-0.5).normalize());
+  if (isDay) u.moonDir.value.set(0, -1, 0); else u.moonDir.value.copy(_sunDir);
+  u.uCloud.value = clamp(0.18 + wet * 0.95, 0, 1);
+  GU.uCloudCov.value = u.uCloud.value; GU.uCloudSh.value = (isDay ? 0.34 : 0.12) * (1 - sstep(0.55, 0.95, wet)) * sstep(0.02, 0.2, _sunDir.y + (isDay ? 0 : 1));
+  u.uAurora.value = lerp(u.uAurora.value, (R.biome === 'snow' ? 1 : 0.45) * (1 - wet), Math.min(1, dt * 0.3));
+  u.uMoonC.value.set(R.raid ? 0xff5040 : 0x9ab0ff);
+  R.moon.visible = !isDay; R.moon.position.copy(R.camera.position).addScaledVector(_sunDir, 800);
+  R.moon.material.color.setRGB(1.7, 1.75, 1.9); if (R.raid) R.moon.material.color.setRGB(2.4, 0.5, 0.35);
+  R.sky.position.copy(R.camera.position);
+  const inten = lerp(a[4], b[4], t) * (1 - wet * 0.45), amb = lerp(a[5], b[5], t) * (1 - wet * 0.2);
+  R.sun.color.copy(u.sunCol.value); R.sun.intensity = inten;
+  R.hemi.intensity = amb; R.hemi.color.copy(u.top.value).lerp(_c2.set(0xffffff), 0.55); R.hemi.groundColor.copy(u.hor.value).multiplyScalar(0.55);
+  R.scene.fog.color.copy(u.hor.value);
+  const fogFar = (R.biome === 'snow' ? 230 : R.biome === 'desert' ? 460 : 400) * Q.fog;
+  R.scene.fog.far = lerp(R.scene.fog.far, fogFar * (1 - wet * 0.45) * (1 - night * 0.25), Math.min(1, dt * 0.6));
+  R.scene.fog.near = R.scene.fog.far * 0.14;
+  // shared shader values
+  const gold = isDay ? 1 - sstep(0.0, 0.5, _sunDir.y) : 0;
+  GU.uSkyTop.value.copy(u.top.value); GU.uSkyHor.value.copy(u.hor.value);
+  GU.uSunCol.value.copy(u.sunCol.value).multiplyScalar(isDay ? inten : inten * 0.6);
+  GU.uNight.value = night;
+  GU.fgSunDir.value.copy(_sunDir);
+  GU.fgSunCol.value.copy(u.hor.value).lerp(u.sunCol.value, 0.65).multiplyScalar(isDay ? 1.15 : 0.6);
+  GU.fgSunStr.value = (isDay ? 0.35 + gold * 0.55 : 0.25) * (1 - wet * 0.8);
+  const mist = R.biome === 'forest' ? sstep(4.6, 6.2, h) * sstep(9.5, 7.2, h) : 0;
+  GU.fgH.value.set(1.5, 0.22, mist * 0.55 + wet * 0.12 + night * 0.06);
+  // sun / moon shadow: centred a little ahead of the player, snapped to shadow texels so edges never shimmer
+  const ext = R.shExt || 75, cam = R.camera.position;
+  _shC.set(cam.x - Math.sin(G.p.yaw) * ext * 0.3, 0, cam.z - Math.cos(G.p.yaw) * ext * 0.3); _shC.y = heightAt(_shC.x, _shC.z);
+  _shR.crossVectors(_UP, _sunDir).normalize(); _shU.crossVectors(_sunDir, _shR);
+  const tex = 2 * ext / R.sun.shadow.mapSize.x;
+  const pa = Math.round(_shC.dot(_shR) / tex) * tex, pb = Math.round(_shC.dot(_shU) / tex) * tex, pc = _shC.dot(_sunDir);
+  R.sun.target.position.copy(_shR).multiplyScalar(pa).addScaledVector(_shU, pb).addScaledVector(_sunDir, pc);
+  R.sun.position.copy(R.sun.target.position).addScaledVector(_sunDir, 230);
+  R.water.position.y = Math.sin(R.t * 0.7) * 0.05;
+  if (R.flashT > 0) { R.flashT -= dt; R.flash.intensity = R.flashT > 0 ? (Math.random() > 0.4 ? 1.6 : 0.5) : 0; }
+}
+
+/* ---------- GPU particle fields that wrap around the camera (rain, snow, fireflies, pollen, dust) ---------- */
+function rainField(n) {
+  const base = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0), g = new THREE.InstancedBufferGeometry();
+  g.index = base.index; g.setAttribute('position', base.attributes.position);
+  const p = new Float32Array(n * 3), r = new Float32Array(n); for (let i = 0; i < n; i++) { p[i * 3] = rnd(40); p[i * 3 + 1] = rnd(30); p[i * 3 + 2] = rnd(40); r[i] = rnd(); }
+  g.setAttribute('aPos', new THREE.InstancedBufferAttribute(p, 3)); g.setAttribute('aR', new THREE.InstancedBufferAttribute(r, 1)); g.instanceCount = n;
+  const m = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, fog: false,
+    uniforms: { uBox: { value: new THREE.Vector3(40, 30, 40) }, uVel: { value: new THREE.Vector3(2, -26, 1) }, uCol: { value: new THREE.Color(0.7, 0.75, 0.85) }, uOp: { value: 0.35 } },
+    vertexShader: `attribute vec3 aPos; attribute float aR; uniform vec3 uBox; uniform vec3 uVel; uniform float uTime; varying float vA; varying float vX;
+      void main(){ vec3 p = aPos + uVel * uTime * (0.85 + 0.3 * aR); vec3 org = cameraPosition - uBox * 0.5; vec3 wp = org + mod(p - org, uBox);
+        vec3 dir = normalize(uVel), toC = normalize(cameraPosition - wp), side = normalize(cross(dir, toC));
+        wp += side * position.x * 0.018 + dir * position.y * 0.75;
+        float d = length(wp - cameraPosition); vA = (1.0 - smoothstep(8.0, 19.0, d)) * smoothstep(0.4, 1.5, d); vX = position.x;
+        gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0); }`,
+    fragmentShader: 'uniform vec3 uCol; uniform float uOp; varying float vA; varying float vX; void main(){ gl_FragColor = vec4(uCol, uOp * vA * (1.0 - abs(vX) * 1.6)); }'
+  });
+  const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.renderOrder = 6; mesh.userData.n = n; return mesh;
+}
+function pointField(n, o) {
+  const g = new THREE.BufferGeometry(), p = new Float32Array(n * 3), r = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) { p[i * 3] = rnd(o.box[0]); p[i * 3 + 1] = rnd(o.box[1]); p[i * 3 + 2] = rnd(o.box[2]); for (let k = 0; k < 4; k++) r[i * 4 + k] = rnd(); }
+  g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('aR', new THREE.BufferAttribute(r, 4));
+  const m = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, fog: false, blending: o.add ? THREE.AdditiveBlending : THREE.NormalBlending,
+    uniforms: { uBox: { value: new THREE.Vector3().fromArray(o.box) }, uVel: { value: new THREE.Vector3().fromArray(o.vel) }, uSwirl: { value: o.swirl || 0 }, uSize: { value: o.size }, uPx: GFX.uPx,
+      uCol: { value: o.col.clone() }, uOp: { value: o.op === undefined ? 1 : o.op }, uBlink: { value: o.blink || 0 }, uGround: { value: o.ground ? 1 : 0 } },
+    vertexShader: `attribute vec4 aR; uniform vec3 uBox; uniform vec3 uVel; uniform float uSwirl; uniform float uSize; uniform float uPx; uniform float uTime; uniform float uGround; varying float vA; varying vec4 vR;
+      ${GLSL_HGT}
+      void main(){
+        vec3 p = position + uVel * uTime * (0.7 + 0.6 * aR.x) + uSwirl * vec3(sin(uTime * 0.5 + aR.y * 40.0), 0.6 * sin(uTime * 0.7 + aR.z * 30.0), cos(uTime * 0.45 + aR.w * 50.0));
+        vec3 org = cameraPosition - uBox * 0.5; vec3 wp = org + mod(p - org, uBox);
+        if (uGround > 0.5) wp.y = terrainH(wp.xz) + 0.2 + mod(p.y, uBox.y);
+        vec4 mv = viewMatrix * vec4(wp, 1.0); gl_Position = projectionMatrix * mv;
+        float d = length(wp - cameraPosition); vA = (1.0 - smoothstep(uBox.x * 0.32, uBox.x * 0.5, d)) * smoothstep(0.25, 1.0, d); vR = aR;
+        gl_PointSize = clamp(uSize * (0.5 + aR.w) * uPx / max(-mv.z, 0.1), 0.0, 64.0); }`,
+    fragmentShader: `uniform vec3 uCol; uniform float uOp; uniform float uBlink; uniform float uTime; varying float vA; varying vec4 vR;
+      void main(){ float r = length(gl_PointCoord - 0.5); float a = (1.0 - smoothstep(0.08, 0.5, r));
+        float bl = mix(1.0, pow(0.5 + 0.5 * sin(uTime * (1.2 + vR.y * 2.0) + vR.x * 40.0), 5.0), uBlink);
+        gl_FragColor = vec4(uCol * (0.8 + 0.4 * vR.z) * bl, a * vA * uOp * bl); }`
+  });
+  const pts = new THREE.Points(g, m); pts.frustumCulled = false; pts.renderOrder = 6; pts.userData.n = n; return pts;
+}
+function buildPrecip(scene) {
+  GFX.uPx = { value: 400 };
+  R.rain = rainField(9000); R.rain.visible = false; scene.add(R.rain);
+  R.snow = pointField(7000, { box: [44, 26, 44], vel: [0.6, -1.6, 0.25], swirl: 0.9, size: 0.09, col: new THREE.Color(1, 1, 1), op: 0.95 }); R.snow.visible = false; scene.add(R.snow);
+  R.fireflies = pointField(260, { box: [70, 3.5, 70], vel: [0, 0, 0], swirl: 1.4, size: 0.11, col: new THREE.Color(2.6, 3.4, 1.1), add: true, blink: 1, ground: true }); scene.add(R.fireflies);
+  R.motes = pointField(220, { box: [18, 2.5, 18], vel: [0.2, 0.03, 0.08], swirl: 0.7, size: 0.014, col: new THREE.Color(1.2, 1.15, 0.9), op: 0.3, add: true, ground: true }); scene.add(R.motes);
+  R.dust = pointField(1400, { box: [40, 1.2, 40], vel: [5.5, 0.1, 1.8], swirl: 0.3, size: 0.045, col: new THREE.Color(0.8, 0.66, 0.48), op: 0.3, ground: true }); scene.add(R.dust);
+  // lightning bolt
+  R.bolt = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: new THREE.Color(6, 6, 8), fog: false, transparent: true }));
+  R.bolt.frustumCulled = false; R.bolt.visible = false; scene.add(R.bolt);
+}
+function makeBolt() {
+  const cam = R.camera.position, a = rnd(TAU), d = rnd(140, 320), x0 = cam.x + Math.cos(a) * d, z0 = cam.z + Math.sin(a) * d, gy = Math.max(0, heightAt(x0, z0));
+  const pts = []; const branch = (x, y, z, len, depth) => {
+    let px = x, py = y, pz = z; const steps = Math.floor(len / 9);
+    for (let i = 0; i < steps && py > gy; i++) { const nx = px + rnd(-7, 7), ny = py - rnd(6, 12), nz = pz + rnd(-7, 7); pts.push(px, py, pz, nx, ny, nz); if (depth < 2 && Math.random() < 0.18) branch(nx, ny, nz, len * 0.35, depth + 1); px = nx; py = ny; pz = nz; }
+  };
+  branch(x0, 160, z0, 170, 0);
+  R.bolt.geometry.dispose(); R.bolt.geometry = new THREE.BufferGeometry(); R.bolt.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  R.bolt.visible = true; R.boltT = 0.32;
+}
+function updatePrecip(dt) {
+  const wet = G.weather === 'rain' || G.weather === 'storm', inSnow = R.biome === 'snow', storm = G.weather === 'storm', Q = R.Q || GFXQ[3];
+  R.overcast = lerp(R.overcast || 0, wet ? 1 : G.weather === 'cloudy' ? 0.45 : 0, Math.min(1, dt * 0.5));
+  R.rain.visible = wet && !inSnow; R.snow.visible = inSnow;
+  R.rain.geometry.instanceCount = Math.floor(R.rain.userData.n * Q.part * (storm ? 1 : 0.6));
+  R.rain.material.uniforms.uVel.value.set(GU.uWind.value.x * (storm ? 9 : 3), storm ? -32 : -25, GU.uWind.value.z * (storm ? 9 : 3));
+  R.rain.material.uniforms.uCol.value.copy(GU.uSkyHor.value).multiplyScalar(0.85).addScalar(0.12);
+  R.snow.geometry.setDrawRange(0, Math.floor(R.snow.userData.n * Q.part * (wet ? 1 : 0.45)));
+  R.snow.material.uniforms.uVel.value.set(0.6 + GU.uWind.value.x * (wet ? 3 : 1), wet ? -2.6 : -1.5, GU.uWind.value.z * (wet ? 3 : 1));
+  R.snow.material.uniforms.uCol.value.setScalar(lerp(1.0, 0.35, GU.uNight.value));
+  if (G.weather === 'storm' && !R.sleeping && Math.random() < dt * 0.09) { R.flashT = 0.28; makeBolt(); setTimeout(() => sfx('thunder'), 300 + Math.random() * 1500); uiFlash('#fff', 0.35); }
+  if (R.boltT > 0) { R.boltT -= dt; R.bolt.material.opacity = Math.random() > 0.3 ? 1 : 0.25; if (R.boltT <= 0) R.bolt.visible = false; }
+}
+
+/* ---------- soft puffs (dust, smoke, sparks) ---------- */
+function buildFx(scene) {
+  R.fxPool = []; GFX.soft = GFX.soft || makeSoftTex();
+  const g = new THREE.PlaneGeometry(1.7, 1.7);
+  for (let i = 0; i < 120; i++) {
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xffffff, map: GFX.soft, transparent: true, depthWrite: false }));
+    m.visible = false; m.renderOrder = 4; scene.add(m); R.fxPool.push({ m, life: 0, max: 1, vx: 0, vy: 0, vz: 0, g: 0, s0: 1, s1: 1 });
+  }
+  // embers above fires
+  const n = 220, p = new Float32Array(n * 3); GFX.embers = []; for (let i = 0; i < n; i++) { p[i * 3 + 1] = -999; GFX.embers.push({ life: 0, x: 0, y: -999, z: 0, vx: 0, vy: 0, vz: 0 }); }
+  const eg = new THREE.BufferGeometry(); eg.setAttribute('position', new THREE.BufferAttribute(p, 3));
+  R.embers = new THREE.Points(eg, new THREE.PointsMaterial({ color: new THREE.Color(3.2, 1.3, 0.35), size: 0.07, map: GFX.soft, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+  R.embers.frustumCulled = false; scene.add(R.embers);
+}
+function updateFx(dt) {
+  const q = R.camera.quaternion;
+  for (const p of R.fxPool) {
+    if (p.life <= 0) continue;
+    p.life -= dt; if (p.life <= 0) { p.m.visible = false; continue; }
+    const k = 1 - p.life / p.max;
+    p.vy -= p.g * dt; p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
+    p.m.scale.setScalar(lerp(p.s0, p.s1, k)); p.m.material.opacity = 1 - k * k; p.m.quaternion.copy(q);
+  }
+  // embers: spawn from nearby lit fires
+  const src = GFX.fireSrc || [], E = GFX.embers, arr = R.embers.geometry.attributes.position.array;
+  for (const f of src) if (f.d < 45 && Math.random() < dt * (f.big ? 9 : 3)) { const e = E.find(e => e.life <= 0); if (e) { e.life = rnd(1.2, 2.6); e.x = f.x + rnd(-0.3, 0.3); e.y = f.y + 0.3; e.z = f.z + rnd(-0.3, 0.3); e.vx = rnd(-0.4, 0.4); e.vy = rnd(1.2, 2.6); e.vz = rnd(-0.4, 0.4); } }
+  const w = GU.uWind.value, wa = GU.uWindAmp.value;
+  for (let i = 0; i < E.length; i++) {
+    const e = E[i]; if (e.life > 0) { e.life -= dt; e.vy -= dt * 0.25; e.x += (e.vx + w.x * wa * 0.8 + Math.sin(R.t * 3 + i) * 0.3) * dt; e.y += e.vy * dt; e.z += (e.vz + w.z * wa * 0.8) * dt; if (e.life <= 0) e.y = -999; }
+    arr[i * 3] = e.x; arr[i * 3 + 1] = e.y; arr[i * 3 + 2] = e.z;
+  }
+  R.embers.geometry.attributes.position.needsUpdate = true;
+}
+
+/* ---------- flames: animated, glowing, always face you ---------- */
+const FLAME_GEO = new THREE.PlaneGeometry(0.38, 0.66).translate(0, 0.3, 0);
+let FLAME_MAT = null;
+function flameMat() {
+  if (FLAME_MAT) return FLAME_MAT;
+  FLAME_MAT = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, uniforms: {},
+    vertexShader: `varying vec2 vUv; varying float vSeed;
+      void main(){ vUv = uv; vec3 c = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+        float sx = length(modelMatrix[0].xyz), sy = length(modelMatrix[1].xyz);
+        vec3 toC = cameraPosition - c; vec3 rt = cross(vec3(0.0, 1.0, 0.0), toC); float rl = length(rt); rt = rl > 1e-4 ? rt / rl : vec3(1.0, 0.0, 0.0);
+        vec3 wp = c + rt * position.x * sx + vec3(0.0, 1.0, 0.0) * position.y * sy;
+        vSeed = fract(c.x * 0.371 + c.z * 0.713 + c.y * 0.19);
+        gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0); }`,
+    fragmentShader: `uniform float uTime; uniform sampler2D uNoise; varying vec2 vUv; varying float vSeed;
+      void main(){
+        float y = vUv.y, t = uTime;
+        float n = texture2D(uNoise, vec2(vUv.x * 0.5 + vSeed, y * 0.45 - t * 1.3)).r;
+        float n2 = texture2D(uNoise, vec2(vUv.x * 1.1 - vSeed, y * 0.9 - t * 2.1)).b;
+        float x = (vUv.x - 0.5) * 2.0 + (n - 0.5) * 0.9 * y;
+        float w = 0.92 * pow(max(1.0 - y, 0.0), 0.75) * smoothstep(-0.05, 0.18, y);
+        float shape = (1.0 - smoothstep(w * 0.45, w, abs(x))) * (1.0 - smoothstep(0.45 + n2 * 0.4, 1.0, y));
+        float core = (1.0 - smoothstep(0.0, w * 0.55, abs(x))) * (1.0 - smoothstep(0.1, 0.7, y)) * smoothstep(0.0, 0.12, y);
+        vec3 col = mix(vec3(1.0, 0.22, 0.03), vec3(1.0, 0.58, 0.12), clamp(shape * 1.4 - y * 0.4, 0.0, 1.0));
+        col = mix(col, vec3(1.0, 0.92, 0.62), core);
+        gl_FragColor = vec4(col * (1.15 + core * 1.5), clamp(shape * 0.92, 0.0, 1.0));
+      }`
+  });
+  return FLAME_MAT;
+}
+function flameGroup(s) {
+  const g = new THREE.Group();
+  const a = new THREE.Mesh(FLAME_GEO, flameMat()); a.frustumCulled = false; a.renderOrder = 7;
+  const b = new THREE.Mesh(FLAME_GEO, flameMat()); b.frustumCulled = false; b.renderOrder = 7; b.scale.set(0.62, 0.7, 1); b.position.set(0.06, 0, 0.04);
+  g.add(a); g.add(b); g.scale.setScalar(s || 1); g.userData.flame = true; return g;
+}
+
+/* ---------- dense grass: a field of blades that follows the player, swaying in gusts, parting as you walk ---------- */
+function gfxBuildGrass(n, rad) {
+  if (R.grassField) { R.scene.remove(R.grassField); R.grassField.geometry.dispose(); R.grassField = null; }
+  if (!n || !GFX.grassMask) return;
+  const ys = [0, 0, 0.36, 0.36, 0.7, 0.7, 1], xs = [-0.5, 0.5, -0.4, 0.4, -0.24, 0.24, 0];
+  const pos = new Float32Array(21), nor = new Float32Array(21), col = new Float32Array(21).fill(1);
+  for (let i = 0; i < 7; i++) { pos[i * 3] = xs[i]; pos[i * 3 + 1] = ys[i]; nor[i * 3 + 1] = 1; }
+  const g = new THREE.InstancedBufferGeometry();
+  g.setIndex([0, 1, 2, 2, 1, 3, 2, 3, 4, 4, 3, 5, 4, 5, 6]);
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const S = rad * 2, side = Math.ceil(Math.sqrt(n)), cell = S / side, off = new Float32Array(n * 2), rn = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) { const gx = i % side, gz = Math.floor(i / side); off[i * 2] = (gx + Math.random()) * cell; off[i * 2 + 1] = (gz + Math.random()) * cell; for (let k = 0; k < 4; k++) rn[i * 4 + k] = Math.random(); }
+  g.setAttribute('aOff', new THREE.InstancedBufferAttribute(off, 2)); g.setAttribute('aRnd', new THREE.InstancedBufferAttribute(rn, 4)); g.instanceCount = n;
+  const m = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const uni = { uGS: { value: S }, uGR: { value: rad }, uGMask: { value: GFX.grassMask }, uGNo: { value: GFX.noGrassTex } };
+  m.customProgramCacheKey = () => 'grass';
+  m.onBeforeCompile = sh => {
+    gfxInject(sh); Object.assign(sh.uniforms, uni);
+    sh.vertexShader = `attribute vec2 aOff; attribute vec4 aRnd; uniform float uGS; uniform float uGR; uniform sampler2D uGMask; uniform sampler2D uGNo;
+      uniform vec3 uCamPos; uniform float uTime; uniform vec3 uWind; uniform float uWindAmp; uniform vec3 uPlayer; uniform float uNight; uniform vec3 fgSunDir; varying float vGT; varying float vGCS;
+      uniform sampler2D uNoise; uniform float uCloudSh; uniform float uCloudCov;
+      ${GLSL_HGT}${GLSL_CLOUDSH}\n` + sh.vertexShader
+      .replace('#include <color_vertex>', `
+      vec2 gOrg = uCamPos.xz - uGS * 0.5; vec2 gP = gOrg + mod(aOff - gOrg, uGS);
+      float gTH = terrainH(gP); vec2 gUV = (gP + ${HALF.toFixed(1)}) / ${WORLD.toFixed(1)};
+      vec4 gM = texture2D(uGMask, gUV); float gNo = texture2D(uGNo, gUV).r;
+      float gDist = length(vec3(gP.x, gTH, gP.y) - uCamPos);
+      float gKeep = mix(1.0, 0.32, smoothstep(uGR * 0.22, uGR, gDist));
+      float gVis = step(aRnd.x, gM.a * gNo) * step(aRnd.y, gKeep) * (1.0 - smoothstep(uGR * 0.72, uGR, gDist)) * step(0.05, gTH);
+      float gHgt = (0.2 + 0.4 * aRnd.z) * (0.6 + 0.5 * gM.a) * gVis * mix(0.3, 1.0, gNo);
+      float gWid = 0.085 * (0.8 + 0.5 * aRnd.w) * gVis * (1.0 + gDist * 0.03);
+      float gA = aRnd.w * 6.2832 + aRnd.z * 2.1; vec2 gFace = vec2(cos(gA), sin(gA)); vec2 gSide = vec2(-gFace.y, gFace.x);
+      float gWave = sin(dot(gP, uWind.xz) * 0.17 - uTime * 2.0 + aRnd.x * 0.7) * 0.5 + 0.5;
+      float gBA = 0.18 + aRnd.y * 0.28 + uWindAmp * (0.12 + 0.6 * gWave * gWave);
+      vec2 gBD = normalize(gSide * (0.35 + 0.4 * aRnd.z) + uWind.xz * uWindAmp * (0.3 + gWave));
+      vec2 gPD = gP - uPlayer.xz; float gPL = length(gPD);
+      float gPush = (1.0 - smoothstep(0.25, 1.4, gPL)) * step(abs(uPlayer.y - gTH), 2.2);
+      gBD = normalize(mix(gBD, gPD / max(gPL, 0.01), gPush)); gBA = mix(gBA, 1.5, gPush);
+      float gY = position.y;
+      vec3 gPos = vec3(gP.x, gTH - 0.05, gP.y);
+      gPos.xz += gFace * position.x * gWid + gBD * gY * gY * gBA * gHgt * 0.9;
+      gPos.y += gY * gHgt * (1.0 - 0.22 * gBA * gBA);
+      vec3 gCol = gM.rgb * (0.88 + 0.28 * aRnd.z) * mix(0.62, 1.12, gY);
+      gCol = mix(gCol, gCol * vec3(1.3, 1.12, 0.55), step(0.86, aRnd.y) * gY * 0.7);
+      float gFl = step(aRnd.x, gM.a * 0.03) * step(0.55, gY) * step(gM.r * 1.6, gM.g);
+      vec3 gFc = aRnd.z < 0.3 ? vec3(1.0, 0.95, 0.85) : aRnd.z < 0.55 ? vec3(1.0, 0.85, 0.2) : aRnd.z < 0.8 ? vec3(0.75, 0.45, 1.0) : vec3(1.0, 0.45, 0.6);
+      gCol = mix(gCol, gFc, gFl);
+      vColor = gCol;
+      vGT = pow(max(dot(normalize(gPos - uCamPos), fgSunDir), 0.0), 4.0) * gY * (1.0 - uNight); vGCS = cloudShadow(gPos, fgSunDir);`)
+      .replace('#include <beginnormal_vertex>', 'vec3 objectNormal = normalize(vec3(gBD.x * 0.25, 1.0, gBD.y * 0.25));')
+      .replace('#include <begin_vertex>', 'vec3 transformed = gPos;');
+    sh.fragmentShader = 'varying float vGT; varying float vGCS; uniform vec3 uSunCol;\n' + sh.fragmentShader.replace(/:\s*vLightBack/g, ': vLightFront').replace(/:\s*vIndirectBack/g, ': vIndirectFront').replace('#include <envmap_fragment>', '#include <envmap_fragment>\n outgoingLight += uSunCol * diffuseColor.rgb * vGT * 0.7;\n outgoingLight *= vGCS;');
+  };
+  const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.renderOrder = 1;
+  R.scene.add(mesh); R.grassField = mesh;
+}
+
+/* ---------- plants sway, crystals glow: per-type materials for the instanced world nodes ---------- */
+const NODE_WIND = { pine: [0.006, 0.03, 1], snowpine: [0.006, 0.03, 1], oak: [0.007, 0.05, 1], deadtree: [0.004, 0.01, 0], palm: [0.011, 0.06, 1], bush: [0.05, 0.04, 1], reed: [0.09, 0.02, 1], herb: [0.4, 0.02, 1] };
+function gfxNodeMat(t) {
+  if (t === 'crystal') return MAT_GLOW;
+  const w = NODE_WIND[t]; if (!w) return MAT_VC;
+  return litMat({ vc: true, wind: [w[0], w[1]], foliage: !!w[2], snow: t === 'pine' || t === 'deadtree' });
+}
+
+/* ---------- life: falling leaves and birds ---------- */
+function buildLife(scene) {
+  const lg = new THREE.PlaneGeometry(0.1, 0.07);
+  R.leaves = new THREE.InstancedMesh(lg, new THREE.MeshLambertMaterial({ side: THREE.DoubleSide }), 70); R.leaves.frustumCulled = false;
+  GFX.leaves = []; const lc = [0xc9a43a, 0x9bb84a, 0xd87a2c, 0x7fa83f, 0xb8562a];
+  for (let i = 0; i < 70; i++) { GFX.leaves.push({ x: 0, y: -999, z: 0, life: 0, rx: rnd(TAU), ry: rnd(TAU), sp: rnd(2, 5) }); R.leaves.setColorAt(i, _c1.set(lc[i % lc.length])); }
+  R.leaves.instanceColor.needsUpdate = true; scene.add(R.leaves);
+  // birds: two triangles that flap in the vertex shader
+  const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.25, -1, 0, -0.1, 0, 0, -0.2, 0, 0, 0.25, 0, 0, -0.2, 1, 0, -0.1], 3)); bg.computeVertexNormals();
+  const bm = new THREE.MeshBasicMaterial({ color: 0x2a2a30, side: THREE.DoubleSide });
+  bm.customProgramCacheKey = () => 'bird';
+  bm.onBeforeCompile = sh => { gfxInject(sh); sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n float ph = uTime * 7.0 + instanceMatrix[3].x * 0.3 + instanceMatrix[3].z * 0.2; transformed.y += sin(ph) * 0.55 * abs(position.x); transformed.x *= 0.85 + 0.15 * cos(ph);'); };
+  R.birds = new THREE.InstancedMesh(bg, bm, 24); R.birds.frustumCulled = false; scene.add(R.birds);
+  GFX.flocks = [{ x: -40, z: 120, r: 60, h: 55, sp: 0.06, n: 8, a: 0, sea: false }, { x: 140, z: -40, r: 80, h: 70, sp: -0.045, n: 7, a: 2, sea: false }, { x: -10, z: 285, r: 45, h: 26, sp: 0.08, n: 9, a: 4, sea: true }];
+}
+const _lm = new THREE.Matrix4(), _lq = new THREE.Quaternion(), _le = new THREE.Euler(), _lp = new THREE.Vector3(), _ls = new THREE.Vector3(1, 1, 1);
+function updateLife(dt) {
+  const p = G.p, day = 1 - GU.uNight.value, forest = R.biome === 'forest', w = GU.uWind.value, wa = GU.uWindAmp.value;
+  // leaves drift down from nearby trees in the forest by day
+  const L = GFX.leaves;
+  if (forest && day > 0.5 && Math.random() < dt * (1.5 + wa * 3)) {
+    const l = L.find(l => l.life <= 0); let tr = null; nodeNear(p.x, p.z, 16, n => { if (!tr && !n.gone && (n.t === 'oak' || n.t === 'pine') && Math.random() < 0.3) tr = n; });
+    if (l && tr) { const x = tr.x + rnd(-1.5, 1.5), z = tr.z + rnd(-1.5, 1.5); l.x = x; l.z = z; l.y = heightAt(x, z) + rnd(2.5, 4.5) * tr.s; l.life = 9; }
+  }
+  for (let i = 0; i < L.length; i++) {
+    const l = L[i];
+    if (l.life > 0) {
+      l.life -= dt; const g = heightAt(l.x, l.z);
+      if (l.y > g + 0.05) { l.y -= dt * 0.7; l.x += (w.x * wa * 1.6 + Math.sin(R.t * l.sp + i) * 0.6) * dt; l.z += (w.z * wa * 1.6 + Math.cos(R.t * l.sp * 0.8 + i) * 0.6) * dt; l.rx += dt * l.sp; l.ry += dt * l.sp * 0.7; }
+      if (l.life <= 0) l.y = -999;
+    }
+    _le.set(l.rx, l.ry, 0); _lq.setFromEuler(_le); _lp.set(l.x, l.y, l.z); R.leaves.setMatrixAt(i, _lm.compose(_lp, _lq, _ls));
+  }
+  R.leaves.instanceMatrix.needsUpdate = true;
+  // birds circle by day
+  let k = 0;
+  for (const f of GFX.flocks) {
+    f.a += f.sp * dt; const cx = f.x + Math.cos(f.a) * f.r, cz = f.z + Math.sin(f.a) * f.r, dir = f.a + Math.sign(f.sp) * Math.PI / 2;
+    for (let i = 0; i < f.n && k < 24; i++, k++) {
+      const row = Math.ceil(i / 2), sideS = i % 2 ? 1 : -1, ox = -Math.sin(dir) * row * 1.6 + Math.cos(dir) * sideS * row * 1.4, oz = -Math.cos(dir) * row * 1.6 - Math.sin(dir) * sideS * row * 1.4;
+      _le.set(0, Math.atan2(Math.cos(dir), Math.sin(dir)), Math.sin(R.t * 0.7 + i) * 0.15); _lq.setFromEuler(_le);
+      _lp.set(cx + ox + Math.sin(R.t * 0.9 + i * 1.7) * 0.6, f.h + Math.sin(R.t * 0.6 + i) * 1.2, cz + oz);
+      const s = day > 0.3 && !(G.weather === 'storm') ? (f.sea ? 0.8 : 0.65) : 0.0001; _ls.setScalar(s);
+      R.birds.setMatrixAt(k, _lm.compose(_lp, _lq, _ls));
+    }
+  }
+  _ls.set(1, 1, 1); R.birds.count = k; R.birds.instanceMatrix.needsUpdate = true;
+  R.birds.material.color.set(GFX.flocks.length && R.biome === 'snow' ? 0x3a3a44 : 0x2a2a30);
+}
+
+/* ---------- post-processing: HDR, bloom, sun shafts, colour grading ---------- */
+const PP = { on: false, w: 0, h: 0 };
+const PP_VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+function ppMat(fs, uni, add) {
+  return new THREE.ShaderMaterial({ uniforms: uni, vertexShader: PP_VS, fragmentShader: fs, depthTest: false, depthWrite: false, fog: false, transparent: !!add, blending: add ? THREE.AdditiveBlending : THREE.NoBlending });
+}
+function ppInit() {
+  const r = R.renderer; PP.ok = r.capabilities.isWebGL2;
+  if (!PP.ok) return;
+  PP.hdr = !!r.extensions.get('EXT_color_buffer_float');
+  PP.type = PP.hdr ? THREE.HalfFloatType : THREE.UnsignedByteType;
+  PP.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1); PP.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); PP.quad.frustumCulled = false;
+  PP.scene = new THREE.Scene(); PP.scene.add(PP.quad);
+  PP.bright = ppMat(`uniform sampler2D tSrc; uniform vec2 uTex; uniform float uTh; uniform float uKnee; varying vec2 vUv;
+    void main(){ vec3 c = (texture2D(tSrc, vUv + uTex * vec2(-0.5, -0.5)).rgb + texture2D(tSrc, vUv + uTex * vec2(0.5, -0.5)).rgb + texture2D(tSrc, vUv + uTex * vec2(-0.5, 0.5)).rgb + texture2D(tSrc, vUv + uTex * vec2(0.5, 0.5)).rgb) * 0.25;
+      float br = max(c.r, max(c.g, c.b)); float sft = clamp(br - uTh + uKnee, 0.0, 2.0 * uKnee); sft = sft * sft / (4.0 * uKnee + 1e-4);
+      gl_FragColor = vec4(min(c * max(sft, br - uTh) / max(br, 1e-4), vec3(40.0)), 1.0); }`,
+    { tSrc: { value: null }, uTex: { value: new THREE.Vector2() }, uTh: { value: 1 }, uKnee: { value: 0.5 } });
+  PP.down = ppMat(`uniform sampler2D tSrc; uniform vec2 uTex; varying vec2 vUv;
+    void main(){ vec3 s = texture2D(tSrc, vUv).rgb * 4.0 + texture2D(tSrc, vUv - uTex).rgb + texture2D(tSrc, vUv + uTex).rgb + texture2D(tSrc, vUv + vec2(uTex.x, -uTex.y)).rgb + texture2D(tSrc, vUv - vec2(uTex.x, -uTex.y)).rgb; gl_FragColor = vec4(s / 8.0, 1.0); }`,
+    { tSrc: { value: null }, uTex: { value: new THREE.Vector2() } });
+  PP.up = ppMat(`uniform sampler2D tSrc; uniform vec2 uTex; uniform float uW; varying vec2 vUv;
+    void main(){ vec2 h = uTex * 0.5; vec3 s = texture2D(tSrc, vUv + vec2(-h.x * 2.0, 0.0)).rgb + texture2D(tSrc, vUv + vec2(-h.x, h.y)).rgb * 2.0 + texture2D(tSrc, vUv + vec2(0.0, h.y * 2.0)).rgb + texture2D(tSrc, vUv + vec2(h.x, h.y)).rgb * 2.0
+      + texture2D(tSrc, vUv + vec2(h.x * 2.0, 0.0)).rgb + texture2D(tSrc, vUv + vec2(h.x, -h.y)).rgb * 2.0 + texture2D(tSrc, vUv + vec2(0.0, -h.y * 2.0)).rgb + texture2D(tSrc, vUv + vec2(-h.x, -h.y)).rgb * 2.0;
+      gl_FragColor = vec4(s / 12.0 * uW, 1.0); }`,
+    { tSrc: { value: null }, uTex: { value: new THREE.Vector2() }, uW: { value: 1 } }, true);
+  PP.mask = ppMat(`uniform sampler2D tSrc; uniform vec2 uSun; uniform float uAsp; varying vec2 vUv;
+    void main(){ vec4 s = texture2D(tSrc, vUv); float sky = 1.0 - clamp(s.a, 0.0, 1.0); float d = length((vUv - uSun) * vec2(uAsp, 1.0));
+      float l = min(dot(s.rgb, vec3(0.33)), 3.0); gl_FragColor = vec4(vec3(sky * l * (1.0 - smoothstep(0.0, 0.9, d))), 1.0); }`,
+    { tSrc: { value: null }, uSun: { value: new THREE.Vector2() }, uAsp: { value: 1 } });
+  PP.rays = ppMat(`uniform sampler2D tSrc; uniform vec2 uSun; varying vec2 vUv;
+    void main(){ vec2 dl = (vUv - uSun) * (0.92 / 56.0); vec2 uv = vUv; float il = 1.0, sum = 0.0;
+      for (int i = 0; i < 56; i++){ uv -= dl; sum += texture2D(tSrc, uv).r * il; il *= 0.962; }
+      gl_FragColor = vec4(vec3(sum * 0.045), 1.0); }`,
+    { tSrc: { value: null }, uSun: { value: new THREE.Vector2() } });
+  PP.comp = ppMat(`uniform sampler2D tScene; uniform sampler2D tBloom; uniform sampler2D tRays; uniform float uBloom; uniform float uRays; uniform vec3 uRayCol;
+    uniform float uExp; uniform float uSat; uniform float uCon; uniform vec3 uTint; uniform vec3 uLift; uniform float uVig; uniform float uTime; uniform float uUnder; uniform float uHurt; uniform float uHdr; uniform float uHeat; uniform float uHorY; varying vec2 vUv;
+    float hsh(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    vec3 shoulder(vec3 x){ vec3 k = vec3(0.78); vec3 o = k + (1.0 - k) * (1.0 - exp(-(x - k) / (1.0 - k))); return mix(x, o, step(k, x)); }
+    void main(){
+      vec2 uv = vUv;
+      if (uUnder > 0.0) uv += vec2(sin(uv.y * 30.0 + uTime * 2.0), cos(uv.x * 26.0 + uTime * 1.7)) * 0.003 * uUnder;
+      if (uHeat > 0.0) { float band = 1.0 - smoothstep(0.0, 0.07, abs(uv.y - uHorY + 0.015)); uv.x += sin(uv.y * 260.0 + uTime * 5.0) * 0.0011 * band * uHeat; uv.y += cos(uv.x * 180.0 + uTime * 4.0) * 0.0006 * band * uHeat; }
+      vec3 c = texture2D(tScene, uv).rgb;
+      c += texture2D(tBloom, uv).rgb * uBloom;
+      c += texture2D(tRays, uv).rgb * uRayCol * uRays;
+      c *= uExp * uTint;
+      c = shoulder(c);
+      float l = dot(c, vec3(0.299, 0.587, 0.114));
+      c = mix(vec3(l), c, uSat);
+      c = (c - 0.5) * uCon + 0.5;
+      c += uLift * (1.0 - c);
+      if (uUnder > 0.0) { float dd = smoothstep(0.0, 1.0, length(vUv - 0.5)); c = mix(c, vec3(0.05, 0.28, 0.38) + c * vec3(0.2, 0.5, 0.6), 0.55 * uUnder) * (1.0 - dd * 0.4 * uUnder); }
+      vec2 q = vUv - 0.5; float v = 1.0 - dot(q, q) * uVig; c *= v;
+      if (uHurt > 0.0) { float e = smoothstep(0.2, 0.75, length(q * vec2(1.3, 1.0))); c = mix(c, vec3(dot(c, vec3(0.33))), uHurt * 0.55); c = mix(c, vec3(0.55, 0.02, 0.02), e * uHurt * (0.45 + 0.2 * sin(uTime * 6.0))); }
+      c += (hsh(vUv * 913.7 + fract(uTime) * 37.0) - 0.5) / 160.0;
+      gl_FragColor = vec4(max(c, 0.0), 1.0); }`,
+    { tScene: { value: null }, tBloom: { value: null }, tRays: { value: null }, uBloom: { value: 0.6 }, uRays: { value: 0 }, uRayCol: { value: new THREE.Color(1, 0.9, 0.7) },
+      uExp: { value: 1 }, uSat: { value: 1 }, uCon: { value: 1 }, uTint: { value: new THREE.Vector3(1, 1, 1) }, uLift: { value: new THREE.Vector3() }, uVig: { value: 0.9 }, uTime: GU.uTime, uUnder: { value: 0 }, uHurt: { value: 0 }, uHdr: { value: 1 }, uHeat: { value: 0 }, uHorY: { value: 0.5 } });
+  PP.grade = { exp: 1, sat: 1, con: 1, tint: new THREE.Vector3(1, 1, 1), lift: new THREE.Vector3(), bloom: 0.6, rays: 0, hurt: 0 };
+}
+function ppResize() {
+  if (!PP.ok) return;
+  const v = R.renderer.getDrawingBufferSize(new THREE.Vector2()), w = Math.max(2, v.x | 0), h = Math.max(2, v.y | 0), Q = R.Q || GFXQ[3];
+  const samples = Math.min(Q.msaa, R.renderer.capabilities.maxSamples || 4);
+  if (PP.w === w && PP.h === h && PP.samples === samples) return;
+  PP.w = w; PP.h = h; PP.samples = samples;
+  const dispose = t => t && t.dispose();
+  dispose(PP.rtScene); (PP.rtB || []).forEach(dispose); dispose(PP.rtM); dispose(PP.rtR);
+  const opt = { format: THREE.RGBAFormat, type: PP.type, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false };
+  if (samples > 0) { PP.rtScene = new THREE.WebGLMultisampleRenderTarget(w, h, { format: THREE.RGBAFormat, type: PP.type }); PP.rtScene.samples = samples; }
+  else PP.rtScene = new THREE.WebGLRenderTarget(w, h, { format: THREE.RGBAFormat, type: PP.type });
+  PP.rtB = []; let bw = w, bh = h;
+  for (let i = 0; i < 6; i++) { bw = Math.max(2, bw >> 1); bh = Math.max(2, bh >> 1); PP.rtB.push(new THREE.WebGLRenderTarget(bw, bh, opt)); }
+  PP.rtM = new THREE.WebGLRenderTarget(Math.max(2, w >> 2), Math.max(2, h >> 2), opt); PP.rtR = new THREE.WebGLRenderTarget(Math.max(2, w >> 2), Math.max(2, h >> 2), opt);
+}
+function ppPass(mat, target) { PP.quad.material = mat; R.renderer.setRenderTarget(target); R.renderer.render(PP.scene, PP.cam); }
+const _sp = new THREE.Vector3(), _cf = new THREE.Vector3();
+function gfxRender() {
+  const r = R.renderer;
+  if (!PP.on) { r.setRenderTarget(null); r.render(R.scene, R.camera); return; }
+  ppResize();
+  r.setRenderTarget(PP.rtScene); r.render(R.scene, R.camera);
+  const src = PP.rtScene.texture, B = PP.rtB, gr = PP.grade;
+  // bloom
+  PP.bright.uniforms.tSrc.value = src; PP.bright.uniforms.uTex.value.set(1 / PP.w, 1 / PP.h);
+  PP.bright.uniforms.uTh.value = PP.hdr ? 1.8 : 0.9; PP.bright.uniforms.uKnee.value = PP.hdr ? 0.4 : 0.08;
+  ppPass(PP.bright, B[0]);
+  for (let i = 1; i < B.length; i++) { PP.down.uniforms.tSrc.value = B[i - 1].texture; PP.down.uniforms.uTex.value.set(1 / B[i - 1].width, 1 / B[i - 1].height); ppPass(PP.down, B[i]); }
+  r.autoClear = false;
+  for (let i = B.length - 1; i > 0; i--) { PP.up.uniforms.tSrc.value = B[i].texture; PP.up.uniforms.uTex.value.set(1 / B[i].width, 1 / B[i].height); PP.up.uniforms.uW.value = 0.85; ppPass(PP.up, B[i - 1]); }
+  r.autoClear = true;
+  // sun shafts
+  let rays = 0;
+  if ((R.Q || GFXQ[3]).rays && gr.rays > 0.01) {
+    R.camera.getWorldDirection(_cf); const fd = _cf.dot(GU.fgSunDir.value);
+    if (fd > 0.05) {
+      _sp.copy(R.camera.position).addScaledVector(GU.fgSunDir.value, 500).project(R.camera);
+      const sx = _sp.x * 0.5 + 0.5, sy = _sp.y * 0.5 + 0.5;
+      rays = gr.rays * sstep(0.05, 0.45, fd) * sstep(1.6, 0.6, Math.max(Math.abs(_sp.x), Math.abs(_sp.y)));
+      if (rays > 0.01) {
+        PP.mask.uniforms.tSrc.value = src; PP.mask.uniforms.uSun.value.set(sx, sy); PP.mask.uniforms.uAsp.value = PP.w / PP.h; ppPass(PP.mask, PP.rtM);
+        PP.rays.uniforms.tSrc.value = PP.rtM.texture; PP.rays.uniforms.uSun.value.set(sx, sy); ppPass(PP.rays, PP.rtR);
+      }
+    }
+  }
+  const u = PP.comp.uniforms;
+  u.tScene.value = src; u.tBloom.value = B[0].texture; u.tRays.value = PP.rtR.texture; u.uRays.value = rays;
+  u.uBloom.value = gr.bloom * (PP.hdr ? 1 : 0.6); u.uExp.value = gr.exp; u.uSat.value = gr.sat; u.uCon.value = gr.con; u.uTint.value.copy(gr.tint); u.uLift.value.copy(gr.lift);
+  u.uRayCol.value.copy(GU.fgSunCol.value); u.uHurt.value = gr.hurt;
+  u.uUnder.value = R.camera.position.y < R.water.position.y - 0.02 && Math.abs(R.camera.position.x) < 400 ? 1 : 0;
+  R.camera.getWorldDirection(_cf); _cf.y = 0; _cf.normalize(); _sp.copy(R.camera.position).addScaledVector(_cf, 600); _sp.y = R.camera.position.y; _sp.project(R.camera);
+  u.uHorY.value = _sp.y * 0.5 + 0.5; u.uHeat.value = gr.heat || 0;
+  ppPass(PP.comp, null);
+}
+/* the colour grade drifts smoothly toward a look that suits the place, the hour and the weather */
+const _gt = new THREE.Vector3(), _gl = new THREE.Vector3(), _gv = new THREE.Vector3();
+function gradeUpdate(dt) {
+  const gr = PP.grade, night = GU.uNight.value, wet = R.overcast || 0, h = G.hour;
+  const gold = (sstep(5.4, 6.6, h) * sstep(9.0, 7.0, h)) + (sstep(16.3, 18.0, h) * sstep(20.5, 19.0, h));
+  let exp = 0.96, sat = 1.0, con = 1.06, bloom = 0.7;
+  _gt.set(1, 1, 1); _gl.set(0, 0, 0);
+  if (R.biome === 'desert') { _gt.set(1.05, 1.0, 0.9); sat = 1.06; }
+  else if (R.biome === 'snow') { _gt.set(0.95, 0.99, 1.06); sat = 0.95; exp = 0.97; }
+  else { _gt.set(1.0, 1.0, 0.96); sat = 0.95; }
+  _gt.lerp(_gv.set(1.07, 0.98, 0.88), gold * 0.75); con += gold * 0.05; sat += gold * 0.06;
+  _gt.lerp(_gv.set(0.84, 0.92, 1.16), night); sat = lerp(sat, 0.8, night); _gl.set(0.0, 0.012, 0.03).multiplyScalar(night); bloom += night * 0.25;
+  sat *= 1 - wet * 0.2; con -= wet * 0.03;
+  if (R.raid && night > 0.4) { _gt.lerp(_gv.set(1.12, 0.86, 0.84), 0.6); }
+  const hurt = G.p && R.started && G.p.hp < 30 ? (30 - G.p.hp) / 30 : 0;
+  const k = Math.min(1, dt * 0.8);
+  gr.exp = lerp(gr.exp, exp, k); gr.sat = lerp(gr.sat, sat, k); gr.con = lerp(gr.con, con, k); gr.tint.lerp(_gt, k); gr.lift.lerp(_gl, k); gr.bloom = lerp(gr.bloom, bloom, k);
+  gr.rays = lerp(gr.rays, (1 - night) * (0.35 + gold * 0.75) * (1 - wet * 0.7), k);
+  gr.heat = lerp(gr.heat || 0, R.biome === 'desert' ? sstep(9, 12, h) * sstep(18, 15.5, h) * (1 - wet) : 0, Math.min(1, dt * 0.5)); gr.hurt = lerp(gr.hurt, hurt, Math.min(1, dt * 3));
+}
+
+/* ---------- lights: a fixed pool (no shader rebuilds), the nearest campfire can cast shadows on Ultra ---------- */
+function gfxLightPool(n, fireShadow) {
+  for (const L of R.lightPool) { R.scene.remove(L); if (L.shadow && L.shadow.map) L.shadow.map.dispose(); }
+  R.lightPool.length = 0;
+  for (let i = 0; i < n; i++) {
+    const L = new THREE.PointLight(0xff9a48, 0, 22, 1.7); L.userData.base = 1; L.userData.on = false; L.position.set(0, -50, 0);
+    if (i === 0 && fireShadow) { L.castShadow = true; L.shadow.mapSize.set(512, 512); L.shadow.bias = -0.004; L.shadow.camera.near = 0.3; L.shadow.camera.far = 28; }
+    R.scene.add(L); R.lightPool.push(L);
+  }
+}
+
+/* ---------- per-frame graphics update ---------- */
+function gfxUpdate(dt) {
+  GU.uTime.value = R.t; GU.uCamPos.value.copy(R.camera.position);
+  const storm = G.weather === 'storm', rain = G.weather === 'rain', night = GU.uNight.value, forest = R.biome === 'forest', desert = R.biome === 'desert';
+  const wa = (storm ? 2.3 : rain ? 1.2 : G.weather === 'cloudy' ? 0.75 : 0.45) + (desert ? 0.25 : 0) + (R.biome === 'snow' ? 0.3 : 0);
+  GU.uWindAmp.value = lerp(GU.uWindAmp.value, wa * (0.85 + 0.15 * Math.sin(R.t * 0.21)), Math.min(1, dt * 0.4));
+  const wd = 0.45 + Math.sin(R.t * 0.013) * 0.7; GU.uWind.value.set(Math.cos(wd), 0, Math.sin(wd));
+  GU.uPlayer.value.set(G.p.x, G.p.y, G.p.z);
+  const wetT = (rain || storm) && R.biome !== 'snow' ? 1 : 0;
+  GU.uWet.value = clamp(GU.uWet.value + (wetT ? dt / 25 : -dt / 120), 0, 1);
+  if (GFX.noGrassDirty) gfxStampGrass();
+  const Q = R.Q || GFXQ[3];
+  // ambient particles
+  const vis = (m, on, op) => { m.visible = on && op > 0.01; if (m.visible) m.material.uniforms.uOp.value = op; };
+  vis(R.fireflies, forest && Q.part > 0.5, night * (1 - (R.overcast || 0)) * 1.0);
+  vis(R.motes, forest, (1 - night) * (1 - (R.overcast || 0)) * 0.45);
+  vis(R.dust, desert, (1 - night * 0.6) * 0.45 * GU.uWindAmp.value);
+  R.fireflies.geometry.setDrawRange(0, Math.floor(R.fireflies.userData.n * Q.part));
+  R.motes.geometry.setDrawRange(0, Math.floor(R.motes.userData.n * Q.part));
+  R.dust.geometry.setDrawRange(0, Math.floor(R.dust.userData.n * Q.part));
+  // glowing things
+  MAT_GLOW.emissiveIntensity = 0.75 + 0.35 * Math.sin(R.t * 1.7) + night * 1.3;
+  if (R.towerLamp) R.towerLamp.material.color.setRGB(4, 0.5, 0.3);
+  for (const c of R.creatures) { const e = c.model && c.model.eye; if (e) { if (!e.userData.base) e.userData.base = e.color.clone(); e.color.copy(e.userData.base).multiplyScalar(1 + night * 3.5); } }
+  // fires for embers
+  const src = GFX.fireSrc || (GFX.fireSrc = []); src.length = 0;
+  for (const s of G.structures) if ((s.k === 'campfire' && s.d.lit) || s.k === 'torchpost') { const d = dist2(s.x, s.z, G.p.x, G.p.z); if (d < 45) src.push({ x: s.x, y: s.y + (s.k === 'torchpost' ? 2.2 : 0.4), z: s.z, d, big: s.k === 'campfire' }); }
+  for (const f of R.worldFires) { const d = dist2(f.x, f.z, G.p.x, G.p.z); if (d < 45) src.push({ x: f.x, y: f.y + 0.6, z: f.z, d, big: false }); }
+  updateLife(dt);
+  if (PP.on) gradeUpdate(dt);
+  // automatic step-down if the computer is struggling (only until the player picks a setting)
+  if (R.started && !R.panel && !R.sleeping && !R.gfxManual && !R.gfxTuned && R.quality > 1) {
+    GFX.fpsT = (GFX.fpsT || 0) + dt; if (GFX.fpsT > 4) GFX.fpsN = (GFX.fpsN || 0) + 1;
+    if (GFX.fpsT > 14) {
+      const fps = GFX.fpsN / (GFX.fpsT - 4); GFX.fpsT = 0; GFX.fpsN = 0;
+      if (fps < 30) { setQuality(R.quality - 1); saveSettings(); toast('🖥️ Graphics set to <b>' + GFXQ[R.quality].n + '</b> so the game runs smoothly. You can change this in Settings.', 'tip', 7000); if (R.quality <= 2) R.gfxTuned = true; }
+      else R.gfxTuned = true;
+    }
+  } else if (R.panel || R.sleeping) { GFX.fpsT = 0; GFX.fpsN = 0; }
+}
+
+/* =========================================================================
+   03_data: items, recipes, buildings, creatures, story text — content only
+   ========================================================================= */
+const ITEMS = {
+  // resources
+  wood: { n: 'Wood', e: ['🪵', '🌳'], d: 'Logs from chopped trees. For building and fuel.' },
+  stick: { n: 'Stick', e: ['🥢'], d: 'Found on the ground and in chopped trees.' },
+  stone: { n: 'Stone', e: ['🪨', '🌑'], d: 'Loose stones, or mine boulders with a pickaxe.' },
+  flint: { n: 'Flint', e: ['🔺'], d: 'Sharp stone for spear tips and arrowheads.' },
+  fibre: { n: 'Fibre', e: ['🌾'], d: 'Tough plant fibre from reeds.' },
+  rope: { n: 'Rope', e: ['🪢', '➰'], d: 'Twisted fibre. Holds everything together.' },
+  hide: { n: 'Hide', e: ['🟫', '🔶'], d: 'Animal hide from deer and goats.' },
+  fur: { n: 'Fur', e: ['🧶'], d: 'Thick fur from wolves and bears. Very warm.' },
+  fang: { n: 'Fang', e: ['🦷'], d: 'A wolf fang. Looks fierce on a necklace.' },
+  chitin: { n: 'Scorpion Shell', e: ['🦂'], d: 'Hard plates from desert scorpions.' },
+  ore: { n: 'Iron Ore', e: ['🟤', '🧱'], d: 'Rusty rock. Smelt it in a furnace.' },
+  iron: { n: 'Iron Bar', e: ['🔩'], d: 'Smelted iron for the best tools.' },
+  crystal: { n: 'Glow Crystal', e: ['💎'], d: 'A glowing crystal from under Frostpeak.' },
+  // food
+  berries: { n: 'Berries', e: ['🫐', '🍇'], d: 'A small snack. Safe to eat raw.', food: { food: 6, water: 3 } },
+  mushroom: { n: 'Mushroom', e: ['🍄'], d: 'Edible raw, far better roasted.', food: { food: 5 }, cook: 'roastshroom' },
+  roastshroom: { n: 'Roast Mushroom', e: ['🍢'], d: 'Smoky and filling.', food: { food: 15 } },
+  rawmeat: { n: 'Raw Meat', e: ['🥩'], d: 'Cook it first! Raw meat makes you sick.', food: { food: 10, hp: -8 }, cook: 'meat' },
+  meat: { n: 'Cooked Meat', e: ['🍖'], d: 'Hot and delicious. Scout loves it too.', food: { food: 38 } },
+  rawfish: { n: 'Raw Fish', e: ['🐟'], d: 'Cook it on a fire.', food: { food: 8, hp: -5 }, cook: 'fish' },
+  fish: { n: 'Cooked Fish', e: ['🍤'], d: 'Flaky and tasty.', food: { food: 32, water: 4 } },
+  cactusfruit: { n: 'Cactus Fruit', e: ['🌵'], d: 'Juicy. Food and drink in one.', food: { food: 8, water: 18 } },
+  coconut: { n: 'Coconut', e: ['🥥'], d: 'Full of coconut water.', food: { food: 10, water: 26 } },
+  stew: { n: 'Hearty Stew', e: ['🍲'], d: 'The best meal on the island. Heals you too.', food: { food: 65, water: 20, hp: 25 } },
+  herb: { n: 'Healing Herb', e: ['🌺'], d: 'Chew it for a little health, or make a bandage.', food: { hp: 8 } },
+  bandage: { n: 'Bandage', e: ['🩹', '➕'], d: 'Restores a big chunk of health.', food: { hp: 40 } },
+  // tools and weapons
+  axe: { n: 'Stone Axe', e: ['🪓', '🔨'], d: 'Chops trees.', tool: { slot: 'axe', cls: 'axe', dmg: 12, reach: 2.9, power: 1, tier: 1 } },
+  ironaxe: { n: 'Iron Axe', e: ['🪓', '🔨'], d: 'Fells a tree in two swings.', bg: '#6d8aa8', tool: { slot: 'axe', cls: 'axe', dmg: 22, reach: 2.9, power: 3, tier: 2 } },
+  pick: { n: 'Stone Pickaxe', e: ['⛏️'], d: 'Breaks boulders and iron rock.', tool: { slot: 'pick', cls: 'pick', dmg: 10, reach: 2.9, power: 1, tier: 1 } },
+  ironpick: { n: 'Iron Pickaxe', e: ['⛏️'], d: 'Cuts crystal — and digs through cave-ins.', bg: '#6d8aa8', tool: { slot: 'pick', cls: 'pick', dmg: 16, reach: 2.9, power: 3, tier: 2 } },
+  spear: { n: 'Spear', e: ['🔱'], d: 'Long reach. Good for hunting.', tool: { slot: 'melee', cls: 'spear', dmg: 20, reach: 3.6, tier: 1 } },
+  sword: { n: 'Iron Sword', e: ['🗡️'], d: 'Fast and strong.', bg: '#6d8aa8', tool: { slot: 'melee', cls: 'sword', dmg: 34, reach: 3.1, tier: 2 } },
+  crystalspear: { n: 'Crystal Spear', e: ['🔱'], d: 'A glowing spear tipped with Frostpeak crystal.', bg: '#3fb6c9', tool: { slot: 'melee', cls: 'spear', dmg: 50, reach: 3.8, tier: 3, glow: 0x55e0ff } },
+  stormspear: { n: 'Storm Spear', e: ['⚡'], d: 'The island\'s gift. Every hit calls lightning.', bg: '#d9a520', tool: { slot: 'melee', cls: 'spear', dmg: 85, reach: 4, tier: 4, glow: 0xffe066, storm: true } },
+  bow: { n: 'Bow', e: ['🏹'], d: 'Shoots arrows. Left click to fire.', tool: { slot: 'bow', cls: 'bow', dmg: 28, tier: 1 } },
+  arrow: { n: 'Arrow', e: ['🪶', '🎯'], d: 'Ammo for the bow.' },
+  torch: { n: 'Torch', e: ['🔥'], d: 'Lights the dark and scares wolves away while you hold it.', tool: { slot: 'torch', cls: 'torch', dmg: 6, reach: 2.6, tier: 1 } },
+  rod: { n: 'Fishing Rod', e: ['🎣'], d: 'Aim at water and left click to cast.', tool: { slot: 'rod', cls: 'rod', dmg: 3, reach: 2.6, tier: 1 } },
+  canteen: { n: 'Canteen', e: ['🧴', '🍶'], d: 'Carries 5 drinks. Fill it at any water. Press G to drink.' },
+  // wearables (worn automatically)
+  vest: { n: 'Hide Vest', e: ['🦺'], d: 'Blocks a quarter of all damage.', wear: { armor: 0.25 } },
+  chitinarmor: { n: 'Shell Armour', e: ['🛡️'], d: 'Scorpion plates. Blocks 40% of damage.', bg: '#b0763a', wear: { armor: 0.4 } },
+  coat: { n: 'Fur Coat', e: ['🧥'], d: 'Keeps you warm on Frostpeak.', wear: { warm: 24 } },
+  necklace: { n: 'Fang Necklace', e: ['📿'], d: '+25% weapon damage. Wolves think twice.', wear: { dmg: 1.25 } },
+  // story
+  coil: { n: 'Power Coil', e: ['⚙️'], d: 'Radio part 1 of 3.', bg: '#b8860b', story: true },
+  battery: { n: 'Battery', e: ['🔋'], d: 'Radio part 2 of 3.', bg: '#b8860b', story: true },
+  antenna: { n: 'Antenna', e: ['📡'], d: 'Radio part 3 of 3.', bg: '#b8860b', story: true },
+  idol: { n: 'Golden Idol', e: ['🗿'], d: 'One of ten. They belong at the Stone Circle.', bg: '#d9a520', story: true }
+};
+const HOTBAR = ['hands', 'axe', 'pick', 'melee', 'bow', 'torch', 'rod'];
+const HANDS = { n: 'Hands', e: ['✋'], tool: { slot: 'hands', cls: 'hands', dmg: 4, reach: 2.5, power: 0, tier: 0 } };
+
+/* station: null = craft anywhere, 'bench' = near a Workbench, 'furnace', 'fire' = near a lit campfire */
+const RECIPES = [
+  { id: 'axe', cost: { stick: 2, stone: 2, fibre: 1 }, xp: 10 },
+  { id: 'pick', cost: { stick: 2, stone: 3, fibre: 1 }, xp: 10 },
+  { id: 'spear', cost: { stick: 3, flint: 1, fibre: 1 }, xp: 10 },
+  { id: 'torch', cost: { stick: 2, fibre: 2 }, xp: 8 },
+  { id: 'rope', cost: { fibre: 3 }, xp: 3 },
+  { id: 'bandage', cost: { fibre: 2, herb: 1 }, xp: 4 },
+  { id: 'arrow', n: 4, cost: { stick: 2, flint: 1 }, xp: 4 },
+  { id: 'rod', cost: { stick: 3, rope: 1, flint: 1 }, xp: 10 },
+  { id: 'canteen', cost: { hide: 2, rope: 1 }, xp: 10 },
+  { id: 'bow', cost: { stick: 4, rope: 2 }, station: 'bench', xp: 15 },
+  { id: 'vest', cost: { hide: 4, rope: 1 }, station: 'bench', xp: 15 },
+  { id: 'coat', cost: { fur: 4, hide: 2, rope: 1 }, station: 'bench', xp: 25 },
+  { id: 'necklace', cost: { fang: 3, rope: 1 }, station: 'bench', xp: 15 },
+  { id: 'chitinarmor', cost: { chitin: 6, rope: 2 }, station: 'bench', xp: 30 },
+  { id: 'ironaxe', cost: { iron: 2, stick: 2, rope: 1 }, station: 'bench', xp: 30 },
+  { id: 'ironpick', cost: { iron: 3, stick: 2, rope: 1 }, station: 'bench', xp: 30 },
+  { id: 'sword', cost: { iron: 4, stick: 1, hide: 1 }, station: 'bench', xp: 40 },
+  { id: 'crystalspear', cost: { crystal: 3, iron: 2, rope: 1 }, station: 'bench', xp: 60 },
+  { id: 'iron', cost: { ore: 2, wood: 1 }, station: 'furnace', xp: 6 },
+  { id: 'meat', cost: { rawmeat: 1 }, station: 'fire', xp: 3 },
+  { id: 'fish', cost: { rawfish: 1 }, station: 'fire', xp: 3 },
+  { id: 'roastshroom', cost: { mushroom: 1 }, station: 'fire', xp: 2 },
+  { id: 'stew', cost: { rawmeat: 1, mushroom: 1, berries: 2 }, station: 'fire', xp: 8 }
+];
+
+/* place: 'free' anywhere, 'cell' snaps to the 3m build grid, 'edge' snaps to a grid edge */
+const BUILDS = [
+  { id: 'campfire', n: 'Campfire', e: ['🔥'], cost: { stone: 3, stick: 4 }, place: 'free', d: 'Warmth, light, cooking. Wolves stay away from a lit fire.' },
+  { id: 'shelter', n: 'Lean-to Shelter', e: ['⛺'], cost: { stick: 6, fibre: 4 }, place: 'free', d: 'Sleep here to skip the night. Keeps the rain off.' },
+  { id: 'bench', n: 'Workbench', e: ['🛠️', '🔨'], cost: { wood: 6, stone: 2 }, place: 'free', d: 'Unlocks bows, armour and iron tools.' },
+  { id: 'chest', n: 'Storage Chest', e: ['📦'], cost: { wood: 6, rope: 1 }, place: 'free', d: 'Keeps your things safe if you black out.' },
+  { id: 'floor', n: 'Wood Floor', e: ['🟫', '⬛'], cost: { wood: 2 }, place: 'cell', d: 'A flat floor. Start your cabin here.' },
+  { id: 'wall', n: 'Wood Wall', e: ['🧱'], cost: { wood: 3 }, place: 'edge', d: 'Keeps creatures out.' },
+  { id: 'door', n: 'Doorway', e: ['🚪'], cost: { wood: 3 }, place: 'edge', d: 'A wall with a door-sized gap.' },
+  { id: 'roof', n: 'Thatch Roof', e: ['🏠'], cost: { wood: 2, fibre: 2 }, place: 'cell', d: 'Shelter from rain and cold. Fires stay lit under it.' },
+  { id: 'bed', n: 'Bed', e: ['🛏️'], cost: { wood: 4, fibre: 3, hide: 2 }, place: 'free', d: 'The best sleep. You wake up here if you black out.' },
+  { id: 'spikes', n: 'Spike Barricade', e: ['🗡️'], cost: { stick: 6, wood: 1 }, place: 'free', d: 'Hurts any creature that runs into it.' },
+  { id: 'torchpost', n: 'Torch Post', e: ['🕯️'], cost: { stick: 3, fibre: 2 }, place: 'free', d: 'A standing torch. Lights your base and scares wolves.' },
+  { id: 'furnace', n: 'Furnace', e: ['🏭', '🧱'], cost: { stone: 10, wood: 2 }, place: 'free', d: 'Smelts iron ore into iron bars.' },
+  { id: 'collector', n: 'Rain Collector', e: ['🪣', '💧'], cost: { wood: 4, hide: 1 }, place: 'free', d: 'Fills with rain and dew. Fresh water at home.' },
+  { id: 'garden', n: 'Berry Garden', e: ['🌱'], cost: { wood: 3, berries: 6 }, place: 'free', d: 'Grows berries every day.' },
+  { id: 'flag', n: 'Camp Flag', e: ['🚩'], cost: { stick: 2, hide: 1 }, place: 'free', d: 'Marks your base on the map.' }
+];
+const BUILD_BY_ID = {}; BUILDS.forEach(b => BUILD_BY_ID[b.id] = b);
+
+/* creatures: speeds in m/s, senses in metres */
+const CREATURES = {
+  rabbit: { n: 'Rabbit', hp: 8, spd: 6.2, flee: 7, loot: { rawmeat: 1 }, xp: 5, passive: true, r: 0.35 },
+  deer: { n: 'Deer', hp: 28, spd: 7.0, flee: 10, loot: { rawmeat: 3, hide: 2 }, xp: 12, passive: true, r: 0.6 },
+  goat: { n: 'Mountain Goat', hp: 32, spd: 6.6, flee: 9, loot: { rawmeat: 2, hide: 1, fur: 1 }, xp: 12, passive: true, r: 0.55 },
+  wolf: { n: 'Wolf', hp: 42, spd: 6.5, dmg: 9, sense: 28, atk: 2.0, loot: { fur: 1, fang: 1 }, xp: 22, fearsFire: true, r: 0.55 },
+  snowwolf: { n: 'Snow Wolf', hp: 66, spd: 6.9, dmg: 13, sense: 30, atk: 2.0, loot: { fur: 2, fang: 1 }, xp: 32, fearsFire: true, r: 0.6 },
+  scorpion: { n: 'Giant Scorpion', hp: 34, spd: 3.7, dmg: 8, sense: 14, atk: 1.9, loot: { chitin: 1 }, xp: 16, r: 0.6 },
+  bear: { n: 'Bear', hp: 150, spd: 5.4, dmg: 19, sense: 15, atk: 2.4, loot: { fur: 3, rawmeat: 4 }, xp: 70, r: 0.95, leash: 40 },
+  grizzle: { n: 'Old Grizzle', boss: true, hp: 340, spd: 5.6, dmg: 21, sense: 24, atk: 2.9, loot: { fur: 5, rawmeat: 5, coil: 1 }, xp: 300, r: 1.4, leash: 48 },
+  duneking: { n: 'The Dune King', boss: true, hp: 460, spd: 4.6, dmg: 19, sense: 26, atk: 3.1, loot: { chitin: 8, battery: 1 }, xp: 400, r: 1.6, leash: 50 },
+  frostclaw: { n: 'Frostclaw', boss: true, hp: 640, spd: 5.9, dmg: 25, sense: 26, atk: 3.1, loot: { fur: 8, crystal: 2, antenna: 1 }, xp: 600, r: 1.5, leash: 46 }
+};
+
+/* ---- story text ---- */
+const NOTES = {
+  skipper: { t: 'Note from Skipper Jo', body: 'Sam!\n\nIf you find this, I made it to the lifeboat. The radio is smashed, so I\'m rowing for the mainland to get help. No ship can cross the reef until storm season ends — 100 DAYS from now.\n\nFind your Uncle Ray. His camp is NORTH-WEST of this cove. Look for his ORANGE WEATHER BALLOON above the trees.\n\nStay warm. Stay fed. Don\'t give up.\n\n— Skipper Jo' },
+  camp: { t: 'Ray\'s Field Journal', body: 'The lights on Frostpeak are back. Blue. Glowing right through the snow.\n\nScout barks at the mountain every night. I tried to radio the mainland but the tower is dead — three parts are missing.\n\nI\'m going up there to find out what those lights are. Sam arrives soon... I\'ll be back in time.\n\nI carved ARROWS in the trees. They lead to the Radio Tower on the big hill, in case anyone needs it.\n\nP.S. Scout hates being left behind. He will do anything for cooked meat.' },
+  arrow: { t: 'Carved in the bark', body: 'R ➜ TOWER\n\nKeep the big hill in front of you. The tower is right on top.' },
+  tower: { t: 'Tower Repair Log', body: 'Still dead. Three parts missing:\n\n1. POWER COIL — Old Grizzle, the giant bear, dragged my whole pack into his den in the WEST woods.\n\n2. BATTERY — the spare is in my locker at the Dust Flats outpost, to the EAST.\n\n3. ANTENNA — the blizzard ripped it off. It landed somewhere on the SUMMIT of Frostpeak, NORTH.\n\nGet all three and this tower will sing again.\n\n— Ray' },
+  pack: { t: 'Torn page from Ray\'s pack', body: '...and if I forget the locker code again: it\'s my lucky number, same as always. The year Dad taught me to fish.\n\nNINETY-FOUR.' },
+  outpost: { t: 'Outpost Notes', body: 'DESERT RULES\n\n1. The sun steals your water twice as fast. Carry a canteen.\n2. Cactus fruit is food AND drink.\n3. Scorpions are slow. Never stand still.\n4. The old mine south of here still has iron in the walls.\n5. Cold at night. Bring a torch.' },
+  locker: { t: 'Note inside the locker', body: 'The battery is GONE.\n\nClaw marks on the door. Giant tracks lead north to the Bone Yard. That monster scorpion — I call it the DUNE KING — collects anything that hums or shines.\n\nWhoever goes after it: take my bow. And water. Lots of water.\n\n— R.' },
+  oasis: { t: 'Message in a bottle', body: '(The paper is very, very old.)\n\n"We came for the glowing stones under the white mountain. The guardians of wood, sand and ice would not let us leave with them.\n\nTEN GOLDEN IDOLS we hid across this island. Return them all to the STONE CIRCLE and the island will give you its storm."' },
+  mine: { t: 'Mine Survey', body: 'Iron ore: plenty. Smelt it in a furnace.\n\nAn IRON PICKAXE is the only thing hard enough to cut Frostpeak crystal — or to dig through a cave-in.\n\n— R.' },
+  cabin: { t: 'Ray\'s Journal — Frostpeak', body: 'I found it.\n\nThe lights come from a cavern full of glowing crystals, right under the peak. The entrance is on the WEST face.\n\nI\'m going inside tomorrow with rope and a lamp. If the roof looks weak I\'ll turn back. Promise.\n\nThe big white bear at the summit — FROSTCLAW — has made a nest out of my antenna. I\'ll deal with that later.\n\nSpare furs are in the chest. This mountain will freeze you solid without a fur coat.' },
+  lake: { t: 'Ice Fishing Log', body: 'The biggest fish on the island live under this ice.\n\nDrop a line in the hole. Bring a fire. Mind the snow wolves.' },
+  summit: { t: 'Scratched into the mast', body: 'KESTREL ISLAND RELAY\nProperty of Ranger R. Rivera.\n\nIf found, please return to the Radio Tower.\n\n(Mind the bear.)' }
+};
+const DIALOGS = {
+  radio: ['The radio crackles... hisses... and then, a voice.', 'RAY: "...anyone? This is Ranger Ray Rivera. I\'m trapped in the crystal cavern under Frostpeak. Cave-in. I can\'t shift the rocks..."', 'You grab the microphone. "UNCLE RAY! It\'s SAM!"', 'RAY: "SAM?! You\'re ALIVE? You fixed the TOWER?! Ha!"', 'RAY: "Listen. West face of Frostpeak. You need an IRON PICKAXE to break through. And Sam... I\'m so proud of you."'],
+  rescue: ['The last rock crumbles. Blue light pours out of the cavern.', 'A man with a wild beard and a ranger hat stumbles out, blinking at the snow.', 'RAY: "Sam! LOOK at you! You crossed the whole island and climbed Frostpeak to find me?"', 'RAY: "I had three weeks of tinned beans and a lot of time to feel silly. You are the best thing I have ever seen."', 'RAY: "Meet me at the Radio Tower. Let\'s call home."'],
+  rayTowerNoRadio: ['RAY: "The tower still needs its three parts, kiddo. Power coil, battery, antenna. Get those and we can call home."'],
+  rayStay: ['RAY: "Then we stay. I\'ll keep the camp fed — you keep being a legend. The ship comes on Day 100."'],
+  rayIdle: ['RAY: "Day 100, kiddo. Until then, this island is ours. Have you found all ten golden idols yet?"']
+};
+const INTRO = [
+  ['THE STORM', 'You were on the supply boat <b>Petrel</b>, heading to spend the holidays with your Uncle Ray — the ranger of wild, faraway <b>Kestrel Island</b>.'],
+  ['THE REEF', 'Then the storm hit. The Petrel struck the reef in the dark. Skipper Jo threw you a life ring and shouted something you couldn\'t hear over the waves.'],
+  ['DAY ONE', 'You wake up on the sand. The boat is wrecked. Uncle Ray is nowhere to be seen.<br><br>You are <b>Sam Rivera</b>. You are eleven years old. And you are going to survive.']
+];
+const LANDMARKS = [
+  { id: 'cove', n: 'Shipwreck Cove', e: '⚓' }, { id: 'rayCamp', n: 'Uncle Ray\'s Camp', e: '🎈' }, { id: 'tower', n: 'Radio Tower', e: '📡' },
+  { id: 'mirror', n: 'Mirror Lake', e: '🐟' }, { id: 'den', n: 'Old Grizzle\'s Den', e: '🐻' }, { id: 'grotto', n: 'Hidden Grotto', e: '🌿' },
+  { id: 'wolfDen', n: 'Wolf Rocks', e: '🐺' }, { id: 'circle', n: 'Stone Circle', e: '🗿' }, { id: 'outpost', n: 'Dust Flats Outpost', e: '🏚️' },
+  { id: 'oasis', n: 'The Oasis', e: '🌴' }, { id: 'mine', n: 'Old Iron Mine', e: '⛏️' }, { id: 'boneyard', n: 'The Bone Yard', e: '🦂' },
+  { id: 'cabin', n: 'Ray\'s Cabin', e: '🛖' }, { id: 'icelake', n: 'Frozen Lake', e: '🧊' }, { id: 'crystal', n: 'Crystal Cavern', e: '💎' },
+  { id: 'summit', n: 'Frostpeak Summit', e: '🏔️' }
+];
+const BADGES = {
+  fire: ['🔥', 'Firestarter', 'Light your first campfire'], night: ['🌙', 'First Night', 'Sleep through a night'],
+  builder: ['🔨', 'Builder', 'Place 12 building pieces'], home: ['🏠', 'Home Sweet Home', 'Stand under your own roof'],
+  hunter: ['🏹', 'Hunter', 'Defeat 10 creatures'], angler: ['🎣', 'Angler', 'Catch 5 fish'], friend: ['🐕', 'Best Friend', 'Befriend Scout'],
+  iron: ['⚒️', 'Iron Age', 'Smelt your first iron bar'], moon: ['🌕', 'Wolf Moon Survivor', 'Survive a Wolf Moon'],
+  grizzle: ['🐻', 'Bear Wrestler', 'Defeat Old Grizzle'], duneking: ['🦂', 'King of the Dunes', 'Defeat the Dune King'], frostclaw: ['❄️', 'Frostbreaker', 'Defeat Frostclaw'],
+  explorer: ['🧭', 'Explorer', 'Discover every landmark'], treasure: ['💰', 'Treasure Hunter', 'Open all 10 treasure chests'], storm: ['⚡', 'Stormcaller', 'Earn the Storm Spear'],
+  radio: ['📡', 'On the Air', 'Repair the Radio Tower'], ray: ['🧔', 'Found Him', 'Rescue Uncle Ray'],
+  d10: ['🔟', '10 Days', 'Survive to Day 10'], d25: ['🏕️', '25 Days', 'Survive to Day 25'], d50: ['⭐', '50 Days', 'Survive to Day 50'], d100: ['👑', '100 Days', 'Survive to Day 100']
+};
+const TIPS = [
+  'Wolves are scared of a lit torch. Hold one at night and they will run.', 'Only COOKED food fills you up properly.', 'Build walls around your bed. Creatures can\'t break them.',
+  'Every 10th night is a Wolf Moon. Get your base ready!', 'Scout can sniff out buried treasure. Pet him once a day.', 'Rain puts out fires that don\'t have a roof over them.',
+  'A stew is the best meal on the island — raw meat, a mushroom and two berries.', 'Sprint with SHIFT. Jump with SPACE.', 'The map (M) fills in as you explore.',
+  'Boss charging at you? Step sideways!', 'Fill your canteen before crossing the Dust Flats.', 'You need a Fur Coat before climbing Frostpeak.',
+  'Store spare items in a chest. You drop your pack if you black out.', 'A Rain Collector gives you fresh water right at your base.'
+];
+
+/* =========================================================================
+   04_nodes: trees, rocks, plants and pickups — placement, instancing, gathering
+   cls: tree (axe) | rock (pickaxe) | crystal (iron pickaxe) | pick (hands) | stay (hands, plant remains)
+   ========================================================================= */
+const NT = {
+  pine: { n: 'Pine Tree', cls: 'tree', hp: 5, col: 0.38, aim: 1.5, drops: { wood: 4, stick: 2 }, respawn: 5, xp: 3 },
+  oak: { n: 'Oak Tree', cls: 'tree', hp: 6, col: 0.42, aim: 1.5, drops: { wood: 5, stick: 2 }, respawn: 5, xp: 3 },
+  snowpine: { n: 'Snowy Pine', cls: 'tree', hp: 5, col: 0.38, aim: 1.5, drops: { wood: 4, stick: 1 }, respawn: 6, xp: 3 },
+  deadtree: { n: 'Dead Tree', cls: 'tree', hp: 3, col: 0.3, aim: 1.4, drops: { wood: 2, stick: 3 }, respawn: 8, xp: 2 },
+  palm: { n: 'Palm Tree', cls: 'stay', col: 0.3, aim: 1.6, verb: 'Shake down a coconut', drops: { coconut: 1 }, respawn: 2, xp: 1 },
+  cactus: { n: 'Cactus', cls: 'stay', col: 0.4, aim: 1.2, verb: 'Pick cactus fruit', drops: { cactusfruit: 2 }, respawn: 3, xp: 1 },
+  bush: { n: 'Berry Bush', cls: 'stay', aim: 0.6, verb: 'Pick berries', drops: { berries: 3 }, respawn: 3, xp: 1 },
+  boulder: { n: 'Boulder', cls: 'rock', hp: 4, col: 0.85, aim: 0.6, drops: { stone: 3 }, bonus: ['flint', 0.45], respawn: 7, xp: 3 },
+  ironrock: { n: 'Iron Rock', cls: 'rock', hp: 5, col: 0.85, aim: 0.6, drops: { ore: 2, stone: 1 }, respawn: 7, xp: 5 },
+  crystal: { n: 'Glow Crystal', cls: 'crystal', hp: 5, col: 0.6, aim: 0.7, drops: { crystal: 1 }, respawn: 12, xp: 10 },
+  reed: { n: 'Reeds', cls: 'pick', aim: 0.6, verb: 'Gather fibre', drops: { fibre: 2 }, respawn: 3, xp: 1 },
+  sticks: { n: 'Sticks', cls: 'pick', aim: 0.1, verb: 'Pick up sticks', drops: { stick: 2 }, respawn: 3, xp: 1 },
+  stones: { n: 'Loose Stones', cls: 'pick', aim: 0.1, verb: 'Pick up stones', drops: { stone: 2 }, respawn: 4, xp: 1 },
+  flintp: { n: 'Flint', cls: 'pick', aim: 0.1, verb: 'Pick up flint', drops: { flint: 1 }, respawn: 4, xp: 1 },
+  mushroom: { n: 'Mushrooms', cls: 'pick', aim: 0.1, verb: 'Pick mushrooms', drops: { mushroom: 1 }, respawn: 3, xp: 1 },
+  herb: { n: 'Healing Herb', cls: 'pick', aim: 0.2, verb: 'Pick herb', drops: { herb: 1 }, respawn: 4, xp: 1 }
+};
+const NODES = [];
+const NODE_MESH = {};
+const _white = new THREE.Color(1, 1, 1);
+
+function nodeGeos() {
+  const g = {};
+  g.pine = [merge([part(cyl(0.16, 0.27, 2.0, 5), 0x6b4a2b, [0, 1.0, 0]), part(cone(1.6, 2.4, 6), 0x2c6634, [0, 2.7, 0]), part(cone(1.25, 2.1, 6), 0x34753a, [0, 3.9, 0], [0, 0.5, 0]), part(cone(0.85, 1.8, 6), 0x3f8540, [0, 5.0, 0], [0, 1, 0])])];
+  g.snowpine = [merge([part(cyl(0.16, 0.27, 2.0, 5), 0x5a4030, [0, 1.0, 0]), part(cone(1.6, 2.4, 6), 0x2f5c48, [0, 2.7, 0]), part(cone(1.3, 2.1, 6), 0xdfe9f2, [0, 3.9, 0], [0, 0.5, 0]), part(cone(0.9, 1.8, 6), 0xf7fbff, [0, 5.0, 0], [0, 1, 0])])];
+  g.oak = [merge([part(cyl(0.22, 0.36, 2.3, 6), 0x5e4126, [0, 1.15, 0]), part(cyl(0.1, 0.14, 1.1, 5), 0x5e4126, [0.55, 2.4, 0.1], [0, 0, -0.9]),
+  part(ico(1.75, 1), 0x4a8c38, [0, 3.7, 0], null, [1, 0.85, 1], 0.09), part(ico(1.15, 0), 0x57993f, [1.25, 3.1, 0.35], [0.3, 0.5, 0], null, 0.09), part(ico(1.2, 0), 0x3f7c33, [-1.05, 3.2, -0.55], [0.6, 0.2, 0.4], null, 0.09), part(ico(0.95, 0), 0x61a445, [0.1, 4.75, -0.2], [0.2, 0.9, 0], null, 0.09)])];
+  g.deadtree = [merge([part(cyl(0.1, 0.24, 2.8, 5), 0x7d684e, [0, 1.4, 0]), part(cyl(0.05, 0.09, 1.3, 4), 0x7d684e, [0.42, 2.3, 0], [0, 0, -0.85]), part(cyl(0.04, 0.08, 1.1, 4), 0x715d45, [-0.36, 1.9, 0.1], [0.2, 0, 0.95]), part(cyl(0.03, 0.06, 0.9, 4), 0x7d684e, [0.05, 3.0, -0.25], [-0.6, 0, 0.15])])];
+  const leaves = []; for (let i = 0; i < 7; i++) { const a = i / 7 * TAU; leaves.push(part(box(2.1, 0.07, 0.55), i % 2 ? 0x4f9a3f : 0x5fae48, [0.62 + Math.cos(a) * 0.95, 4.42, -Math.sin(a) * 0.95], [0, a, -0.42])); }
+  g.palm = [merge([part(cyl(0.17, 0.22, 1.7, 6), 0x9a7a52, [0.03, 0.85, 0], [0, 0, -0.06]), part(cyl(0.15, 0.17, 1.6, 6), 0x8f7049, [0.2, 2.35, 0], [0, 0, -0.16]), part(cyl(0.13, 0.15, 1.5, 6), 0x9a7a52, [0.47, 3.75, 0], [0, 0, -0.24]), ...leaves]),
+  merge([part(sph(0.17, 6, 5), 0x6b4a2b, [0.45, 4.25, 0.18]), part(sph(0.17, 6, 5), 0x5e4126, [0.78, 4.22, -0.1]), part(sph(0.16, 6, 5), 0x6b4a2b, [0.6, 4.18, -0.25])])];
+  g.cactus = [merge([part(cyl(0.27, 0.31, 2.4, 7), 0x4c8c49, [0, 1.2, 0]), part(sph(0.27, 7, 4), 0x4c8c49, [0, 2.4, 0]), part(cyl(0.15, 0.15, 0.6, 6), 0x47854a, [0.5, 1.3, 0], [0, 0, Math.PI / 2]), part(cyl(0.15, 0.16, 0.9, 6), 0x4c8c49, [0.76, 1.72, 0]), part(cyl(0.14, 0.14, 0.5, 6), 0x47854a, [-0.45, 1.0, 0], [0, 0, Math.PI / 2]), part(cyl(0.14, 0.15, 0.7, 6), 0x4c8c49, [-0.68, 1.33, 0])]),
+  merge([part(sph(0.13, 6, 5), 0xe0457a, [0, 2.72, 0]), part(sph(0.11, 6, 5), 0xe0457a, [0.76, 2.25, 0]), part(sph(0.11, 6, 5), 0xd03a6c, [-0.68, 1.76, 0])])];
+  const bz = []; const bp = [[0.1, 0.95, 0.35], [0.62, 0.7, 0.45], [-0.45, 0.8, 0.3], [0.5, 0.75, -0.35], [-0.2, 1.0, -0.2], [-0.62, 0.55, -0.1], [0.3, 0.5, 0.68], [0.85, 0.5, 0.05]];
+  for (const p of bp) bz.push(part(sph(0.1, 6, 4), 0xe2334c, p, null, null, 0.1));
+  g.bush = [merge([part(ico(0.75, 0), 0x3c7c38, [0, 0.55, 0], [0.4, 0.3, 0], null, 0.1), part(ico(0.55, 0), 0x468a3d, [0.55, 0.42, 0.22], [0.1, 0.9, 0.3], null, 0.1), part(ico(0.55, 0), 0x357034, [-0.45, 0.45, -0.25], [0.7, 0.1, 0.2], null, 0.1)]), merge(bz)];
+  g.boulder = [merge([part(ico(1, 0), 0x8b8b87, [0, 0.45, 0], [0.4, 0.2, 0.1], [1.15, 0.78, 0.98], 0.13), part(ico(0.55, 0), 0x7e7e7b, [0.85, 0.25, 0.4], [0.9, 0.5, 0.2], [1, 0.8, 1], 0.13)])];
+  g.ironrock = [merge([part(ico(1, 0), 0x6d5f58, [0, 0.5, 0], [0.2, 0.7, 0.1], [1.1, 0.85, 1], 0.12), part(box(0.34, 0.3, 0.34), 0xc96a2c, [0.55, 0.85, 0.3], [0.5, 0.4, 0.2]), part(box(0.3, 0.26, 0.3), 0xd87a36, [-0.5, 0.7, 0.45], [0.2, 0.9, 0.5]), part(box(0.28, 0.3, 0.26), 0xb85c24, [0.1, 1.05, -0.4], [0.7, 0.2, 0.3]), part(box(0.24, 0.22, 0.24), 0xd87a36, [-0.25, 0.4, -0.85], [0.3, 0.3, 0.6])])];
+  const cr = (x, z, h, r, tx, tz, c) => [part(cyl(r, r * 1.15, h, 6), c, [x + tx * h * 0.25, h / 2, z + tz * h * 0.25], [tz * 0.5, 0, -tx * 0.5], null, 0.12), part(cone(r, r * 2, 6), c, [x + tx * h * 0.52, h + r * 0.75, z + tz * h * 0.52], [tz * 0.5, 0, -tx * 0.5], null, 0.12)];
+  g.crystal = [merge([...cr(0, 0, 1.5, 0.26, 0, 0, 0x6fe3ff), ...cr(0.42, 0.1, 0.95, 0.19, 0.7, 0.1, 0x57c8f5), ...cr(-0.36, 0.2, 0.8, 0.17, -0.6, 0.3, 0x86ecff), ...cr(0.05, -0.4, 0.7, 0.15, 0.1, -0.7, 0x57c8f5)])];
+  const rd = []; for (let i = 0; i < 7; i++) { const a = i * 2.4, r = 0.1 + (i % 3) * 0.12, h = 1.2 + (i % 4) * 0.22; rd.push(part(cone(0.05, h, 4), i % 2 ? 0xa3b356 : 0x8ea248, [Math.cos(a) * r, h / 2, Math.sin(a) * r], [Math.sin(a) * 0.12, 0, Math.cos(a) * 0.12])); if (i % 2 === 0) rd.push(part(box(0.07, 0.24, 0.07), 0x6b4a2b, [Math.cos(a) * r, h * 0.92, Math.sin(a) * r])); }
+  g.reed = [merge(rd)];
+  g.sticks = [merge([part(box(1.0, 0.07, 0.08), 0x7a5632, [0, 0.05, 0], [0, 0.3, 0]), part(box(0.9, 0.07, 0.07), 0x6b4a2b, [0.05, 0.1, 0.05], [0, -0.7, 0.05]), part(box(0.8, 0.06, 0.07), 0x86603a, [-0.05, 0.14, -0.02], [0, 1.4, -0.04])])];
+  g.stones = [merge([part(ico(0.2, 0), 0x9a9a96, [0, 0.12, 0], [0.3, 0, 0.5], [1.2, 0.8, 1], 0.12), part(ico(0.16, 0), 0x86868a, [0.3, 0.1, 0.12], [0.8, 0.2, 0], null, 0.12), part(ico(0.14, 0), 0xa3a39e, [-0.12, 0.08, 0.28], [0.1, 0.6, 0.3], null, 0.12)])];
+  g.flintp = [merge([part(cone(0.16, 0.26, 3), 0x2f353b, [0, 0.1, 0], [1.2, 0.3, 0.2]), part(cone(0.12, 0.2, 3), 0x4a535c, [0.2, 0.08, 0.1], [1.4, 1.2, 0])])];
+  g.mushroom = [merge([part(cyl(0.05, 0.07, 0.24, 6), 0xf1e6cf, [0, 0.12, 0]), part(cone(0.2, 0.16, 7), 0xd8402c, [0, 0.3, 0]), part(cyl(0.035, 0.05, 0.16, 6), 0xf1e6cf, [0.22, 0.08, 0.1]), part(cone(0.13, 0.11, 7), 0xe25a3a, [0.22, 0.2, 0.1])])];
+  g.herb = [merge([part(cyl(0.02, 0.03, 0.4, 4), 0x3f8a3c, [0, 0.2, 0]), part(ico(0.11, 0), 0xff6fae, [0, 0.45, 0]), part(box(0.26, 0.03, 0.1), 0x4a9a44, [0.1, 0.16, 0], [0, 0.4, 0.4]), part(box(0.26, 0.03, 0.1), 0x4a9a44, [-0.1, 0.22, 0.03], [0, -0.5, -0.4])])];
+  return g;
+}
+
+function placeNodes(scene) {
+  const occ = new Set();
+  const free = (x, z, sp) => { const k = Math.floor(x / sp) * 4096 + Math.floor(z / sp); if (occ.has(k)) return false; occ.add(k); return true; };
+  const inLake = (x, z, pad) => LAKES.some(L => Math.hypot(x - L.x, z - L.z) < L.r + pad);
+  const add = (t, x, z, s, ry) => { NODES.push({ t, x, z, y: heightAt(x, z), s: s || 1, ry: ry === undefined ? wr() * TAU : ry, hp: NT[t].hp || 1, gone: false }); };
+  /** scatter `count` nodes; ok(x,z,w,h) decides if a random spot is acceptable */
+  const scatter = (t, count, ok, smin, smax, sp, sitePad = 2.5) => {
+    let placed = 0, tries = 0;
+    while (placed < count && tries < count * 60) {
+      tries++;
+      const x = wrr(-320, 320), z = wrr(-320, 320), h = heightAt(x, z);
+      if (h < 1.25) continue;
+      if (inSite(x, z, sitePad) || inLake(x, z, -2)) continue;
+      const w = biomeW(x, z); if (!ok(x, z, w, h)) continue;
+      if (!free(x, z, sp || 2.4)) continue;
+      add(t, x, z, wrr(smin || 0.85, smax || 1.3)); placed++;
+    }
+  };
+  const dense = (x, z, o) => fbm(x * 0.022 + o, z * 0.022 + o, 2);
+  scatter('pine', 640, (x, z, w, h) => w.forest > 0.55 && h > 2.4 && dense(x, z, 3) > 0.40 && slopeAt(x, z) < 0.7, 0.85, 1.5);
+  scatter('oak', 250, (x, z, w, h) => w.forest > 0.6 && h > 2.4 && dense(x, z, 60) > 0.46 && slopeAt(x, z) < 0.6, 0.9, 1.4, 3.2);
+  scatter('snowpine', 300, (x, z, w, h) => w.snow > 0.55 && h < 44 && dense(x, z, 20) > 0.42 && slopeAt(x, z) < 0.8, 0.85, 1.45);
+  scatter('deadtree', 70, (x, z, w) => w.desert > 0.6, 0.8, 1.3);
+  scatter('cactus', 125, (x, z, w, h) => w.desert > 0.6 && h > 2.3 && slopeAt(x, z) < 0.5, 0.75, 1.35);
+  scatter('palm', 40, (x, z, w, h) => w.snow < 0.2 && h > 1.3 && h < 2.7, 0.9, 1.25, 4);
+  scatter('boulder', 120, (x, z, w) => w.forest > 0.5, 0.6, 1.5, 3);
+  scatter('boulder', 80, (x, z, w) => w.desert > 0.5, 0.7, 1.8, 3);
+  scatter('boulder', 100, (x, z, w) => w.snow > 0.5, 0.7, 1.9, 3);
+  scatter('ironrock', 34, (x, z, w, h) => w.desert > 0.6 && (slopeAt(x, z) > 0.3 || h > 9), 0.8, 1.2, 3);
+  scatter('ironrock', 18, (x, z, w, h) => w.snow > 0.6 && h > 14 && h < 40, 0.8, 1.2, 3);
+  scatter('crystal', 26, (x, z, w, h) => w.snow > 0.7 && h > 30, 0.8, 1.4, 3);
+  scatter('bush', 135, (x, z, w, h) => w.forest > 0.6 && h > 2.3, 0.85, 1.25);
+  scatter('reed', 150, (x, z, w, h) => w.snow < 0.3 && ((h < 3.0) || inLake(x, z, 10) || (w.forest > 0.6 && dense(x, z, 90) < 0.36)), 0.8, 1.3, 1.6);
+  scatter('sticks', 210, (x, z, w) => w.forest > 0.5, 0.85, 1.2, 1.6);
+  scatter('sticks', 50, (x, z, w) => w.forest < 0.5, 0.85, 1.2, 1.6);
+  scatter('stones', 190, () => true, 0.85, 1.3, 1.6);
+  scatter('flintp', 100, (x, z, w) => w.snow < 0.6, 0.9, 1.3, 1.6);
+  scatter('mushroom', 100, (x, z, w, h) => w.forest > 0.6 && dense(x, z, 3) > 0.44, 0.9, 1.4, 1.6);
+  scatter('herb', 75, (x, z, w) => w.snow < 0.3, 0.9, 1.3, 1.6);
+  // hand-placed clusters: a fair start, the oasis, the mine, the crystal cavern, the frozen lake
+  const ring = (t, cx, cz, r0, r1, n, s0, s1) => { for (let i = 0; i < n; i++) { const a = i / n * TAU + wrr(-0.3, 0.3), r = wrr(r0, r1), x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r; if (heightAt(x, z) > 1.2) add(t, x, z, wrr(s0 || 0.9, s1 || 1.2)); } };
+  const st = R.start;
+  ring('sticks', st.x, st.z - 14, 4, 16, 6); ring('stones', st.x, st.z - 14, 5, 17, 5); ring('reed', st.x, st.z - 16, 7, 18, 5);
+  ring('flintp', st.x, st.z - 14, 8, 18, 2); ring('mushroom', st.x, st.z - 26, 4, 14, 3); ring('bush', st.x, st.z - 30, 6, 16, 3);
+  ring('palm', LAKES[2].x, LAKES[2].z, 17, 22, 7, 0.95, 1.3); ring('reed', LAKES[2].x, LAKES[2].z, 15, 19, 8);
+  ring('ironrock', SITES.mine.x, SITES.mine.z, 6, 11, 9, 0.9, 1.3); ring('boulder', SITES.mine.x, SITES.mine.z, 11, 15, 6, 1.2, 1.9);
+  ring('crystal', SITES.crystal.x, SITES.crystal.z, 6, 11, 7, 0.9, 1.5); ring('crystal', SITES.summit.x, SITES.summit.z, 12, 17, 6, 1.1, 1.7);
+  ring('reed', LAKES[1].x, LAKES[1].z, 10, 14, 7); ring('reed', LAKES[0].x, LAKES[0].z, 27, 33, 14);
+  ring('herb', SITES.rayCamp.x, SITES.rayCamp.z, 10, 16, 3); ring('mushroom', SITES.grotto.x, SITES.grotto.z, 3, 6, 5);
+
+  // build one InstancedMesh (plus an optional overlay for fruit) per node type
+  const geos = nodeGeos(), counts = {};
+  for (const n of NODES) counts[n.t] = (counts[n.t] || 0) + 1;
+  for (const t in NT) {
+    const c = counts[t] || 0; if (!c) continue;
+    const mat = gfxNodeMat(t);
+    const m = windShadow(new THREE.InstancedMesh(geos[t][0], mat, c)); m.castShadow = NT[t].cls !== 'pick' || t === 'reed'; m.receiveShadow = true; m.frustumCulled = false;
+    let ov = null; if (geos[t][1]) { ov = windShadow(new THREE.InstancedMesh(geos[t][1], mat === MAT_GLOW ? MAT_VC : mat, c)); ov.frustumCulled = false; ov.receiveShadow = true; scene.add(ov); }
+    scene.add(m); NODE_MESH[t] = { m, ov, geo: geos[t][0], i: 0 };
+  }
+  const col = new THREE.Color();
+  NODES.forEach((n, idx) => {
+    const nm = NODE_MESH[n.t]; n.i = nm.i++; n.idx = idx;
+    setNodeMatrix(n, true, true);
+    const k = 0.86 + wr() * 0.28; col.setRGB(k, k * (0.96 + wr() * 0.08), k); nm.m.setColorAt(n.i, col); if (nm.ov) nm.ov.setColorAt(n.i, _white);
+    if (NT[n.t].col) n.col = addCollider({ x: n.x, z: n.z, r: NT[n.t].col * n.s });
+    shCell(n.x, n.z).nodes.push(n);
+  });
+  for (const t in NODE_MESH) { const nm = NODE_MESH[t]; nm.m.instanceMatrix.needsUpdate = true; if (nm.m.instanceColor) nm.m.instanceColor.needsUpdate = true; if (nm.ov) { nm.ov.instanceMatrix.needsUpdate = true; nm.ov.instanceColor.needsUpdate = true; } }
+  buildGrass(scene);
+}
+const _nm = new THREE.Matrix4(), _nq = new THREE.Quaternion(), _np = new THREE.Vector3(), _ns = new THREE.Vector3(), _ne = new THREE.Euler();
+function setNodeMatrix(n, showBase, showOverlay) {
+  const nm = NODE_MESH[n.t]; _ne.set(0, n.ry, 0); _nq.setFromEuler(_ne); _np.set(n.x, n.y - 0.05, n.z);
+  _ns.setScalar(showBase ? n.s : 0.0001); nm.m.setMatrixAt(n.i, _nm.compose(_np, _nq, _ns)); nm.m.instanceMatrix.needsUpdate = true;
+  if (nm.ov) { _ns.setScalar(showOverlay ? n.s : 0.0001); nm.ov.setMatrixAt(n.i, _nm.compose(_np, _nq, _ns)); nm.ov.instanceMatrix.needsUpdate = true; }
+}
+function buildGrass(scene) {
+  const geo = merge([part(cone(0.07, 0.55, 3), 0x58a53f, [0, 0.27, 0]), part(cone(0.06, 0.45, 3), 0x4c9638, [0.14, 0.22, 0.05], [0, 0, -0.3]), part(cone(0.06, 0.42, 3), 0x63b047, [-0.1, 0.2, 0.1], [0.3, 0, 0.3])]);
+  const N = 3400, m = new THREE.InstancedMesh(geo, MAT_VC, N); m.frustumCulled = false; m.receiveShadow = true;
+  const col = new THREE.Color(); let i = 0, tries = 0;
+  while (i < N && tries < N * 30) {
+    tries++; const x = wrr(-320, 320), z = wrr(-320, 320), h = heightAt(x, z); if (h < 2) continue;
+    const w = biomeW(x, z); if (w.snow > 0.4) continue; if (w.desert > 0.5 && wr() > 0.22) continue;
+    _ne.set(0, wr() * TAU, 0); _nq.setFromEuler(_ne); _np.set(x, h - 0.03, z); _ns.setScalar(wrr(0.8, 1.8));
+    m.setMatrixAt(i, _nm.compose(_np, _nq, _ns));
+    if (w.desert > 0.5) col.setRGB(1.5, 1.05, 0.6); else { const k = 0.8 + wr() * 0.4; col.setRGB(k, k, k * 0.9); }
+    m.setColorAt(i, col); i++;
+  }
+  m.count = i; m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; scene.add(m); R.grass = m;
+}
+
+/* ---------- gathering ---------- */
+function nodeNear(x, z, range, fn) {
+  const r = Math.ceil(range / SH_CELL);
+  for (let gx = -r; gx <= r; gx++) for (let gz = -r; gz <= r; gz++) {
+    const cell = SH.get(shKey(x + gx * SH_CELL, z + gz * SH_CELL)); if (!cell) continue;
+    for (const n of cell.nodes) if (!n.gone) fn(n);
+  }
+}
+function dropsOf(n, mult) {
+  const def = NT[n.t], out = {};
+  for (const k in def.drops) out[k] = Math.round(def.drops[k] * (mult || 1));
+  if (def.bonus && Math.random() < def.bonus[1]) out[def.bonus[0]] = 1;
+  return out;
+}
+function depleteNode(n, quiet) {
+  const def = NT[n.t];
+  n.gone = true; G.nodeState[n.idx] = G.day + def.respawn;
+  if (def.cls === 'stay') setNodeMatrix(n, true, false);
+  else { setNodeMatrix(n, false, false); if (n.col) n.col.off = true; }
+  if (quiet) return;
+  if (def.cls === 'tree') {
+    // a real mesh takes the instance's place and topples over
+    const m = new THREE.Mesh(NODE_MESH[n.t].geo, MAT_VC); m.position.set(n.x, n.y, n.z); m.rotation.y = n.ry; m.scale.setScalar(n.s); m.castShadow = true;
+    const a = Math.atan2(n.x - G.p.x, n.z - G.p.z), piv = new THREE.Group();
+    piv.position.copy(m.position); piv.rotation.order = 'YXZ'; piv.rotation.y = a; m.position.set(0, 0, 0); m.rotation.y = n.ry - a; piv.add(m);
+    R.scene.add(piv); R.fx.push({ kind: 'fall', m: piv, t: 0 }); sfx('treefall');
+  } else if (def.cls === 'rock' || def.cls === 'crystal') { puff(n.x, n.y + 0.6, n.z, def.cls === 'crystal' ? 0x9eeaff : 0x9a9a96, 12, { size: 0.35 }); }
+}
+function restoreNode(n) { n.gone = false; n.hp = NT[n.t].hp || 1; setNodeMatrix(n, true, true); if (n.col) n.col.off = false; delete G.nodeState[n.idx]; }
+function respawnNodes() {
+  for (const k in G.nodeState) {
+    if (G.nodeState[k] <= G.day) { const n = NODES[k]; if (!n) { delete G.nodeState[k]; continue; } if (dist2(n.x, n.z, G.p.x, G.p.z) > 30 || NT[n.t].cls === 'stay') restoreNode(n); }
+  }
+}
+function applyNodeState() { for (const k in G.nodeState) { const n = NODES[k], d = G.nodeState[k]; if (n) { depleteNode(n, true); G.nodeState[k] = d; } else delete G.nodeState[k]; } }
+/** hands-only pickup */
+function pickNode(n) {
+  const def = NT[n.t], d = dropsOf(n);
+  for (const k in d) give(k, d[k]);
+  depleteNode(n); addXP(def.xp); sfx('pickup'); swingNow(0.22);
+  if (n.t === 'palm') { puff(n.x + 0.6, n.y + 4.2, n.z, 0x5fae48, 5, { size: 0.2 }); }
+}
+/** one tool swing landing on a tree / rock / crystal */
+function hitNode(n, tool) {
+  const def = NT[n.t], isTree = def.cls === 'tree';
+  n.hp -= Math.max(1, tool.power);
+  sfx(isTree ? 'chop' : 'mine'); R.shake = Math.max(R.shake, 0.08);
+  puff(n.x + (G.p.x - n.x) * 0.25, G.p.y + 1.2, n.z + (G.p.z - n.z) * 0.25, isTree ? 0xb8905a : def.cls === 'crystal' ? 0xa6f0ff : 0xb0b0aa, 5, { size: 0.12, grow: 1, speed: 2.6, g: 9 });
+  if (n.hp <= 0) {
+    const d = dropsOf(n, tool.tier >= 2 ? 1.5 : 1);
+    for (const k in d) give(k, d[k]);
+    if (isTree) G.stats.wood++;
+    depleteNode(n); addXP(def.xp);
+  }
+}
+/** which tool class does this node need? null = hands */
+function nodeNeeds(n) { const c = NT[n.t].cls; return c === 'tree' ? 'axe' : c === 'rock' || c === 'crystal' ? 'pick' : null; }
+
+/* =========================================================================
+   05_models: procedural low-poly models — animals, people, tools, structures
+   ========================================================================= */
+const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
+const lam = c => litMat({ color: c });
+function bx(parent, mat, w, h, d, x, y, z, rx, ry, rz) {
+  const m = new THREE.Mesh(UNIT_BOX, mat); m.scale.set(w, h, d); m.position.set(x, y, z);
+  if (rx || ry || rz) m.rotation.set(rx || 0, ry || 0, rz || 0);
+  m.castShadow = true; parent.add(m); return m;
+}
+/** four-legged animal. forward is +Z, origin on the ground. */
+function quadruped(o) {
+  const g = new THREE.Group(), M = { main: lam(o.c), dark: lam(o.c2 || o.c), light: lam(o.c3 || o.c), eye: new THREE.MeshBasicMaterial({ color: o.eye || 0x111111 }) };
+  const [bw, bh, bl] = o.body, L = o.leg, T = o.legT, by = L + bh / 2;
+  const body = bx(g, M.main, bw, bh, bl, 0, by, 0);
+  if (o.back) bx(g, M.dark, bw * 0.7, bh * 0.25, bl * 0.9, 0, by + bh * 0.45, -bl * 0.03);
+  if (o.belly) bx(g, M.light, bw * 0.8, bh * 0.3, bl * 0.8, 0, by - bh * 0.4, 0);
+  if (o.hump) bx(g, M.dark, bw * 0.8, bh * 0.4, bl * 0.4, 0, by + bh * 0.55, bl * 0.2);
+  const legs = [];
+  for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+    const p = new THREE.Group(); p.position.set(sx * (bw / 2 - T / 2), L, sz * (bl / 2 - T * 0.7)); g.add(p);
+    bx(p, M.dark, T, L, T, 0, -L / 2, 0); legs.push(p);
+  }
+  const head = new THREE.Group(); head.position.set(0, by + bh * (o.headUp === undefined ? 0.3 : o.headUp), bl / 2 + (o.neck || 0)); g.add(head);
+  if (o.neck) bx(g, M.main, bw * 0.5, o.neck * 1.6, bw * 0.5, 0, by + bh * 0.3, bl / 2, 0.6, 0, 0);
+  const [hw, hh, hl] = o.head; bx(head, M.main, hw, hh, hl, 0, 0, hl / 2);
+  if (o.snout) bx(head, M.light, o.snout[0], o.snout[1], o.snout[2], 0, -hh * 0.18, hl + o.snout[2] / 2 - 0.02);
+  bx(head, M.eye, 0.05, 0.05, 0.03, hw * 0.3, hh * 0.15, hl + 0.005); bx(head, M.eye, 0.05, 0.05, 0.03, -hw * 0.3, hh * 0.15, hl + 0.005);
+  if (o.snout) bx(head, lam(0x1a1a1a), o.snout[0] * 0.45, o.snout[1] * 0.4, 0.04, 0, -hh * 0.1, hl + o.snout[2]);
+  const e = o.ears || 'point';
+  if (e === 'point') { bx(head, M.dark, 0.09, 0.16, 0.06, hw * 0.32, hh / 2 + 0.06, hl * 0.3); bx(head, M.dark, 0.09, 0.16, 0.06, -hw * 0.32, hh / 2 + 0.06, hl * 0.3); }
+  if (e === 'round') { bx(head, M.dark, 0.16, 0.14, 0.08, hw * 0.4, hh / 2 + 0.04, hl * 0.25); bx(head, M.dark, 0.16, 0.14, 0.08, -hw * 0.4, hh / 2 + 0.04, hl * 0.25); }
+  if (e === 'long') { bx(head, M.main, 0.07, 0.34, 0.09, hw * 0.25, hh / 2 + 0.15, hl * 0.2, -0.2); bx(head, M.main, 0.07, 0.34, 0.09, -hw * 0.25, hh / 2 + 0.15, hl * 0.2, -0.2); }
+  if (e === 'flop') { bx(head, M.dark, 0.08, 0.22, 0.14, hw / 2 + 0.03, hh * 0.15, hl * 0.3, 0, 0, -0.25); bx(head, M.dark, 0.08, 0.22, 0.14, -hw / 2 - 0.03, hh * 0.15, hl * 0.3, 0, 0, 0.25); }
+  if (o.antlers) { const am = lam(0xd8c9a3); for (const s of [1, -1]) { bx(head, am, 0.04, 0.4, 0.04, s * hw * 0.3, hh / 2 + 0.2, hl * 0.2, 0, 0, -s * 0.35); bx(head, am, 0.04, 0.22, 0.04, s * (hw * 0.3 + 0.12), hh / 2 + 0.36, hl * 0.2 + 0.06, 0.6, 0, -s * 0.8); bx(head, am, 0.04, 0.2, 0.04, s * (hw * 0.3 + 0.05), hh / 2 + 0.3, hl * 0.2 - 0.08, -0.7, 0, -s * 0.2); } }
+  if (o.horns) { const am = lam(0x8a8478); for (const s of [1, -1]) bx(head, am, 0.06, 0.3, 0.06, s * hw * 0.28, hh / 2 + 0.1, hl * 0.15, -0.7, 0, -s * 0.2); bx(head, M.light, 0.08, 0.16, 0.06, 0, -hh * 0.6, hl * 0.8); }
+  let tail = null;
+  if (o.tail) { tail = new THREE.Group(); tail.position.set(0, by + bh * 0.25, -bl / 2); g.add(tail); bx(tail, o.tailC ? lam(o.tailC) : M.dark, o.tail[0], o.tail[1], o.tail[2], 0, 0, -o.tail[2] / 2); tail.rotation.x = o.tailA || 0; }
+  if (o.spikes) { const sm = new THREE.MeshLambertMaterial({ color: 0x8fe6ff, emissive: 0x2a8fb0 }); for (let i = 0; i < 4; i++) { const s = new THREE.Mesh(cone(0.14, 0.5, 4), sm); s.position.set(0, by + bh / 2 + 0.2, bl * (0.3 - i * 0.22)); s.rotation.x = -0.3; g.add(s); } }
+  if (o.collar) bx(g, lam(o.collar), bw * 0.62, 0.09, bw * 0.62, 0, by + bh * 0.28, bl / 2 + 0.03, 0.5);
+  if (o.scar) bx(head, lam(0xd9d2c4), 0.04, hh * 0.7, 0.03, hw * 0.3, hh * 0.1, hl + 0.01, 0, 0, 0.3);
+  g.scale.setScalar(o.scale || 1);
+  return { g, legs, head, tail, body, mats: [M.main, M.dark, M.light], eye: o.eye ? M.eye : null, stride: o.stride || 9, h: (by + bh) * (o.scale || 1) };
+}
+function scorpionModel(scale, king) {
+  const g = new THREE.Group(), main = lam(king ? 0x7a2f1a : 0xb8763a), dark = lam(king ? 0x4a1a10 : 0x8a5226), glow = new THREE.MeshLambertMaterial({ color: king ? 0xffd24a : 0x3a2414, emissive: king ? 0xb07a00 : 0 });
+  bx(g, main, 0.7, 0.26, 0.9, 0, 0.36, 0); bx(g, dark, 0.56, 0.22, 0.4, 0, 0.36, 0.6); bx(g, main, 0.5, 0.22, 0.36, 0, 0.38, -0.58);
+  const legs = [];
+  for (let i = 0; i < 3; i++) for (const s of [1, -1]) { const p = new THREE.Group(); p.position.set(s * 0.35, 0.36, 0.3 - i * 0.32); g.add(p); bx(p, dark, 0.5, 0.07, 0.07, s * 0.27, -0.08, 0, 0, 0, -s * 0.5); bx(p, dark, 0.07, 0.3, 0.07, s * 0.5, -0.22, 0); legs.push(p); }
+  for (const s of [1, -1]) { bx(g, main, 0.14, 0.14, 0.6, s * 0.42, 0.36, 0.95, 0, s * 0.35); bx(g, dark, 0.26, 0.16, 0.34, s * 0.56, 0.36, 1.33); bx(g, glow, 0.08, 0.1, 0.22, s * 0.66, 0.36, 1.56, 0, -s * 0.3); bx(g, glow, 0.08, 0.1, 0.22, s * 0.46, 0.36, 1.56, 0, s * 0.3); }
+  const tail = new THREE.Group(); tail.position.set(0, 0.42, -0.72); g.add(tail);
+  bx(tail, main, 0.22, 0.2, 0.36, 0, 0.08, -0.14, 0.5); bx(tail, main, 0.2, 0.36, 0.2, 0, 0.42, -0.3, 0.2); bx(tail, main, 0.18, 0.34, 0.18, 0, 0.74, -0.24, -0.3); bx(tail, dark, 0.16, 0.16, 0.34, 0, 0.94, -0.04, -0.2);
+  const st = new THREE.Mesh(cone(0.09, 0.3, 4), glow); st.position.set(0, 0.9, 0.22); st.rotation.x = 2.0; tail.add(st);
+  bx(g, new THREE.MeshBasicMaterial({ color: king ? 0xffe066 : 0x111111 }), 0.3, 0.05, 0.03, 0, 0.44, 0.8);
+  if (king) { const cm = new THREE.MeshLambertMaterial({ color: 0xffd24a, emissive: 0x7a5200 }); for (let i = 0; i < 5; i++) { const c = new THREE.Mesh(cone(0.07, 0.24, 4), cm); c.position.set(-0.2 + i * 0.1, 0.62, 0.62); g.add(c); } }
+  g.scale.setScalar(scale);
+  return { g, legs, head: null, tail, mats: [main, dark], stride: 14, scorp: true, h: 1.3 * scale };
+}
+const ANIMALS = {
+  rabbit: () => quadruped({ c: 0xb49a7c, c3: 0xe9dcc8, body: [0.3, 0.3, 0.48], leg: 0.16, legT: 0.09, head: [0.24, 0.24, 0.24], ears: 'long', tail: [0.12, 0.12, 0.1], tailC: 0xffffff, stride: 16, headUp: 0.45 }),
+  hare: () => quadruped({ c: 0xf4f4f0, c3: 0xffffff, body: [0.3, 0.3, 0.48], leg: 0.16, legT: 0.09, head: [0.24, 0.24, 0.24], ears: 'long', tail: [0.12, 0.12, 0.1], stride: 16, headUp: 0.45 }),
+  deer: () => quadruped({ c: 0xa8703f, c2: 0x7d5230, c3: 0xe6cfa6, body: [0.48, 0.55, 1.2], leg: 0.78, legT: 0.11, belly: true, neck: 0.28, head: [0.24, 0.28, 0.42], ears: 'point', antlers: true, tail: [0.1, 0.16, 0.1], tailC: 0xffffff, headUp: 0.85, stride: 8 }),
+  goat: () => quadruped({ c: 0xe8e4da, c2: 0xcfc9bb, c3: 0xf6f3ec, body: [0.5, 0.56, 1.0], leg: 0.52, legT: 0.12, head: [0.26, 0.3, 0.4], horns: true, ears: 'none', tail: [0.1, 0.12, 0.12], headUp: 0.6, stride: 10 }),
+  wolf: () => quadruped({ c: 0x70757a, c2: 0x4b4f55, c3: 0xb1b5b9, eye: 0xffd640, body: [0.44, 0.5, 1.15], leg: 0.55, legT: 0.12, back: true, belly: true, head: [0.36, 0.34, 0.36], snout: [0.2, 0.17, 0.28], ears: 'point', tail: [0.14, 0.14, 0.6], tailA: -0.7, headUp: 0.35, stride: 10 }),
+  redwolf: () => quadruped({ c: 0x3a3338, c2: 0x241f24, c3: 0x5a4f55, eye: 0xff3020, body: [0.46, 0.52, 1.2], leg: 0.56, legT: 0.12, back: true, head: [0.38, 0.35, 0.37], snout: [0.2, 0.17, 0.3], ears: 'point', tail: [0.14, 0.14, 0.6], tailA: -0.7, headUp: 0.35, stride: 10, scale: 1.08 }),
+  snowwolf: () => quadruped({ c: 0xe9eef2, c2: 0xc2ccd6, c3: 0xffffff, eye: 0x4fd0ff, body: [0.46, 0.52, 1.2], leg: 0.56, legT: 0.13, back: true, head: [0.38, 0.35, 0.37], snout: [0.2, 0.17, 0.29], ears: 'point', tail: [0.16, 0.16, 0.62], tailA: -0.7, headUp: 0.35, stride: 10, scale: 1.1 }),
+  bear: () => quadruped({ c: 0x5d3f26, c2: 0x47301c, c3: 0x8a6a48, body: [0.95, 0.9, 1.7], leg: 0.6, legT: 0.3, hump: true, head: [0.6, 0.55, 0.5], snout: [0.3, 0.26, 0.3], ears: 'round', tail: [0.14, 0.14, 0.1], headUp: 0.2, stride: 6 }),
+  grizzle: () => quadruped({ c: 0x46301f, c2: 0x2f2015, c3: 0x77604a, eye: 0xff9a2a, body: [0.95, 0.9, 1.7], leg: 0.6, legT: 0.3, hump: true, head: [0.6, 0.55, 0.5], snout: [0.3, 0.26, 0.3], ears: 'round', scar: true, tail: [0.14, 0.14, 0.1], headUp: 0.2, stride: 5, scale: 1.55 }),
+  frostclaw: () => quadruped({ c: 0xf2f6fa, c2: 0xcfdce8, c3: 0xffffff, eye: 0x39d0ff, body: [0.95, 0.9, 1.7], leg: 0.62, legT: 0.3, hump: true, spikes: true, head: [0.6, 0.55, 0.5], snout: [0.3, 0.26, 0.3], ears: 'round', tail: [0.14, 0.14, 0.1], headUp: 0.2, stride: 5, scale: 1.7 }),
+  scorpion: () => scorpionModel(1, false),
+  duneking: () => scorpionModel(2.6, true),
+  scout: () => quadruped({ c: 0xc98a3c, c2: 0x9a6428, c3: 0xfff3e0, body: [0.36, 0.4, 0.85], leg: 0.38, legT: 0.1, belly: true, head: [0.32, 0.3, 0.3], snout: [0.17, 0.15, 0.22], ears: 'flop', collar: 0xd9342b, tail: [0.09, 0.09, 0.42], tailA: 0.9, headUp: 0.45, stride: 13 })
+};
+function humanModel(ray) {
+  const g = new THREE.Group(), skin = lam(0xe2b48c), shirt = lam(ray ? 0x4d6e3c : 0xd9482b), trousers = lam(0x5a4632), hat = lam(0x8c6c3c), hair = lam(ray ? 0x6b5a4a : 0x3a2a1c);
+  bx(g, trousers, 0.2, 0.8, 0.22, 0.13, 0.4, 0); bx(g, trousers, 0.2, 0.8, 0.22, -0.13, 0.4, 0);
+  bx(g, shirt, 0.52, 0.62, 0.3, 0, 1.11, 0);
+  const armL = new THREE.Group(), armR = new THREE.Group(); armL.position.set(0.34, 1.38, 0); armR.position.set(-0.34, 1.38, 0); g.add(armL); g.add(armR);
+  bx(armL, shirt, 0.15, 0.6, 0.18, 0, -0.3, 0); bx(armR, shirt, 0.15, 0.6, 0.18, 0, -0.3, 0); bx(armL, skin, 0.13, 0.13, 0.15, 0, -0.66, 0); bx(armR, skin, 0.13, 0.13, 0.15, 0, -0.66, 0);
+  const head = new THREE.Group(); head.position.set(0, 1.6, 0); g.add(head);
+  bx(head, skin, 0.34, 0.34, 0.32, 0, 0, 0); bx(head, new THREE.MeshBasicMaterial({ color: 0x1a1a1a }), 0.05, 0.05, 0.03, 0.08, 0.04, 0.165); bx(head, new THREE.MeshBasicMaterial({ color: 0x1a1a1a }), 0.05, 0.05, 0.03, -0.08, 0.04, 0.165);
+  if (ray) { bx(head, hair, 0.36, 0.2, 0.2, 0, -0.16, 0.1); bx(head, hat, 0.62, 0.05, 0.6, 0, 0.19, 0); bx(head, hat, 0.36, 0.16, 0.34, 0, 0.29, 0); }
+  else bx(head, hair, 0.36, 0.1, 0.34, 0, 0.2, 0);
+  return { g, armL, armR, head };
+}
+
+/* ---------- first-person tools ---------- */
+function toolModel(id) {
+  const def = id === 'hands' ? HANDS : ITEMS[id], cls = def.tool.cls, t = def.tool.tier, g = new THREE.Group();
+  const WOOD = 0x7a5632, STONE = 0x8d8d89, IRON = 0xcfd6dd, SKIN = 0xe2b48c, head = t >= 2 ? IRON : STONE;
+  const hand = part(box(0.1, 0.12, 0.13), SKIN, [0, -0.05, 0.01]), arm = part(box(0.1, 0.5, 0.11), 0xd9482b, [0.02, -0.36, 0.08], [0.25, 0, 0]);
+  let m;
+  if (cls === 'hands') m = vcMesh([part(box(0.11, 0.07, 0.15), SKIN, [0, 0.13, -0.01]), part(box(0.1, 0.06, 0.05), SKIN, [0, 0.19, 0.04], [0.5, 0, 0]), part(box(0.04, 0.09, 0.04), SKIN, [0.065, 0.13, 0.04]), part(box(0.105, 0.42, 0.11), 0xd9482b, [0, -0.13, 0.02]), part(box(0.115, 0.06, 0.12), 0xf2efe6, [0, 0.07, 0.015])]);
+  if (cls === 'axe') m = vcMesh([part(box(0.045, 0.72, 0.045), WOOD, [0, 0.26, 0]), part(box(0.05, 0.19, 0.24), head, [0, 0.55, -0.1]), part(box(0.03, 0.24, 0.07), head, [0, 0.55, -0.24]), hand, arm]);
+  if (cls === 'pick') m = vcMesh([part(box(0.045, 0.72, 0.045), WOOD, [0, 0.26, 0]), part(box(0.055, 0.08, 0.56), head, [0, 0.6, 0]), part(cone(0.04, 0.14, 4), head, [0, 0.58, -0.33], [-1.9, 0, 0]), part(cone(0.04, 0.14, 4), head, [0, 0.58, 0.33], [1.9, 0, 0]), hand, arm]);
+  if (cls === 'sword') m = vcMesh([part(box(0.04, 0.18, 0.04), 0x4a3421, [0, 0.03, 0]), part(box(0.04, 0.04, 0.22), 0xb8860b, [0, 0.13, 0]), part(box(0.022, 0.72, 0.075), IRON, [0, 0.5, 0]), part(cone(0.04, 0.12, 4), IRON, [0, 0.92, 0], null, [0.55, 1, 1]), hand, arm]);
+  if (cls === 'spear') { const tip = def.tool.glow || (t >= 2 ? IRON : 0x3b4046); m = vcMesh([part(box(0.04, 1.7, 0.04), WOOD, [0, 0.55, 0]), part(cone(0.055, 0.3, 4), tip, [0, 1.52, 0]), part(box(0.06, 0.07, 0.06), 0xc9b98a, [0, 1.36, 0]), hand, arm], def.tool.glow ? new THREE.MeshLambertMaterial({ vertexColors: true, emissive: def.tool.glow, emissiveIntensity: 0.25 }) : null); }
+  if (cls === 'torch') { m = vcMesh([part(box(0.05, 0.6, 0.05), WOOD, [0, 0.2, 0]), part(box(0.08, 0.14, 0.08), 0x3a2a1c, [0, 0.52, 0]), hand, arm]); const f = flameGroup(0.55); f.position.y = 0.56; m.add(f); g.userData.flame = f; }
+  if (cls === 'rod') m = vcMesh([part(box(0.03, 1.9, 0.03), 0x9a7a4a, [0, 0.75, 0]), part(box(0.07, 0.07, 0.05), 0x444444, [0, 0.12, -0.04]), hand, arm]);
+  if (cls === 'bow') {
+    const ps = [hand, arm]; for (let i = -3; i <= 3; i++) { const a = i * 0.22; ps.push(part(box(0.035, 0.2, 0.04), WOOD, [0, Math.sin(a) * 0.72, -0.22 + Math.cos(a) * 0.3], [-a, 0, 0])); }
+    m = vcMesh(ps); const s = new THREE.Mesh(UNIT_BOX, new THREE.MeshBasicMaterial({ color: 0xeeeeee })); s.scale.set(0.008, 1.1, 0.008); s.position.set(0, 0, 0.0); m.add(s);
+    const ar = vcMesh([part(box(0.014, 0.014, 0.75), 0xc9b98a, [0, 0, -0.3]), part(cone(0.025, 0.08, 4), 0x3b4046, [0, 0, -0.7], [-Math.PI / 2, 0, 0])]); ar.position.set(0.02, 0, 0.1); m.add(ar); g.userData.arrow = ar;
+  }
+  m.castShadow = false; m.receiveShadow = false; g.add(m); g.userData.cls = cls;
+  return g;
+}
+
+/* ---------- structures ---------- */
+const WOODC = [0x8a623a, 0x7d5833, 0x946b40, 0x86603a];
+function planks(w, h, d, n, vertical, x, y, z) {
+  const ps = []; for (let i = 0; i < n; i++) { const c = WOODC[i % 4]; ps.push(vertical ? part(box(w / n - 0.02, h, d), c, [x - w / 2 + (i + 0.5) * w / n, y, z]) : part(box(w, h, d / n - 0.02), c, [x, y, z - d / 2 + (i + 0.5) * d / n])); }
+  return ps;
+}
+function structureModel(id) {
+  const THATCH = 0xb9a55a, g = new THREE.Group(); let m;
+  switch (id) {
+    case 'campfire': {
+      const ps = []; for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; ps.push(part(ico(0.2, 0), 0x8a8a86, [Math.cos(a) * 0.62, 0.1, Math.sin(a) * 0.62], [a, a * 2, 0], [1.1, 0.8, 1], 0.12)); }
+      ps.push(part(box(0.9, 0.12, 0.13), 0x4a3421, [0, 0.12, 0], [0, 0.4, 0.12]), part(box(0.9, 0.12, 0.13), 0x3a2a1c, [0, 0.16, 0], [0, 1.6, -0.1]), part(box(0.85, 0.11, 0.12), 0x4a3421, [0, 0.2, 0], [0, 2.7, 0.1]), part(cyl(0.5, 0.5, 0.04, 10), 0x2a2420, [0, 0.03, 0]));
+      m = vcMesh(ps); const f = flameGroup(1.9); f.position.y = 0.15; f.visible = false; g.add(f); g.userData.flame = f; break;
+    }
+    case 'shelter': {
+      const ps = [part(box(0.1, 1.9, 0.1), 0x6b4a2b, [-1.3, 0.95, 0.9]), part(box(0.1, 1.9, 0.1), 0x6b4a2b, [1.3, 0.95, 0.9]), part(box(2.9, 0.1, 0.1), 0x6b4a2b, [0, 1.88, 0.9])];
+      for (let i = 0; i < 7; i++) ps.push(part(box(0.4, 0.09, 2.85), i % 2 ? THATCH : 0xa8954e, [-1.23 + i * 0.41, 0.98, -0.25], [0.72, 0, 0]));
+      ps.push(part(box(2.4, 0.12, 1.5), 0x5a8a45, [0, 0.07, -0.1]), part(box(0.1, 1.0, 0.1), 0x6b4a2b, [-1.3, 0.5, -0.3], [0.72, 0, 0]), part(box(0.1, 1.0, 0.1), 0x6b4a2b, [1.3, 0.5, -0.3], [0.72, 0, 0]));
+      m = vcMesh(ps, MAT_VC_DS); break;
+    }
+    case 'bench': m = vcMesh([...planks(1.7, 0.1, 0.85, 4, false, 0, 0.85, 0), part(box(0.1, 0.82, 0.1), 0x5e4126, [-0.75, 0.41, -0.34]), part(box(0.1, 0.82, 0.1), 0x5e4126, [0.75, 0.41, -0.34]), part(box(0.1, 0.82, 0.1), 0x5e4126, [-0.75, 0.41, 0.34]), part(box(0.1, 0.82, 0.1), 0x5e4126, [0.75, 0.41, 0.34]), part(box(1.5, 0.06, 0.06), 0x5e4126, [0, 0.3, -0.34]), part(box(0.05, 0.05, 0.34), 0x7a5632, [-0.4, 0.93, 0], [0, 0.5, 0]), part(box(0.14, 0.09, 0.09), 0x8d8d89, [-0.47, 0.94, 0.14], [0, 0.5, 0]), part(box(0.4, 0.03, 0.12), 0xcfd6dd, [0.35, 0.92, 0.1], [0, -0.3, 0])]); break;
+    case 'chest': m = vcMesh([...planks(0.95, 0.42, 0.6, 3, true, 0, 0.24, 0), part(box(0.99, 0.2, 0.64), 0x9c7446, [0, 0.54, 0]), part(box(1.0, 0.64, 0.06), 0x3b4046, [-0.3, 0.33, 0], [0, Math.PI / 2, 0], [1, 1, 1]), part(box(0.07, 0.66, 0.66), 0x3b4046, [-0.3, 0.33, 0]), part(box(0.07, 0.66, 0.66), 0x3b4046, [0.3, 0.33, 0]), part(box(0.12, 0.14, 0.04), 0xd9a520, [0, 0.46, 0.32])].filter((p, i) => i !== 4)); break;
+    case 'floor': m = vcMesh([...planks(3, 0.14, 3, 6, false, 0, 0.13, 0), part(box(2.9, 1.4, 2.9), 0x5e4126, [0, -0.62, 0])]); break;
+    case 'wall': m = vcMesh([...planks(3, 3, 0.18, 7, true, 0, 1.5, 0), part(box(3.04, 0.14, 0.24), 0x5e4126, [0, 0.9, 0]), part(box(3.04, 0.14, 0.24), 0x5e4126, [0, 2.3, 0]), part(box(3, 1.5, 0.16), 0x4a3421, [0, -0.75, 0])]); break;
+    case 'door': m = vcMesh([...planks(0.8, 3, 0.18, 2, true, -1.1, 1.5, 0), ...planks(0.8, 3, 0.18, 2, true, 1.1, 1.5, 0), ...planks(1.4, 0.75, 0.18, 3, true, 0, 2.63, 0), part(box(3.04, 0.14, 0.24), 0x5e4126, [0, 2.3, 0]), part(box(0.8, 1.5, 0.16), 0x4a3421, [-1.1, -0.75, 0]), part(box(0.8, 1.5, 0.16), 0x4a3421, [1.1, -0.75, 0])]); break;
+    case 'roof': { const ps = []; for (let i = 0; i < 6; i++) ps.push(part(box(3.3, 0.16, 0.58), i % 2 ? THATCH : 0xa8954e, [0, 3.08 + (i % 2) * 0.05, -1.38 + i * 0.55])); ps.push(part(box(0.12, 0.12, 3.2), 0x5e4126, [-1.4, 2.98, 0]), part(box(0.12, 0.12, 3.2), 0x5e4126, [1.4, 2.98, 0])); m = vcMesh(ps); break; }
+    case 'bed': m = vcMesh([part(box(1.1, 0.28, 2.1), 0x7a5632, [0, 0.22, 0]), part(box(1.0, 0.14, 1.95), 0xd8c9a3, [0, 0.42, 0]), part(box(1.02, 0.1, 1.2), 0x8a5a3a, [0, 0.5, 0.3]), part(box(0.7, 0.12, 0.36), 0xf2efe6, [0, 0.54, -0.72]), part(box(1.14, 0.7, 0.1), 0x5e4126, [0, 0.45, -1.06]), part(box(0.1, 0.36, 0.1), 0x5e4126, [-0.5, 0.18, 1.0]), part(box(0.1, 0.36, 0.1), 0x5e4126, [0.5, 0.18, 1.0])]); break;
+    case 'spikes': { const ps = [part(cyl(0.12, 0.12, 2.6, 6), 0x5e4126, [0, 0.3, 0], [0, 0, Math.PI / 2])]; for (let i = 0; i < 6; i++) { const s = i % 2 ? 1 : -1; ps.push(part(cone(0.07, 1.5, 5), 0x9c7446, [-1.1 + i * 0.44, 0.75, s * 0.32], [s * 0.6, 0, 0])); } m = vcMesh(ps); break; }
+    case 'torchpost': { m = vcMesh([part(box(0.09, 1.9, 0.09), 0x6b4a2b, [0, 0.95, 0]), part(box(0.16, 0.2, 0.16), 0x3a2a1c, [0, 1.95, 0]), part(ico(0.16, 0), 0x8a8a86, [0.1, 0.08, 0.05])]); const f = flameGroup(0.9); f.position.y = 2.02; g.add(f); g.userData.flame = f; break; }
+    case 'furnace': { m = vcMesh([part(box(1.3, 1.3, 1.2), 0x7f7f7b, [0, 0.65, 0], null, null, 0.1), part(box(1.0, 0.4, 0.95), 0x8b8b87, [0, 1.5, 0], null, null, 0.1), part(box(0.44, 0.9, 0.44), 0x6f6f6c, [0, 2.15, -0.15], null, null, 0.1), part(box(0.55, 0.5, 0.08), 0x1c1512, [0, 0.5, 0.6])]); const gl = new THREE.Mesh(UNIT_BOX, new THREE.MeshBasicMaterial({ color: 0xff7a1e })); gl.scale.set(0.42, 0.3, 0.05); gl.position.set(0, 0.42, 0.62); g.add(gl); break; }
+    case 'collector': m = vcMesh([part(cyl(0.42, 0.36, 0.8, 9), 0x8a623a, [0, 0.4, 0]), part(cyl(0.44, 0.44, 0.06, 9), 0x3b4046, [0, 0.62, 0]), part(cyl(0.37, 0.37, 0.03, 9), 0x3f8fd0, [0, 0.76, 0]), part(box(0.06, 1.7, 0.06), 0x6b4a2b, [-0.7, 0.85, -0.7]), part(box(0.06, 1.7, 0.06), 0x6b4a2b, [0.7, 0.85, -0.7]), part(box(0.06, 1.7, 0.06), 0x6b4a2b, [-0.7, 0.85, 0.7]), part(box(0.06, 1.7, 0.06), 0x6b4a2b, [0.7, 0.85, 0.7]), part(cone(0.95, 0.5, 4), 0xa0764e, [0, 1.45, 0], [Math.PI, Math.PI / 4, 0])], MAT_VC_DS); break;
+    case 'garden': {
+      const ps = [part(box(2.2, 0.3, 1.4), 0x7a5632, [0, 0.15, 0]), part(box(2.0, 0.08, 1.2), 0x3d2c1e, [0, 0.3, 0])];
+      for (let i = 0; i < 4; i++) ps.push(part(ico(0.3, 0), 0x3f8a3c, [-0.75 + i * 0.5, 0.52, (i % 2 ? 0.2 : -0.2)], [i, i * 2, 0], null, 0.1));
+      m = vcMesh(ps); const bs = []; for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) bs.push(part(sph(0.07, 5, 4), 0xe2334c, [-0.75 + i * 0.5 + Math.cos(j * 2.1) * 0.24, 0.6 + j * 0.07, (i % 2 ? 0.2 : -0.2) + Math.sin(j * 2.1) * 0.24]));
+      const b = vcMesh(bs); b.visible = false; g.add(b); g.userData.berries = b; break;
+    }
+    case 'flag': { m = vcMesh([part(box(0.08, 3.4, 0.08), 0x6b4a2b, [0, 1.7, 0]), part(ico(0.1, 0), 0xd9a520, [0, 3.45, 0])]); const c = new THREE.Mesh(UNIT_BOX, new THREE.MeshLambertMaterial({ color: 0xd9342b, side: THREE.DoubleSide })); c.scale.set(1.1, 0.7, 0.03); c.position.set(0.6, 2.95, 0); g.add(c); g.userData.cloth = c; break; }
+  }
+  g.add(m); g.userData.main = m; return g;
+}
+
+/* =========================================================================
+   06_player: inventory, survival meters, movement, tools, targeting, fishing
+   ========================================================================= */
+const inv = id => G.inv[id] || 0;
+function give(id, n = 1, quiet) { G.inv[id] = inv(id) + n; if (!quiet) lootToast(id, n); uiDirty(); }
+function take(id, n = 1) { G.inv[id] = Math.max(0, inv(id) - n); if (!G.inv[id]) delete G.inv[id]; uiDirty(); }
+function canAfford(cost) { for (const k in cost) if (inv(k) < cost[k]) return false; return true; }
+function pay(cost) { for (const k in cost) take(k, cost[k]); }
+function bestTool(slot) {
+  if (slot === 'hands') return 'hands';
+  let best = null, tier = -1;
+  for (const id in G.inv) { const t = ITEMS[id] && ITEMS[id].tool; if (t && t.slot === slot && t.tier > tier) { best = id; tier = t.tier; } }
+  return best;
+}
+function heldId() { return bestTool(G.p.held) || 'hands'; }
+function heldDef() { const id = heldId(); return id === 'hands' ? HANDS : ITEMS[id]; }
+function wearStat(key, base, better) { let v = base; for (const id in G.inv) { const w = ITEMS[id] && ITEMS[id].wear; if (w && w[key] !== undefined) v = better(v, w[key]); } return v; }
+const armorValue = () => wearStat('armor', 0, Math.max);
+const dmgMult = () => wearStat('dmg', 1, Math.max) * (1 + (G.p.level - 1) * 0.03);
+const xpNeed = l => Math.round(60 + 32 * l * l);
+function addXP(n) {
+  const p = G.p; p.xp += n;
+  while (p.xp >= xpNeed(p.level) && p.level < 30) {
+    p.xp -= xpNeed(p.level); p.level++; p.maxHp += 8; p.hp = p.maxHp;
+    banner('LEVEL ' + p.level + '!', 'Max health up. Weapons hit harder.'); sfx('levelup'); uiFlash('#ffe066', 0.25);
+    if (p.level >= 10) badge('level');
+  }
+  uiDirty();
+}
+
+/* ---------- temperature + the one survival step (used for play AND sleep) ---------- */
+function ambientTemp() {
+  const p = G.p, w = biomeW(p.x, p.z), n = nightAmount();
+  let T = w.forest * lerp(21, 9, n) + w.desert * lerp(35, 7, n) + w.snow * lerp(-5, -15, n);
+  R.heat = w.desert > 0.5 && n < 0.3 && !R.sheltered;
+  const wet = G.weather === 'rain' || G.weather === 'storm';
+  if (wet && !R.sheltered) T -= G.weather === 'storm' ? 9 : 7;
+  if (R.sheltered) T += 7;
+  if (R.nearFire) T += R.nearFireDist < 6 ? 26 : 26 * (1 - (R.nearFireDist - 6) / 4);
+  if (heldDef().tool.cls === 'torch') T += 6;
+  T += wearStat('warm', 0, Math.max) + (armorValue() > 0 ? 4 : 0);
+  if (p.y < -0.5) T -= 6;
+  R.temp = T; return T;
+}
+const SURV = { food: 3.0, water: 3.8, comfort: 14 };
+/** advance the survival meters by gh game-hours. ctx: {sleeping, sprint, rest} */
+function survivalStep(gh, ctx) {
+  const p = G.p, T = R.temp, sl = ctx.sleeping ? 0.5 : 1;
+  p.food = Math.max(0, p.food - SURV.food * gh * sl * (ctx.sprint ? 1.6 : 1));
+  p.water = Math.max(0, p.water - SURV.water * gh * sl * (ctx.sprint ? 1.5 : 1) * (R.heat ? 2 : 1));
+  if (T >= SURV.comfort) p.warm = Math.min(100, p.warm + (R.nearFire ? 34 : 11) * gh);
+  else p.warm = Math.max(0, p.warm - (SURV.comfort - T) * 0.85 * gh);
+  let dh = 0;
+  if (p.food <= 0) dh -= 5; if (p.water <= 0) dh -= 7; if (p.warm <= 0) dh -= 9;
+  if (dh === 0 && p.food > 25 && p.water > 25 && p.warm > 25) dh = ctx.sleeping ? (ctx.rest || 4) : 2.5;
+  p.hp = clamp(p.hp + dh * gh, 0, p.maxHp);
+  if (p.hp <= 0 && !ctx.sleeping) blackout(p.warm <= 0 ? 'cold' : p.water <= 0 ? 'thirst' : 'hunger');
+  if (ctx.sleeping && p.hp < 5) p.hp = 5;
+}
+function hurtPlayer(dmg, src) {
+  if (R.cinematic || R.sleeping || R.invuln > 0) return;
+  const p = G.p; dmg = Math.max(1, Math.round(dmg * (1 - armorValue())));
+  p.hp -= dmg; R.shake = 0.4; uiDamage(); sfx('hurt');
+  if (p.hp <= 0) { p.hp = 0; blackout(src || 'hurt'); }
+}
+function blackout(why) {
+  if (R.cinematic) return;
+  const p = G.p; R.cinematic = true; sfx('blackout'); G.stats.blackouts++;
+  // drop loose materials as a backpack at this spot (tools, clothes and story items stay with you)
+  const items = {}; let any = false;
+  for (const id in G.inv) { const d = ITEMS[id]; if (!d.tool && !d.wear && !d.story && id !== 'canteen') { items[id] = G.inv[id]; any = true; } }
+  if (any) { for (const id in items) delete G.inv[id]; G.pack = { x: p.x, z: p.z, items }; }
+  const msg = { cold: 'You got too cold and blacked out.', thirst: 'You ran out of water and blacked out.', hunger: 'You got too hungry and blacked out.' }[why] || 'You were knocked out!';
+  uiFade(true, 900, () => {
+    clearCreatures(); endRaid(true);
+    const s = G.spawn || R.start; p.x = s.x; p.z = s.z; p.y = groundAt(p.x, p.z); p.vy = 0;
+    if (G.hour > 7) G.day++; G.hour = 7; onNewDay(true);
+    p.hp = Math.round(p.maxHp * 0.5); p.food = Math.max(p.food, 45); p.water = Math.max(p.water, 45); p.warm = 90;
+    refreshPack(); uiDirty(); saveGame();
+    showMessage('💫 Everything went dark...', msg + '<br><br>You wake up ' + (G.spawn ? 'in your bed' : 'back at the cove') + ' the next morning.' + (any ? '<br><br><b>Your backpack fell where you blacked out.</b> It\'s marked on your map — go and get it!' : ''), () => { uiFade(false, 700); R.cinematic = false; R.invuln = 4; });
+  });
+}
+
+/* ---------- eating and drinking ---------- */
+function eat(id) {
+  const d = ITEMS[id]; if (!d || !d.food || inv(id) < 1) return false;
+  const p = G.p, f = d.food;
+  if (f.food && !f.hp && p.food >= 99) { hint('You\'re full!'); return false; }
+  if (!f.food && f.hp > 0 && p.hp >= p.maxHp) { hint('You\'re already at full health.'); return false; }
+  take(id, 1);
+  if (f.food) p.food = Math.min(100, p.food + f.food);
+  if (f.water) p.water = Math.min(100, p.water + f.water);
+  if (f.hp) p.hp = clamp(p.hp + f.hp, 1, p.maxHp);
+  sfx('eat');
+  if (f.hp < 0) { toast('🤢 Yuck! Raw ' + (id === 'rawfish' ? 'fish' : 'meat') + ' makes you feel sick. Cook it on a fire!', 'warn'); uiDamage(); }
+  else toast('😋 Ate ' + d.n, 'ok');
+  uiDirty(); return true;
+}
+function quickEat() {
+  const order = ['stew', 'meat', 'fish', 'roastshroom', 'coconut', 'cactusfruit', 'berries', 'mushroom'].filter(i => inv(i) > 0);
+  if (!order.length) { hint('No food! Cook meat or fish, or pick berries.'); sfx('deny'); return; }
+  const need = 100 - G.p.food;
+  const fit = order.filter(i => ITEMS[i].food.food <= need + 8);
+  eat(fit.length ? fit[0] : order[order.length - 1]);
+}
+function drinkCanteen() {
+  if (!inv('canteen')) { hint('You need a Canteen (2 hide + 1 rope). Or drink at a lake.'); sfx('deny'); return; }
+  if (!(G.flags.canteen > 0)) { hint('Your canteen is empty. Fill it at any water.'); sfx('deny'); return; }
+  if (G.p.water >= 99) { hint('You\'re not thirsty.'); return; }
+  G.flags.canteen--; G.p.water = Math.min(100, G.p.water + 34); sfx('drink'); toast('💧 Drank from canteen (' + G.flags.canteen + '/5 left)', 'ok'); uiDirty();
+}
+function drinkHere(amount) {
+  G.p.water = Math.min(100, G.p.water + (amount || 40)); sfx('drink');
+  if (inv('canteen') && (G.flags.canteen || 0) < 5) { G.flags.canteen = 5; toast('💧 Drank, and filled your canteen', 'ok'); } else toast('💧 Ahh. Fresh water.', 'ok');
+  uiDirty();
+}
+
+/* ---------- ground + movement ---------- */
+const FLOORS = new Map();   // "cx,cz" -> top height of a built floor
+function groundAt(x, z) {
+  let h = heightAt(x, z);
+  if (FLOORS.size) { const f = FLOORS.get(Math.floor(x / BUILD_CELL) + ',' + Math.floor(z / BUILD_CELL)); if (f !== undefined && f > h && f < h + 2.2) h = f; }
+  return h;
+}
+const _fwd = new THREE.Vector3();
+function updatePlayer(dt) {
+  const p = G.p, k = R.keys, free = !R.panel && !R.cinematic && !R.sleeping;
+  if (free) {   // arrow keys also turn the camera (handy on a trackpad)
+    if (k.ArrowLeft) p.yaw += dt * 2.2; if (k.ArrowRight) p.yaw -= dt * 2.2;
+    if (k.ArrowUp) p.pitch = Math.min(1.45, p.pitch + dt * 1.6); if (k.ArrowDown) p.pitch = Math.max(-1.45, p.pitch - dt * 1.6);
+  }
+  let mx = 0, mz = 0;
+  if (free) { if (k.KeyW) mz += 1; if (k.KeyS) mz -= 1; if (k.KeyD) mx += 1; if (k.KeyA) mx -= 1; if (R.joy) { mx += R.joy.x; mz += R.joy.y; } }
+  const moving = mx !== 0 || mz !== 0, grounded = p.y <= R.ground + 0.02;
+  const wading = p.y < -0.25, sprint = moving && (k.ShiftLeft || k.ShiftRight || (R.joy && R.joy.mag > 0.93 && free)) && p.stam > 1 && !wading && !R.fish;
+  R.sprinting = sprint;
+  if (sprint) p.stam = Math.max(0, p.stam - 13 * dt); else p.stam = Math.min(100, p.stam + (moving ? 9 : 16) * dt);
+  let speed = sprint ? 8.4 : 5.0; if (wading) speed *= 0.55; if (p.warm < 15) speed *= 0.8;
+  if (moving) {
+    const l = Math.hypot(mx, mz); if (l > 1) { mx /= l; mz /= l; }
+    const sn = Math.sin(p.yaw), cs = Math.cos(p.yaw);
+    const dx = (-sn * mz + cs * mx) * speed * dt, dz = (-cs * mz - sn * mx) * speed * dt;
+    const tryMove = (ax, az) => {
+      let nx = clamp(p.x + ax, -HALF + 4, HALF - 4), nz = clamp(p.z + az, -HALF + 4, HALF - 4);
+      const c = collide(nx, nz, 0.42); nx = c[0]; nz = c[1];
+      const gh = groundAt(nx, nz), run = Math.hypot(nx - p.x, nz - p.z);
+      if (gh < -1.25) { if (!R.tips.deep) { R.tips.deep = 1; hint('The water is too deep to cross.'); setTimeout(() => R.tips.deep = 0, 6000); } return false; }
+      if (run > 0.0001 && (gh - (grounded ? R.ground : p.y)) / run > 1.45) return false;   // too steep (a jump gets you up a ledge)
+      G.stats.dist += run; R.stepAcc += run; p.x = nx; p.z = nz; return true;
+    };
+    if (!tryMove(dx, dz)) { if (!tryMove(dx, 0)) tryMove(0, dz); }
+  } else { const c = collide(p.x, p.z, 0.42); p.x = c[0]; p.z = c[1]; }
+  R.ground = groundAt(p.x, p.z);
+  if (free && k.Space && grounded && !wading) { p.vy = 6.6; sfx('step', R.stepKind); }
+  p.vy -= 19 * dt; p.y += p.vy * dt;
+  if (p.y <= R.ground) { if (p.vy < -9) { R.shake = Math.max(R.shake, 0.2); sfx('thunk'); } p.y = R.ground; p.vy = 0; }
+  else if (p.vy <= 0 && p.y - R.ground < 0.45) { p.y = R.ground; p.vy = 0; }   // stick to slopes when walking downhill
+  // footsteps + head bob
+  if (R.stepAcc > (sprint ? 3.0 : 2.3) && grounded) { R.stepAcc = 0; sfx('step', R.stepKind); }
+  R.bob = moving && grounded ? R.bob + dt * (sprint ? 13 : 9) : R.bob * 0.9;
+  const cam = R.camera, bobY = Math.sin(R.bob) * (moving && grounded ? 0.055 : 0), eye = wading ? 1.25 : 1.62;
+  R.eye = lerp(R.eye || 1.62, eye, Math.min(1, dt * 6));
+  cam.position.set(p.x, p.y + R.eye + bobY, p.z);
+  if (R.shake > 0) { R.shake = Math.max(0, R.shake - dt * 1.6); cam.position.x += rnd(-1, 1) * R.shake * 0.25; cam.position.y += rnd(-1, 1) * R.shake * 0.25; }
+  cam.rotation.set(p.pitch, p.yaw, 0);
+  cam.getWorldDirection(_fwd);
+  if (R.invuln > 0) R.invuln -= dt;
+}
+
+/* ---------- held tool view model ---------- */
+function refreshViewModel() {
+  const id = heldId(); if (R.vmId === id) return;
+  if (R.vm) R.camera.remove(R.vm);
+  R.vm = toolModel(id); R.vmId = id; R.vm.traverse(o => { if (o.material === MAT_VC) o.material = MAT_VC_TOOL; }); R.camera.add(R.vm); uiDirty();
+  if (R.torchLight) R.torchLight.userData.on = R.vm.userData.cls === 'torch';
+}
+function swingNow(dur) { if (R.swing <= 0) { R.swing = R.swingDur = dur; R.swingHit = true; } }
+function updateViewModel(dt) {
+  refreshViewModel();
+  const vm = R.vm, cls = vm.userData.cls, sway = Math.sin(R.bob) * 0.012, s2 = Math.cos(R.bob * 0.5) * 0.01;
+  let px = 0.36, py = -0.4, pz = -0.62, rx = -0.5, ry = -0.15, rz = 0.08;
+  if (cls === 'spear') { px = 0.3; py = -0.34; pz = -0.35; rx = -1.42; ry = 0.06; rz = 0; }
+  if (cls === 'bow') { px = 0.16; py = -0.2; pz = -0.6; rx = 0; ry = 0.12; rz = -0.25; }
+  if (cls === 'rod') { px = 0.34; py = -0.42; pz = -0.5; rx = -0.95; }
+  if (cls === 'hands') { px = 0.3; py = -0.34; pz = -0.62; rx = -0.35; ry = 0.25; rz = 0.15; }
+  if (cls === 'torch') { px = 0.42; py = -0.55; pz = -0.85; rx = -0.15; ry = -0.1; rz = 0.12; }
+  if (R.swing > 0) {
+    R.swing -= dt; const t = 1 - Math.max(0, R.swing) / R.swingDur, a = Math.sin(t * Math.PI);
+    if (cls === 'spear') { pz -= a * 0.75; py += a * 0.05; }
+    else if (cls === 'bow') { pz += a * 0.08; }
+    else if (cls === 'hands') { pz -= a * 0.45; py += a * 0.16; rx -= a * 0.4; }
+    else { rx -= a * 1.35; rz -= a * 0.35; px -= a * 0.12; py += a * 0.1; }
+    if (!R.swingHit && t >= 0.45) { R.swingHit = true; resolveSwing(); }
+  }
+  if (R.fish) { rx += 0.25 + (R.fish.phase === 'bite' ? Math.sin(R.t * 40) * 0.05 : 0); }
+  vm.position.set(px + sway, py + Math.abs(s2) - (G.p.vy !== 0 ? 0.02 : 0), pz); vm.rotation.set(rx, ry, rz);
+  if (vm.userData.flame) { const f = vm.userData.flame; f.scale.set(0.55 + Math.sin(R.t * 23) * 0.05, 0.55 + Math.sin(R.t * 17) * 0.1, 0.55); }
+  if (vm.userData.arrow) vm.userData.arrow.visible = inv('arrow') > 0 && R.bowCd <= 0;
+  if (R.bowCd > 0) R.bowCd -= dt;
+}
+
+/* ---------- targeting (dot-product, forgiving) ---------- */
+const POIS = [];   // { id, x, y, z, reach, tall, label(), act(), on() }
+function findTarget() {
+  const p = G.p, cx = p.x, cy = R.camera.position.y, cz = p.z, f = _fwd;
+  let best = null, bestScore = -1e9;
+  const consider = (kind, ref, x, y0, z, reach, tall, bias) => {
+    const dxh = x - cx, dzh = z - cz, dh = Math.hypot(dxh, dzh); if (dh > reach + 0.5) return;
+    const y = tall ? clamp(cy + f.y * dh, y0, y0 + tall) : y0, dy = y - cy, d = Math.hypot(dh, dy); if (d > reach) return;
+    const dot = (dxh * f.x + dy * f.y + dzh * f.z) / (d || 1);
+    if (dot < (d < 1.4 ? 0.35 : 0.84)) return;
+    const score = dot * 3 - d * 0.22 + (bias || 0);
+    if (score > bestScore) { bestScore = score; best = { kind, ref, d }; }
+  };
+  nodeNear(cx, cz, 5.5, n => { const def = NT[n.t]; if (def.cls === 'stay' && n.gone) return; const big = def.cls === 'tree' || n.t === 'palm' || n.t === 'cactus'; consider('node', n, n.x, n.y + (big ? 0.3 : def.aim * n.s), n.z, big ? 4.3 : def.cls === 'pick' ? 3.4 : 4.0, big ? 3 : 0, def.cls === 'pick' ? 0.15 : 0); });
+  for (const s of G.structures) { if (Math.abs(s.x - cx) > 6 || Math.abs(s.z - cz) > 6) continue; const b = STRUCT[s.k]; consider('struct', s, s.x, s.y + (b.aim || 0.5), s.z, 4.4, b.tall || 0, b.use ? 0.25 : -0.4); }
+  for (const q of POIS) { if (Math.abs(q.x - cx) > 9 || Math.abs(q.z - cz) > 9 || (q.on && !q.on())) continue; consider('poi', q, q.x, q.y, q.z, q.reach || 4, q.tall || 0, 0.3); }
+  if (!best && f.y < -0.25) {   // looking down at open water?
+    for (const d of [1.6, 2.6, 3.6]) { const wx = cx + f.x * d, wz = cz + f.z * d; if (heightAt(wx, wz) < -0.12 && cy + f.y * d < 0.5) { best = { kind: 'water', ref: null, d }; break; } }
+  }
+  return best;
+}
+function targetPrompt(t) {
+  if (!t) return '';
+  if (t.kind === 'water') return key('E') + ' Drink' + (inv('canteen') ? ' and fill canteen' : '');
+  if (t.kind === 'poi') { const l = typeof t.ref.label === 'function' ? t.ref.label() : t.ref.label; return l ? key('E') + ' ' + l : ''; }
+  if (t.kind === 'struct') return structPrompt(t.ref);
+  const n = t.ref, def = NT[n.t], need = nodeNeeds(n);
+  if (def.cls === 'stay' && n.gone) return '';
+  if (!need) return key('E') + ' ' + def.verb;
+  if (need === 'axe') return bestTool('axe') ? key('Click') + ' Chop ' + def.n : '🪓 ' + def.n + ' — you need an Axe';
+  if (def.cls === 'crystal' && bestTool('pick') !== 'ironpick') return '💎 ' + def.n + ' — you need an Iron Pickaxe';
+  return bestTool('pick') ? key('Click') + ' Mine ' + def.n : '⛏️ ' + def.n + ' — you need a Pickaxe';
+}
+const TKEY = { E: '✋', Click: '⚔️', R: '↻', X: '✕', G: '💧' };
+const key = k => R.touch && TKEY[k] ? '<kbd class="tk">' + TKEY[k] + '</kbd>' : '<kbd>' + k + '</kbd>';
+
+/* ---------- actions ---------- */
+function primaryAction() {
+  if (R.panel || R.cinematic || R.sleeping || !R.started) return;
+  if (R.build) { placeBuild(); return; }
+  const t = R.target, cls = heldDef().tool.cls;
+  if (R.fish) { fishClick(); return; }
+  if (cls === 'bow' && !(t && (t.kind === 'poi' || t.kind === 'struct'))) { shootBow(); return; }
+  if (cls === 'rod' && tryCast()) return;
+  if (t && t.kind === 'node') {
+    const need = nodeNeeds(t.ref);
+    if (!need) { if (!(NT[t.ref.t].cls === 'stay' && t.ref.gone)) pickNode(t.ref); return; }
+    if (bestTool(need) && G.p.held !== need) { G.p.held = need; refreshViewModel(); }
+  } else if (t && (t.kind === 'poi' || t.kind === 'struct' || t.kind === 'water') && !nearestHostile(4.5)) { interact(); return; }
+  if (R.swing > 0) return;
+  const c = heldDef().tool.cls;
+  R.swing = R.swingDur = c === 'spear' ? 0.34 : c === 'sword' ? 0.3 : c === 'hands' ? 0.3 : 0.42; R.swingHit = false; sfx('swish');
+}
+function interact() {
+  if (R.panel || R.cinematic || R.sleeping || !R.started || R.t - (R.closedAt || -9) < 0.25) return;
+  if (R.build) return;
+  const t = R.target; if (!t) return;
+  if (t.kind === 'water') { drinkHere(); return; }
+  if (t.kind === 'poi') { t.ref.act(); return; }
+  if (t.kind === 'struct') { useStructure(t.ref); return; }
+  if (t.kind === 'node') { if (nodeNeeds(t.ref)) primaryAction(); else if (!(NT[t.ref.t].cls === 'stay' && t.ref.gone)) pickNode(t.ref); }
+}
+function resolveSwing() {
+  const tool = heldDef().tool, p = G.p;
+  // creatures first
+  let hitC = null, bd = 99;
+  for (const c of R.creatures) {
+    if (c.dead) continue;
+    const dx = c.x - p.x, dz = c.z - p.z, d = Math.hypot(dx, dz) - c.def.r * c.scale; if (d > tool.reach) continue;
+    const dot = (dx * _fwd.x + dz * _fwd.z) / (Math.hypot(dx, dz) || 1); if (dot < 0.5 && d > 0.6) continue;
+    if (d < bd) { bd = d; hitC = c; }
+  }
+  if (hitC) { damageCreature(hitC, tool.dmg * dmgMult(), tool); return; }
+  const t = findTarget();
+  if (t && t.kind === 'node') {
+    const n = t.ref, need = nodeNeeds(n), def = NT[n.t];
+    if (!need) return;
+    if (tool.cls !== need) { hint(need === 'axe' ? 'You need an Axe to chop trees. Make one in the Craft menu (press <b>C</b>).' : 'You need a Pickaxe to break rocks. Make one in the Craft menu (press <b>C</b>).'); sfx('deny'); return; }
+    if (def.cls === 'crystal' && tool.tier < 2) { hint('The crystal is too hard! You need an Iron Pickaxe.'); sfx('deny'); return; }
+    hitNode(n, tool);
+  }
+}
+
+/* ---------- bow ---------- */
+function shootBow() {
+  if (R.bowCd > 0) return;
+  if (inv('arrow') < 1) { hint('No arrows! Craft some: 2 sticks + 1 flint = 4 arrows.'); sfx('deny'); return; }
+  take('arrow', 1); R.bowCd = 0.55; sfx('bow'); R.swing = R.swingDur = 0.25; R.swingHit = true;
+  const m = vcMesh([part(box(0.03, 0.03, 0.8), 0xc9b98a, [0, 0, 0]), part(cone(0.05, 0.14, 4), 0x3b4046, [0, 0, -0.45], [-Math.PI / 2, 0, 0]), part(box(0.1, 0.01, 0.14), 0xffffff, [0, 0, 0.36])]);
+  const c = R.camera.position; m.position.set(c.x + _fwd.x * 0.6, c.y - 0.1 + _fwd.y * 0.6, c.z + _fwd.z * 0.6); R.scene.add(m);
+  R.arrows.push({ m, vx: _fwd.x * 46, vy: _fwd.y * 46 + 1.2, vz: _fwd.z * 46, life: 3 });
+}
+function updateArrows(dt) {
+  for (let i = R.arrows.length - 1; i >= 0; i--) {
+    const a = R.arrows[i], m = a.m; a.life -= dt; a.vy -= 11 * dt;
+    const steps = 3; let done = a.life <= 0;
+    for (let s = 0; s < steps && !done; s++) {
+      m.position.x += a.vx * dt / steps; m.position.y += a.vy * dt / steps; m.position.z += a.vz * dt / steps;
+      for (const c of R.creatures) {
+        if (c.dead) continue; const r = c.def.r * c.scale + 0.45;
+        if (Math.hypot(c.x - m.position.x, c.z - m.position.z) < r && m.position.y > c.y - 0.2 && m.position.y < c.y + c.model.h + 0.5) {
+          damageCreature(c, ITEMS.bow.tool.dmg * dmgMult(), ITEMS.bow.tool); if (Math.random() < 0.5) give('arrow', 1, true); done = true; break;
+        }
+      }
+      if (!done && m.position.y < heightAt(m.position.x, m.position.z)) { puff(m.position.x, m.position.y + 0.1, m.position.z, 0xc9b98a, 3, { size: 0.1 }); sfx('thunk'); done = true; }
+    }
+    m.lookAt(m.position.x - a.vx, m.position.y - a.vy, m.position.z - a.vz);
+    if (done) { R.scene.remove(m); m.geometry.dispose(); R.arrows.splice(i, 1); }
+  }
+}
+
+/* ---------- fishing ---------- */
+function startFishing(x, z, rich) {
+  if (!R.bobber) { R.bobber = vcMesh([part(sph(0.12, 8, 6), 0xe2334c, [0, 0.05, 0]), part(sph(0.1, 8, 6), 0xffffff, [0, -0.03, 0])]); R.bobber.castShadow = false; R.scene.add(R.bobber); }
+  R.bobber.visible = true; R.bobber.position.set(x, rich ? heightAt(x, z) + 0.1 : 0.05, z);
+  R.fish = { phase: 'wait', t: rnd(2.2, 6), x, z, rich, px: G.p.x, pz: G.p.z, y0: R.bobber.position.y };
+  if (G.p.held !== 'rod') { G.p.held = 'rod'; refreshViewModel(); }
+  sfx('splash'); R.swing = R.swingDur = 0.4; R.swingHit = true; hint('Wait for a bite... then click!', 3);
+}
+function tryCast() {
+  const c = R.camera.position;
+  for (let d = 3; d <= 17; d += 0.7) {
+    const x = c.x + _fwd.x * d, y = c.y + _fwd.y * d + 0.3 - d * d * 0.012, z = c.z + _fwd.z * d;
+    const h = heightAt(x, z);
+    if (y <= 0.05 && h < -0.3) { startFishing(x, z, false); return true; }
+    if (y < h) break;
+  }
+  return false;
+}
+function stopFishing() { R.fish = null; if (R.bobber) R.bobber.visible = false; }
+function fishClick() {
+  const f = R.fish;
+  if (f.phase === 'bite') {
+    if (Math.random() < 0.85) { const n = f.rich ? 2 : 1; give('rawfish', n); G.stats.fish += n; addXP(6); sfx('splash'); puff(f.x, f.y0 + 0.2, f.z, 0xbfe6ff, 8, { size: 0.15 }); if (G.stats.fish >= 5) badge('angler'); }
+    else { hint('It wriggled off the hook!'); sfx('deny'); }
+  } else hint('You reeled in too early.');
+  stopFishing();
+}
+function updateFishing(dt) {
+  const f = R.fish; if (!f) return;
+  if (dist2(G.p.x, G.p.z, f.px, f.pz) > 3 || G.p.held !== 'rod') { stopFishing(); return; }
+  f.t -= dt;
+  if (f.phase === 'wait') { R.bobber.position.y = f.y0 + Math.sin(R.t * 2.5) * 0.03; if (f.t <= 0) { f.phase = 'bite'; f.t = 1.3; sfx('bite'); hint('🐟 BITE! Click now!', 1.3); puff(f.x, f.y0 + 0.1, f.z, 0xffffff, 5, { size: 0.1 }); } }
+  else { R.bobber.position.y = f.y0 - 0.12 + Math.sin(R.t * 30) * 0.04; if (f.t <= 0) { hint('Too slow — the fish got away.'); stopFishing(); } }
+}
+
+/* ---------- input ---------- */
+function setupInput(canvas) {
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+    if (e.repeat) return; R.keys[e.code] = true; audioInit();
+    if (!R.started) return;
+    if (e.code === 'Escape') { if (R.build) { cancelBuild(); return; } if (R.panel) { if (R.panel !== 'pause' || !document.pointerLockElement) closePanel(); } else if (!R.cinematic && !R.sleeping) openPanel('pause'); return; }
+    if (R.panel) {
+      const invP = R.panel === 'inv' || R.panel === 'craft' || R.panel === 'build';
+      if (invP && (e.code === 'Tab' || e.code === 'KeyI')) switchInvTab('inv');
+      else if (invP && e.code === 'KeyC') switchInvTab('craft');
+      else if (invP && e.code === 'KeyB') switchInvTab('build');
+      else if (e.code === 'KeyE' && invP) closePanel();
+      else if ((e.code === 'Tab' || e.code === 'KeyI' || e.code === 'KeyE') && (R.panel === 'fire' || R.panel === 'chest')) closePanel(); else if (e.code === 'KeyJ' && R.panel === 'journal') closePanel(); else if (e.code === 'KeyM' && R.panel === 'map') closePanel();
+      else if ((e.code === 'Enter' || e.code === 'Space' || e.code === 'KeyE') && R.panelNext) R.panelNext();
+      return;
+    }
+    if (R.cinematic || R.sleeping) return;
+    switch (e.code) {
+      case 'KeyE': interact(); break;
+      case 'Tab': case 'KeyI': openPanel('inv'); break;
+      case 'KeyC': if (R.build) cancelBuild(); openPanel('craft'); break;
+      case 'KeyB': if (R.build) cancelBuild(); else openPanel('build'); break;
+      case 'KeyJ': openPanel('journal'); break;
+      case 'KeyM': openPanel('map'); break;
+      case 'KeyF': quickEat(); break;
+      case 'KeyG': drinkCanteen(); break;
+      case 'KeyR': if (R.build) R.build.rot = (R.build.rot + 1) % 4; break;
+      case 'KeyX': if (R.build) cancelBuild(); else tryDismantle(); break;
+      case 'KeyT': G.p.held = G.p.held === 'torch' ? 'hands' : (bestTool('torch') ? 'torch' : G.p.held); refreshViewModel(); break;
+      default: if (e.code.startsWith('Digit')) { const i = +e.code.slice(5) - 1; if (i >= 0 && i < HOTBAR.length) selectSlot(HOTBAR[i]); }
+    }
+  });
+  window.addEventListener('keyup', e => { R.keys[e.code] = false; });
+  window.addEventListener('blur', () => { R.keys = {}; });
+  canvas.addEventListener('mousedown', e => {
+    audioInit(); if (!R.started || R.panel) return;
+    if (!document.pointerLockElement && !R.dragLook) { lockPointer(); return; }
+    if (e.button === 0) { R.mouseDown = true; R.dragMoved = 0; if (!R.dragLook) primaryAction(); }
+    if (e.button === 2 && R.build) cancelBuild();
+  });
+  window.addEventListener('mouseup', e => { if (e.button === 0) { if (R.dragLook && R.mouseDown && R.dragMoved < 6 && !R.panel) primaryAction(); R.mouseDown = false; } });
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  window.addEventListener('mousemove', e => {
+    if (!R.started || R.panel || R.cinematic) return;
+    const locked = document.pointerLockElement === canvas;
+    if (locked || (R.dragLook && R.mouseDown)) {
+      const s = 0.0023 * R.sens; R.dragMoved += Math.abs(e.movementX) + Math.abs(e.movementY);
+      G.p.yaw -= clamp(e.movementX, -120, 120) * s; G.p.pitch = clamp(G.p.pitch - clamp(e.movementY, -120, 120) * s, -1.45, 1.45);
+    }
+  });
+  window.addEventListener('wheel', e => { if (!R.started || R.panel) return; const own = HOTBAR.filter(s => bestTool(s)); let i = own.indexOf(G.p.held); i = (i + (e.deltaY > 0 ? 1 : own.length - 1)) % own.length; selectSlot(own[i]); }, { passive: true });
+  document.addEventListener('pointerlockchange', () => { R.locked = document.pointerLockElement === canvas; if (R.locked) R.lockOk = true; if (!R.locked && R.started && !R.panel && !R.cinematic && !R.dragLook && !R.suppressPause) openPanel('pause'); });
+  document.addEventListener('pointerlockerror', () => { R.lockErr = (R.lockErr || 0) + 1; if (!R.lockOk && R.lockErr >= 3) { R.dragLook = true; hint('Mouse-look is blocked here: hold the left mouse button and drag to look around, or use the arrow keys.', 6); } else if (R.started && !R.panel) hint('Click the game to look around with the mouse.', 3); });
+}
+function lockPointer() { if (R.dragLook || R.touch) return; try { const pr = R.renderer.domElement.requestPointerLock(); if (pr && pr.catch) pr.catch(() => { }); } catch (e) { R.dragLook = true; } }
+function selectSlot(s) { if (!bestTool(s)) { hint('You don\'t have that tool yet.'); return; } if (R.fish) stopFishing(); G.p.held = s; refreshViewModel(); sfx('click'); }
+
+/* =========================================================================
+   07_build: base building — placement, structures, fire, sleep, storage
+   ========================================================================= */
+const STRUCT = {
+  campfire: { aim: 0.3, use: true, col: 0.6 }, shelter: { aim: 0.8, use: true, tall: 1 }, bench: { aim: 0.9, use: true, col: 0.8 },
+  chest: { aim: 0.4, use: true, col: 0.55 }, floor: { aim: 0.1 }, wall: { aim: 0.5, tall: 2.5 }, door: { aim: 0.5, tall: 2.5 }, roof: { aim: 3 },
+  bed: { aim: 0.5, use: true, col: 0.8 }, spikes: { aim: 0.5 }, torchpost: { aim: 1, tall: 1, col: 0.15 }, furnace: { aim: 0.9, use: true, col: 0.9 },
+  collector: { aim: 0.8, use: true, col: 0.5 }, garden: { aim: 0.4, use: true, col: 0.9 }, flag: { aim: 1, tall: 2, col: 0.12 }
+};
+const ROOFS = new Map(), WALLS = new Map();
+const cellKey = (x, z) => Math.floor(x / BUILD_CELL) + ',' + Math.floor(z / BUILD_CELL);
+
+function structColliders(s) {
+  const b = STRUCT[s.k], out = [];
+  if (s.k === 'wall') out.push(s.r ? { x: s.x, z: s.z, hw: 0.14, hd: 1.5 } : { x: s.x, z: s.z, hw: 1.5, hd: 0.14 });
+  else if (s.k === 'door') for (const o of [-1.1, 1.1]) out.push(s.r ? { x: s.x, z: s.z + o, hw: 0.14, hd: 0.4 } : { x: s.x + o, z: s.z, hw: 0.4, hd: 0.14 });
+  else if (s.k === 'spikes') for (const o of [-0.9, 0, 0.9]) out.push({ x: s.x + Math.cos(s.ry) * o, z: s.z - Math.sin(s.ry) * o, r: 0.45, spikes: true });
+  else if (b.col) out.push({ x: s.x, z: s.z, r: b.col });
+  return out;
+}
+/** create the mesh + colliders for a saved structure record */
+function spawnStructure(s) {
+  GFX.noGrassDirty = true;
+  const g = structureModel(s.k); g.position.set(s.x, s.y, s.z); g.rotation.y = s.ry || 0;
+  R.scene.add(g); s._g = g; s._cols = structColliders(s).map(addCollider);
+  if (s.k === 'floor') FLOORS.set(cellKey(s.x, s.z), s.y + 0.2);
+  if (s.k === 'roof') ROOFS.set(cellKey(s.x, s.z), s.y + 3);
+  if (s.k === 'wall' || s.k === 'door') WALLS.set(Math.round(s.x * 2) + ',' + Math.round(s.z * 2), s);
+  if (!s.d) s.d = {};
+  if (s.k === 'campfire') { if (s.d.fuel === undefined) { s.d.fuel = 0; s.d.lit = false; } g.userData.flame.visible = !!s.d.lit; }
+  if (s.k === 'chest' && !s.d.items) s.d.items = {};
+  if (s.k === 'collector' && s.d.water === undefined) s.d.water = 2;
+  if (s.k === 'garden') { if (s.d.berries === undefined) s.d.berries = 0; g.userData.berries.visible = s.d.berries > 0; }
+  if (s.k === 'bed') G.spawn = { x: s.x + Math.sin(s.ry || 0) * 1.6, z: s.z + Math.cos(s.ry || 0) * 1.6 };
+}
+function removeStructure(s) {
+  GFX.noGrassDirty = true;
+  R.scene.remove(s._g); s._g.traverse(o => { if (o.geometry && o.geometry !== UNIT_BOX) o.geometry.dispose(); });
+  s._cols.forEach(removeCollider);
+  if (s.k === 'floor') FLOORS.delete(cellKey(s.x, s.z)); if (s.k === 'roof') ROOFS.delete(cellKey(s.x, s.z));
+  if (s.k === 'wall' || s.k === 'door') WALLS.delete(Math.round(s.x * 2) + ',' + Math.round(s.z * 2));
+  G.structures.splice(G.structures.indexOf(s), 1);
+  if (s.k === 'bed') { const b = G.structures.find(q => q.k === 'bed'); G.spawn = b ? { x: b.x + 1.6, z: b.z } : null; }
+}
+function rebuildStructures() { FLOORS.clear(); ROOFS.clear(); WALLS.clear(); for (const s of G.structures) spawnStructure(s); }
+
+/* ---------- placement ---------- */
+function startBuild(id) {
+  cancelBuild(); const def = BUILD_BY_ID[id];
+  const g = structureModel(id);
+  const mat = new THREE.MeshBasicMaterial({ color: 0x66ff88, transparent: true, opacity: 0.55, depthWrite: false });
+  g.traverse(o => { if (o.isMesh) { o.material = mat; o.castShadow = false; } });
+  R.scene.add(g); R.build = { id, def, g, mat, rot: 0, ok: false, pos: null };
+  if (!R.touch) hint('Left click to place · <b>R</b> to rotate · <b>X</b> or right click to stop', 5);
+}
+function cancelBuild() { if (!R.build) return; R.scene.remove(R.build.g); R.build = null; }
+function aimPoint(maxD) {
+  const c = R.camera.position;
+  for (let d = 1.2; d <= maxD; d += 0.2) { const x = c.x + _fwd.x * d, y = c.y + _fwd.y * d, z = c.z + _fwd.z * d; if (y <= groundAt(x, z)) return { x, z }; }
+  const d = Math.min(maxD, 5); return { x: c.x + _fwd.x * d, z: c.z + _fwd.z * d };
+}
+function updateBuildGhost() {
+  const b = R.build; if (!b) return;
+  const a = aimPoint(b.def.place === 'free' ? 7 : 9), C = BUILD_CELL; let x = a.x, z = a.z, y, ry = 0, r = 0, ok = true, why = '';
+  const cx = Math.floor(x / C), cz = Math.floor(z / C), mx = (cx + 0.5) * C, mz = (cz + 0.5) * C;
+  const nbr = (map, off) => { for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const v = map.get((cx + ox) + ',' + (cz + oz)); if (v !== undefined) return v - off; } return undefined; };
+  if (b.def.place === 'cell') {
+    x = mx; z = mz;
+    const th = Math.max(heightAt(mx, mz), heightAt(mx - 1.4, mz - 1.4), heightAt(mx + 1.4, mz - 1.4), heightAt(mx - 1.4, mz + 1.4), heightAt(mx + 1.4, mz + 1.4));
+    if (b.id === 'floor') { const n = nbr(FLOORS, 0.2); y = n !== undefined && Math.abs(n - th) < 1.6 ? n : th; if (FLOORS.has(cx + ',' + cz)) { ok = false; why = 'There is already a floor here.'; } }
+    else { const f = FLOORS.get(cx + ',' + cz), n = nbr(ROOFS, 3); y = f !== undefined ? f - 0.2 : n !== undefined && Math.abs(n - th) < 1.6 ? n : th; if (ROOFS.has(cx + ',' + cz)) { ok = false; why = 'There is already a roof here.'; } }
+    ry = b.rot * Math.PI / 2;
+  } else if (b.def.place === 'edge') {
+    const u = x - mx, v = z - mz;
+    if (Math.abs(u) > Math.abs(v)) { x = cx * C + (u > 0 ? C : 0); z = mz; r = 1; } else { z = cz * C + (v > 0 ? C : 0); x = mx; r = 0; }
+    ry = r ? Math.PI / 2 : 0;
+    const f1 = FLOORS.get(cellKey(x - (r ? 0.5 : 0), z - (r ? 0 : 0.5))), f2 = FLOORS.get(cellKey(x + (r ? 0.5 : 0), z + (r ? 0 : 0.5)));
+    y = f1 !== undefined ? f1 - 0.2 : f2 !== undefined ? f2 - 0.2 : Math.max(heightAt(x, z), heightAt(x + (r ? 0 : 1.4), z + (r ? 1.4 : 0)), heightAt(x - (r ? 0 : 1.4), z - (r ? 1.4 : 0)));
+    if (WALLS.has(Math.round(x * 2) + ',' + Math.round(z * 2))) { ok = false; why = 'There is already a wall here.'; }
+  } else {
+    y = groundAt(x, z); ry = Math.round((G.p.yaw + Math.PI) / (Math.PI / 4)) * (Math.PI / 4) + b.rot * Math.PI / 2;
+    for (const s of G.structures) if (BUILD_BY_ID[s.k].place === 'free' && dist2(s.x, s.z, x, z) < 1.3) { ok = false; why = 'Too close to another object.'; }
+    if (dist2(x, z, G.p.x, G.p.z) < 1.1 && STRUCT[b.id].col) { ok = false; why = 'Step back a little.'; }
+  }
+  if (heightAt(x, z) < 0.35) { ok = false; why = 'You can\'t build in water.'; }
+  if (inSite(x, z, -3) && inSite(x, z, -3) !== 'stump') { ok = false; why = 'You can\'t build on a landmark.'; }
+  if (ok && !canAfford(b.def.cost)) { ok = false; why = 'Not enough materials.'; }
+  b.g.position.set(x, y, z); b.g.rotation.y = ry; b.mat.color.set(ok ? 0x66ff88 : 0xff5544);
+  b.ok = ok; b.why = why; b.pos = { x, y, z, ry, r };
+}
+function placeBuild() {
+  const b = R.build; if (!b || !b.pos) return;
+  if (!b.ok) { hint(b.why || 'Can\'t build there.'); sfx('deny'); return; }
+  pay(b.def.cost);
+  const s = { k: b.id, x: b.pos.x, y: b.pos.y, z: b.pos.z, ry: b.pos.ry, r: b.pos.r, d: {}, id: G.sid++ };
+  G.structures.push(s); spawnStructure(s);
+  sfx('build'); puff(s.x, s.y + 0.4, s.z, 0xc9b98a, 8, { size: 0.25 }); addXP(5); G.stats.built++;
+  s._g.scale.setScalar(0.6); R.fx.push({ kind: 'pop', m: s._g, t: 0 });
+  if (G.stats.built >= 12) badge('builder');
+  if (b.id === 'campfire') tipOnce('fire', 'Look at the campfire and press <b>E</b> to add fuel and light it.');
+  if (b.id === 'shelter' || b.id === 'bed') tipOnce('sleep', 'When it gets dark (after 7 pm), press <b>E</b> on it to sleep until morning.');
+  const keep = (b.def.place !== 'free' || b.id === 'spikes' || b.id === 'torchpost') && canAfford(b.def.cost);
+  if (!keep) cancelBuild();
+  uiDirty();
+}
+function tryDismantle() {
+  const t = R.target; if (!t || t.kind !== 'struct') { hint('Look at something you built and press X to take it apart.'); return; }
+  const s = t.ref;
+  if (s.k === 'chest' && Object.keys(s.d.items).length) { hint('Empty the chest first.'); sfx('deny'); return; }
+  const cost = BUILD_BY_ID[s.k].cost; for (const k in cost) { const n = Math.floor(cost[k] / 2); if (n > 0) give(k, n); }
+  puff(s.x, s.y + 0.5, s.z, 0xc9b98a, 10, { size: 0.3 }); sfx('thunk'); removeStructure(s); R.target = null;
+}
+
+/* ---------- using structures ---------- */
+function isRoofed(x, z) { return ROOFS.has(cellKey(x, z)); }
+function structPrompt(s) {
+  const d = s.d, x = '  <span class="dim">' + key('X') + ' take apart</span>';
+  switch (s.k) {
+    case 'campfire': return key('E') + (d.lit ? ' Campfire — cook / add fuel (' + d.fuel.toFixed(1) + 'h left)' : ' Campfire — add fuel and light');
+    case 'shelter': case 'bed': return key('E') + ' Sleep' + x;
+    case 'bench': return key('E') + ' Use Workbench' + x;
+    case 'furnace': return key('E') + ' Use Furnace' + x;
+    case 'chest': return key('E') + ' Open Chest' + x;
+    case 'collector': return key('E') + ' Drink (' + Math.floor(d.water) + ' drinks stored)' + x;
+    case 'garden': return (d.berries > 0 ? key('E') + ' Pick ' + d.berries + ' berries' : '🌱 Berry Garden — growing...') + x;
+    default: return BUILD_BY_ID[s.k].n + x;
+  }
+}
+function useStructure(s) {
+  switch (s.k) {
+    case 'campfire': openPanel('fire', s); break;
+    case 'bench': openPanel('craft', 'bench'); break;
+    case 'furnace': openPanel('craft', 'furnace'); break;
+    case 'chest': openPanel('chest', s); break;
+    case 'shelter': case 'bed': trySleep(s); break;
+    case 'collector': if (s.d.water >= 1) { s.d.water -= 1; drinkHere(34); } else { hint('The collector is empty. It fills when it rains.'); sfx('deny'); } break;
+    case 'garden': if (s.d.berries > 0) { give('berries', s.d.berries); s.d.berries = 0; s._g.userData.berries.visible = false; sfx('pickup'); } else hint('The berries are still growing. Check back tomorrow.'); break;
+  }
+}
+function lightFire(s) {
+  if (s.d.fuel <= 0) { hint('Add some sticks or wood first.'); sfx('deny'); return; }
+  if ((G.weather === 'rain' || G.weather === 'storm') && !isRoofed(s.x, s.z) && biomeAt(s.x, s.z) !== 'snow') { hint('It\'s too wet! Build a roof over the fire.'); sfx('deny'); return; }
+  s.d.lit = true; s._g.userData.flame.visible = true; sfx('ignite'); puff(s.x, s.y + 0.5, s.z, 0xffa040, 8, { size: 0.15, up: 3 });
+  if (!G.flags.fireLit) { G.flags.fireLit = true; badge('fire'); }
+}
+function douse(s, why) { s.d.lit = false; s._g.userData.flame.visible = false; if (dist2(s.x, s.z, G.p.x, G.p.z) < 25 && !R.sleeping) { sfx('hiss'); toast(why, 'warn'); } puff(s.x, s.y + 0.5, s.z, 0x888888, 6, { size: 0.3, up: 2.5, g: -1 }); }
+function addFuel(s, id) {
+  if (inv(id) < 1) return; if (s.d.fuel >= 11.5) { hint('The fire can\'t hold any more fuel.'); return; }
+  take(id, 1); s.d.fuel = Math.min(12, s.d.fuel + (id === 'wood' ? 3 : 0.75)); sfx('thunk');
+}
+/** all time-based structure logic, in game hours (also used while sleeping) */
+function structuresStep(gh) {
+  const wet = G.weather === 'rain' || G.weather === 'storm';
+  for (const s of G.structures) {
+    if (s.k === 'campfire' && s.d.lit) {
+      s.d.fuel -= gh; if (s.d.fuel <= 0) { s.d.fuel = 0; douse(s, '🔥 Your campfire burned out.'); R.report.fireOut = true; }
+      else if (wet && !isRoofed(s.x, s.z) && biomeAt(s.x, s.z) !== 'snow') { douse(s, '🌧️ The rain put out your campfire! Build a roof over it.'); R.report.fireRain = true; }
+    }
+    if (s.k === 'collector' && wet) s.d.water = Math.min(10, s.d.water + gh * 1.5);
+  }
+}
+function structuresNewDay() {
+  for (const s of G.structures) {
+    if (s.k === 'garden') { s.d.berries = Math.min(8, s.d.berries + 4); s._g.userData.berries.visible = true; }
+    if (s.k === 'collector') s.d.water = Math.min(10, s.d.water + 2);
+  }
+}
+/** nearest lit fire or torch post: used for warmth, wolf fear, lights */
+function nearestFlame(x, z, maxD, firesOnly) {
+  let best = null, bd = maxD;
+  for (const s of G.structures) {
+    if (!((s.k === 'campfire' && s.d.lit) || (!firesOnly && s.k === 'torchpost'))) continue;
+    const d = dist2(s.x, s.z, x, z); if (d < bd) { bd = d; best = s; }
+  }
+  if (!firesOnly || true) for (const f of R.worldFires) { const d = dist2(f.x, f.z, x, z); if (d < bd) { bd = d; best = f; } }
+  return best ? { s: best, d: bd } : null;
+}
+function updateStructures(dt) {
+  const p = G.p;
+  // shelter + warmth sources around the player
+  let sh = isRoofed(p.x, p.z);
+  if (!sh) for (const s of G.structures) if (s.k === 'shelter' && dist2(s.x, s.z, p.x, p.z) < 2.3) { sh = true; break; }
+  if (!sh) for (const f of R.worldRoofs) if (dist2(f.x, f.z, p.x, p.z) < f.r) { sh = true; break; }
+  if (sh && !R.sheltered && isRoofed(p.x, p.z)) badge('home');
+  R.sheltered = sh;
+  const nf = nearestFlame(p.x, p.z, 10, true); R.nearFire = nf ? nf.s : null; R.nearFireDist = nf ? nf.d : 99;
+  // flame flicker + up to 3 real lights on the closest flames
+  R.lightT = (R.lightT || 0) - dt;
+  if (R.lightT <= 0) {
+    R.lightT = 0.5; const src = [];
+    for (const s of G.structures) if ((s.k === 'campfire' && s.d.lit) || s.k === 'torchpost' || s.k === 'furnace') src.push({ x: s.x, y: s.y + (s.k === 'torchpost' ? 2.3 : 1), z: s.z, d: dist2(s.x, s.z, p.x, p.z), big: s.k === 'campfire' });
+    for (const f of R.worldFires) src.push({ x: f.x, y: f.y + 1, z: f.z, d: dist2(f.x, f.z, p.x, p.z), big: true });
+    src.sort((a, b) => a.d - b.d);
+    R.lightPool.forEach((L, i) => { const s = src[i]; if (s && s.d < 70) { L.userData.on = true; L.position.set(s.x, s.y, s.z); L.userData.base = s.big ? 1.5 : 1.0; L.distance = s.big ? 26 : 18; } else L.userData.on = false; });
+  }
+  const fl = 1 + Math.sin(R.t * 19) * 0.08 + Math.sin(R.t * 7.3) * 0.08;
+  for (const L of R.lightPool) L.intensity = L.userData.on ? L.userData.base * fl * (0.35 + nightAmount() * 0.75) : 0;
+  for (const s of G.structures) {
+    const f = s._g.userData.flame; if (f && f.visible) { const k = s.k === 'campfire' ? 1.9 : 0.9; f.scale.set(k * (1 + Math.sin(R.t * 21 + s.id) * 0.1), k * (1 + Math.sin(R.t * 15 + s.id * 2) * 0.18), k); if (s.k === 'campfire' && Math.random() < dt * 2.5) puff(s.x, s.y + 1.2, s.z, 0x777777, 1, { size: 0.16, up: 1.4, g: -1.2, speed: 0.3, life: 2.2, grow: 3 }); }
+    const c = s._g.userData.cloth; if (c) c.rotation.y = Math.sin(R.t * 2.2 + s.id) * 0.25;
+  }
+}
+
+/* ---------- sleep ---------- */
+function trySleep(s) {
+  if (G.hour >= 6 && G.hour < 19) { hint('It\'s too early to sleep. Come back after sunset (7 pm).'); sfx('deny'); return; }
+  if (R.raid) { hint('The wolves are howling. No sleep until the Wolf Moon is over!'); sfx('deny'); return; }
+  if (G.day % 10 === 0 && G.raidDone < G.day && G.hour >= 19) { startRaid(); return; }
+  if (nearestHostile(24)) { hint('You can\'t sleep — something is prowling nearby!'); sfx('deny'); return; }
+  R.sleeping = true; R.report = { rest: s.k === 'bed' ? 7 : 4, bed: s.k === 'bed' }; if (R.fish) stopFishing();
+  uiFade(true, 1000, () => {
+    clearCreatures(true);
+    const wasSheltered = true; let guard = 0;
+    while (!(G.hour >= 6 && G.hour < 6.3) && guard++ < 200) {
+      R.sheltered = wasSheltered; ambientTemp();
+      advanceTime(0.25, true); structuresStep(0.25);
+      const nf = nearestFlame(G.p.x, G.p.z, 10, true); R.nearFire = nf ? nf.s : null; R.nearFireDist = nf ? nf.d : 99;
+      survivalStep(0.25, { sleeping: true, rest: R.report.rest });
+    }
+    G.hour = 6.05; if (!G.flags.slept) { G.flags.slept = true; badge('night'); }
+    saveGame(); showMorningReport(() => { R.sleeping = false; uiFade(false, 900); });
+  });
+}
+
+/* =========================================================================
+   08_creatures: animals, predators, bosses, Wolf Moon raids, Scout the dog
+   ========================================================================= */
+function spawnCreature(type, x, z, o = {}) {
+  const def = CREATURES[type], model = ANIMALS[o.model || type]();
+  const c = {
+    type, def, model, g: model.g, x, z, y: heightAt(x, z), yaw: rnd(TAU), hp: def.hp * (o.hpMul || 1), maxHp: def.hp * (o.hpMul || 1), scale: model.g.scale.x,
+    state: 'idle', st: rnd(1, 3), tx: x, tz: z, home: { x, z }, phase: rnd(TAU), moving: 0, flash: 0, atkCd: 0, spec: rnd(4, 7), lunge: 0,
+    raid: !!o.raid, lair: o.lair || null, boss: !!def.boss, warned: false, dead: false, summoned: false
+  };
+  c.g.position.set(x, c.y, z); R.scene.add(c.g); R.creatures.push(c); return c;
+}
+function removeCreature(c) { R.scene.remove(c.g); c.g.traverse(o => { if (o.material && o.material.dispose) o.material.dispose(); if (o.geometry && o.geometry !== UNIT_BOX) o.geometry.dispose(); }); const i = R.creatures.indexOf(c); if (i >= 0) R.creatures.splice(i, 1); if (R.focus === c) R.focus = null; if (R.boss === c) R.boss = null; }
+function clearCreatures() { for (const c of R.creatures.slice()) removeCreature(c); }
+function nearestHostile(d) {
+  let best = null;
+  for (const c of R.creatures) { if (c.dead || c.def.passive || c.state === 'flee' || c.state === 'home') continue; const dd = dist2(c.x, c.z, G.p.x, G.p.z); if (dd < d) { d = dd; best = c; } }
+  return best;
+}
+function damageCreature(c, dmg, tool) {
+  if (c.dead) return;
+  if (c.state === 'stun') dmg *= 1.5;
+  dmg = Math.round(dmg); c.hp -= dmg; c.flash = 0.12; sfx('hit'); R.focus = c; R.focusT = 5;
+  dmgNumber(c.x, c.y + c.model.h + 0.3, c.z, dmg, c.state === 'stun' ? 'crit' : '');
+  puff(c.x, c.y + c.model.h * 0.6, c.z, 0xffffff, 3, { size: 0.1, speed: 3, g: 6 });
+  if (tool && tool.storm) { sfx('zap'); uiFlash('#fff7c2', 0.3); R.flashT = 0.15; puff(c.x, c.y + 1, c.z, 0xffe066, 10, { size: 0.2, speed: 5, up: 4 }); }
+  const dx = c.x - G.p.x, dz = c.z - G.p.z, d = Math.hypot(dx, dz) || 1;
+  if (!c.boss) { const k = collide(c.x + dx / d * 0.5, c.z + dz / d * 0.5, c.def.r * c.scale); c.x = k[0]; c.z = k[1]; }
+  if (c.hp <= 0) { killCreature(c); return; }
+  if (c.def.passive) { c.state = 'flee'; c.st = 5; if (c.type === 'rabbit') sfx('squeak'); }
+  else if (c.state === 'idle' || c.state === 'home' || (c.state === 'flee' && !c.def.fearsFire)) { c.state = 'chase'; c.st = 0; }
+}
+function killCreature(c) {
+  c.dead = true; c.deadT = 0.45; G.stats.kills++;
+  puff(c.x, c.y + c.model.h * 0.5, c.z, 0xd8ccb4, c.boss ? 30 : 12, { size: c.boss ? 0.7 : 0.4, speed: c.boss ? 5 : 2.5 });
+  const loot = c.def.loot; for (const k in loot) give(k, loot[k]);
+  addXP(c.def.xp); if (G.stats.kills >= 10) badge('hunter');
+  if (c.lair) G.lairs[c.lair] = G.day + 5;
+  if (c.boss) {
+    G.bossDead[c.type] = true; G.stats.bosses++; R.boss = null; badge(c.type); sfx('discover'); uiFlash('#fff', 0.5);
+    banner(c.def.n.toUpperCase() + ' DEFEATED!', 'You found the ' + (c.type === 'grizzle' ? 'Power Coil' : c.type === 'duneking' ? 'Battery' : 'Antenna') + '!');
+    if (c.type === 'grizzle') spawnPackNote();
+  }
+  if (c.raid && R.raid) { R.raid.killed++; if (R.raid.killed >= R.raid.total) endRaid(false); }
+}
+/** move with collision; refuses to walk into water */
+function moveCreature(c, dx, dz, speed, dt) {
+  const l = Math.hypot(dx, dz); if (l < 0.0001) return;
+  const nx = c.x + dx / l * speed * dt, nz = c.z + dz / l * speed * dt;
+  if (heightAt(nx, nz) < 0.25) { c.st = 0; return; }
+  const k = collide(nx, nz, Math.min(0.7, c.def.r * c.scale));
+  c.x = k[0]; c.z = k[1]; c.moving = speed;
+  c.yaw += angDiff(c.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 9);
+}
+function updateCreatures(dt) {
+  const p = G.p, torch = heldDef().tool.cls === 'torch', dawn = G.hour > 5.6 && G.hour < 8;
+  for (let i = R.creatures.length - 1; i >= 0; i--) {
+    const c = R.creatures[i], def = c.def;
+    if (c.dead) { c.deadT -= dt; c.g.scale.setScalar(Math.max(0.01, c.scale * c.deadT / 0.45)); if (c.deadT <= 0) removeCreature(c); continue; }
+    const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz); c.moving = 0; c.st -= dt; if (c.atkCd > 0) c.atkCd -= dt;
+    if (d > 150 && !c.raid) { removeCreature(c); continue; }
+    if (def.passive) {
+      if (c.state === 'flee') { moveCreature(c, -dx, -dz, def.spd, dt); if (c.st <= 0) c.state = 'idle'; }
+      else if (d < def.flee) { c.state = 'flee'; c.st = rnd(2, 3.2); if (c.type === 'rabbit' && d < 14) sfx('squeak'); }
+      else wander(c, dt, 2.0);
+    } else {
+      // fear of flame (never during a Wolf Moon)
+      if (def.fearsFire && !c.raid && c.state !== 'flee') {
+        let th = null;
+        if (torch && d < 12) th = p; else { const f = nearestFlame(c.x, c.z, 9); if (f) th = f.s; }
+        if (th) { c.state = 'flee'; c.st = 4; c.fx = th.x; c.fz = th.z; if (d < 30) { sfx('whine'); tipOnce('wolfFear', 'The wolf is scared of the flames and runs away!'); } }
+      }
+      if (def.fearsFire && !c.raid && !c.lair && dawn && c.state !== 'flee') { c.state = 'flee'; c.st = 30; c.fx = p.x; c.fz = p.z; }
+      // spikes hurt
+      for (const s of G.structures) if (s.k === 'spikes' && Math.abs(s.x - c.x) < 2 && dist2(s.x, s.z, c.x, c.z) < 1.9) { c.hp -= 18 * dt; if (Math.random() < dt * 4) { c.flash = 0.1; puff(c.x, c.y + 0.6, c.z, 0xffffff, 2, { size: 0.1 }); } if (c.hp <= 0) { killCreature(c); break; } }
+      if (c.dead) continue;
+      const hd = dist2(c.x, c.z, c.home.x, c.home.z);
+      switch (c.state) {
+        case 'flee': {
+          const fx = c.x - c.fx, fz = c.z - c.fz; moveCreature(c, fx, fz, def.spd * 1.1, dt);
+          if (Math.hypot(fx, fz) > 45 || (d > 60)) { if (c.lair) { c.state = 'home'; } else { removeCreature(c); continue; } }
+          if (c.st <= 0) c.state = 'idle'; break;
+        }
+        case 'idle':
+          if (def.leash && hd > 6) { moveCreature(c, c.home.x - c.x, c.home.z - c.z, def.spd * 0.5, dt); } else wander(c, dt, 1.6);
+          if (d < def.sense * (c.raid ? 6 : 1)) { c.state = 'chase'; if (!c.warned) { c.warned = true; sfx(c.boss ? 'roar' : c.type === 'scorpion' ? 'hiss' : 'growl'); scoutAlert(c); } }
+          break;
+        case 'home':
+          moveCreature(c, c.home.x - c.x, c.home.z - c.z, def.spd, dt); c.hp = Math.min(c.maxHp, c.hp + c.maxHp * 0.04 * dt);
+          if (hd < 4) c.state = 'idle'; break;
+        case 'chase': {
+          if (def.leash && hd > def.leash) { c.state = 'home'; if (c.boss) hint(def.n + ' loses interest and heads home.'); break; }
+          if (!c.raid && !c.boss && d > def.sense * 2.2) { c.state = 'idle'; break; }
+          const reach = def.atk * (0.75 + 0.25 * c.scale);
+          if (c.boss) {
+            c.spec -= dt;
+            if (c.spec <= 0 && d > 4 && d < 22) { c.spec = rnd(6, 9); c.state = 'tele'; c.st = 0.95; c.mode = (c.type === 'frostclaw' && Math.random() < 0.5 && d < 9) ? 'slam' : 'charge'; sfx('roar'); dmgNumber(c.x, c.y + c.model.h + 0.6, c.z, c.mode === 'slam' ? 'JUMP!' : 'DODGE!', 'warn'); break; }
+            if (c.type === 'duneking' && !c.summoned && c.hp < c.maxHp * 0.5) { c.summoned = true; sfx('hiss'); banner('', 'The Dune King calls its brood!'); for (let k = 0; k < 3; k++) { const a = rnd(TAU); const s = spawnCreature('scorpion', c.x + Math.cos(a) * 4, c.z + Math.sin(a) * 4); s.state = 'chase'; s.warned = true; } }
+          }
+          if (d > reach) moveCreature(c, dx, dz, def.spd * (c.raid ? 1.05 : 1), dt);
+          else if (c.atkCd <= 0) { c.state = 'wind'; c.st = c.boss ? 0.55 : 0.42; }
+          c.yaw += angDiff(c.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 8);
+          break;
+        }
+        case 'wind':
+          c.yaw += angDiff(c.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 10);
+          if (c.st <= 0) {
+            c.lunge = 0.22; c.atkCd = c.boss ? 1.5 : 1.25; c.state = 'chase';
+            if (d < def.atk * (0.75 + 0.25 * c.scale) + 0.7 && Math.abs(p.y - c.y) < 2.5) hurtPlayer(def.dmg, 'hurt');
+            else sfx('swish');
+          }
+          break;
+        case 'tele':   // boss winds up a special
+          c.yaw += angDiff(c.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 10); c.flash = 0.06;
+          if (c.st <= 0) {
+            if (c.mode === 'slam') {
+              sfx('thunder'); R.shake = Math.max(R.shake, 0.5); for (let k = 0; k < 16; k++) { const a = k / 16 * TAU; puff(c.x + Math.cos(a) * 5, c.y + 0.3, c.z + Math.sin(a) * 5, 0xdff4ff, 1, { size: 0.5 }); }
+              if (d < 8 && p.y - R.ground < 0.5) hurtPlayer(def.dmg * 1.3, 'hurt'); c.state = 'stun'; c.st = 1.4;
+            } else { c.state = 'charge'; c.st = 1.0; const l = d || 1; c.cx = dx / l; c.cz = dz / l; c.hitOnce = false; }
+          }
+          break;
+        case 'charge':
+          moveCreature(c, c.cx, c.cz, 15, dt);
+          if (!c.hitOnce && d < def.r * c.scale + 1.1) { c.hitOnce = true; hurtPlayer(def.dmg * 1.5, 'hurt'); R.shake = 0.6; }
+          if (Math.random() < dt * 20) puff(c.x, c.y + 0.2, c.z, 0xcbbfa5, 1, { size: 0.4 });
+          if (c.st <= 0) { c.state = 'stun'; c.st = c.hitOnce ? 0.8 : 1.7; if (!c.hitOnce) dmgNumber(c.x, c.y + c.model.h + 0.6, c.z, 'DIZZY!', 'crit'); }
+          break;
+        case 'stun': if (c.st <= 0) c.state = 'chase'; break;
+      }
+      if (c.boss && (c.state !== 'idle' && c.state !== 'home') && d < 60) R.boss = c; else if (R.boss === c) R.boss = null;
+    }
+    // keep creatures from standing inside the player
+    if (d < 0.75 && !c.def.passive) { c.x -= dx / (d || 1) * 0.05; c.z -= dz / (d || 1) * 0.05; }
+    // animate
+    c.y = lerp(c.y, heightAt(c.x, c.z), Math.min(1, dt * 12));
+    let ox = 0, oz = 0; if (c.lunge > 0) { c.lunge -= dt; const k = Math.sin(c.lunge / 0.22 * Math.PI) * 0.5; ox = Math.sin(c.yaw) * k; oz = Math.cos(c.yaw) * k; }
+    c.g.position.set(c.x + ox, c.y, c.z + oz); c.g.rotation.y = c.yaw;
+    const m = c.model;
+    if (c.moving > 0) { c.phase += dt * Math.min(c.moving, 9) * m.stride * 0.22; const s = Math.sin(c.phase) * (m.scorp ? 0.35 : 0.65); if (m.scorp) m.legs.forEach((l, j) => l.rotation.y = (j % 2 ? -1 : 1) * Math.sin(c.phase + j) * 0.4); else { m.legs[0].rotation.x = s; m.legs[3].rotation.x = s; m.legs[1].rotation.x = -s; m.legs[2].rotation.x = -s; } }
+    else if (!m.scorp) m.legs.forEach(l => l.rotation.x *= 0.85);
+    if (m.head) m.head.rotation.x = c.state === 'wind' ? -0.5 : c.state === 'stun' ? 0.5 + Math.sin(R.t * 12) * 0.1 : Math.sin(R.t * 1.3 + c.phase) * 0.06;
+    if (m.scorp && m.tail) m.tail.rotation.x = c.state === 'wind' || c.state === 'tele' ? 0.5 : Math.sin(R.t * 2 + c.phase) * 0.08;
+    c.g.rotation.z = c.state === 'stun' ? Math.sin(R.t * 9) * 0.06 : 0;
+    if (c.flash > 0) { c.flash -= dt; const on = c.flash > 0; for (const mt of m.mats) mt.emissive.setHex(on ? (c.state === 'tele' ? 0xaa3300 : 0x999999) : 0); }
+  }
+  if (R.focusT > 0) { R.focusT -= dt; if (R.focusT <= 0) R.focus = null; }
+}
+function wander(c, dt, speed) {
+  if (c.st <= 0) { if (c.tx === null) { c.tx = c.x + rnd(-12, 12); c.tz = c.z + rnd(-12, 12); c.st = rnd(2, 5); } else { c.tx = null; c.st = rnd(1.5, 5); } }
+  if (c.tx !== null) { const dx = c.tx - c.x, dz = c.tz - c.z; if (Math.hypot(dx, dz) > 0.6) moveCreature(c, dx, dz, speed, dt); }
+}
+
+/* ---------- population ---------- */
+function spawnPoint(biome, r0, r1) {
+  for (let i = 0; i < 8; i++) {
+    const a = rnd(TAU), r = rnd(r0, r1), x = G.p.x + Math.cos(a) * r, z = G.p.z + Math.sin(a) * r;
+    if (Math.abs(x) > 330 || Math.abs(z) > 330 || heightAt(x, z) < 1.2 || slopeAt(x, z) > 0.9) continue;
+    if (biome && biomeAt(x, z) !== biome) continue;
+    if (inSite(x, z, 4)) continue;
+    return { x, z };
+  }
+  return null;
+}
+function updateSpawner() {
+  const p = G.p, b = R.biome, night = nightAmount() > 0.6, cnt = {};
+  for (const c of R.creatures) if (!c.dead && !c.lair && !c.boss && !c.raid) cnt[c.type] = (cnt[c.type] || 0) + 1;
+  const want = (type, cap, biome, o) => { if ((cnt[type] || 0) < cap) { const s = spawnPoint(biome, 46, 72); if (s) { spawnCreature(type, s.x, s.z, o); return true; } } return false; };
+  if (b === 'forest') {
+    want('rabbit', night ? 1 : 3, 'forest'); if (!night) want('deer', 2, 'forest');
+    if (night && G.day >= 2 && !R.raid && (G.hour < 5 || G.hour > 20.5)) want('wolf', clamp(1 + Math.floor(G.day / 3), 1, 4), 'forest');
+  } else if (b === 'desert') {
+    want('rabbit', 2, 'desert'); want('scorpion', night ? 4 : 2, 'desert');
+  } else {
+    want('goat', 3, 'snow'); want('rabbit', 2, 'snow', { model: 'hare' }); want('snowwolf', night ? 3 : (G.day >= 3 ? 2 : 1), 'snow');
+  }
+  // lairs and bosses appear when you get close
+  const lair = (id, type, site, n, o) => {
+    const s = SITES[site], d = dist2(p.x, p.z, s.x, s.z), alive = R.creatures.some(c => c.lair === id && !c.dead);
+    if (d < 95 && !alive && !(G.lairs[id] > G.day)) for (let i = 0; i < n; i++) { const a = i / n * TAU + 1; const c = spawnCreature(type, s.x + Math.cos(a) * (n > 1 ? 4 : 0.5), s.z + Math.sin(a) * (n > 1 ? 4 : 0.5), { lair: id, ...(o || {}) }); }
+  };
+  lair('cave2', 'bear', 'cave2', 1); lair('wolfDen', 'wolf', 'wolfDen', 3); lair('crystalW', 'snowwolf', 'crystal', 2);
+  const boss = (type, site) => { const s = SITES[site]; if (!G.bossDead[type] && dist2(p.x, p.z, s.x, s.z) < 110 && !R.creatures.some(c => c.type === type)) spawnCreature(type, s.x, s.z); };
+  boss('grizzle', 'den'); boss('duneking', 'boneyard'); boss('frostclaw', 'summit');
+  // Wolf Moon
+  if (R.raid) {
+    const alive = R.creatures.filter(c => c.raid && !c.dead).length;
+    if (R.raid.spawned < R.raid.total && alive < 4) { const s = spawnPoint(null, 30, 46); if (s) { const c = spawnCreature('wolf', s.x, s.z, { model: 'redwolf', raid: true, hpMul: 1.15 }); c.state = 'chase'; c.warned = true; R.raid.spawned++; if (Math.random() < 0.5) sfx('howl'); } }
+    if (G.hour > 5.6 && G.hour < 12) endRaid(true);
+  } else if (G.day % 10 === 0 && G.raidDone < G.day && (G.hour >= 20.5 || G.hour < 3) && !R.sleeping) startRaid();
+}
+function startRaid() {
+  G.raidDone = G.day; const total = Math.min(14, 4 + Math.floor(G.day / 10) * 2);
+  R.raid = { total, spawned: 0, killed: 0 };
+  for (const c of R.creatures.slice()) if (c.type === 'wolf' && !c.raid && !c.lair) removeCreature(c);
+  banner('🌕 WOLF MOON', total + ' red-eyed wolves are hunting you. They are not afraid of fire tonight!'); sfx('howl'); setTimeout(() => sfx('howl'), 700); setTimeout(() => sfx('howl'), 1500);
+}
+function endRaid(dawn) {
+  if (!R.raid) return;
+  const won = !dawn && R.raid.killed >= R.raid.total;
+  for (const c of R.creatures.slice()) if (c.raid) { if (dawn) removeCreature(c); }
+  R.raid = null;
+  if (won) { banner('WOLF MOON SURVIVED!', 'The pack is beaten. +150 XP'); addXP(150); give('fang', 3); badge('moon'); sfx('discover'); }
+  else if (R.started && !R.cinematic) { toast('🌅 The sun rises. The Wolf Moon pack slinks away.', 'ok'); badge('moon'); }
+}
+
+/* ---------- Scout ---------- */
+function initScout() {
+  const m = ANIMALS.scout(), s = SITES.rayCamp;
+  R.scout = { model: m, g: m.g, x: s.x + 3, z: s.z + 2, y: 0, yaw: 0, phase: 0, moving: 0, bite: 0, barkT: 0, state: 'wait' };
+  R.scout.y = heightAt(R.scout.x, R.scout.z); m.g.position.set(R.scout.x, R.scout.y, R.scout.z); R.scene.add(m.g);
+  R.scoutPoi = {
+    id: 'scout', x: R.scout.x, y: R.scout.y + 0.5, z: R.scout.z, reach: 3.6,
+    label: () => {
+      const m = scoutMeat();
+      if (!G.scout.friend) return m ? 'Give Scout some meat' : 'Scout looks hungry. He wants meat (raw is fine!)';
+      if (G.scout.fed >= G.day) return 'Pet Scout';
+      return m ? 'Feed Scout — he\'s hungry!' : 'Scout is hungry — he needs meat';
+    },
+    act: () => {
+      const sc = R.scout, m = scoutMeat();
+      if (!G.scout.friend) {
+        if (!m) { hint('Scout sniffs your hands and whines. He wants meat — hunt a rabbit or deer. Raw meat is fine for him!'); sfx('whine'); return; }
+        take(m, 1); G.scout.friend = true; G.scout.fed = G.day; sfx('bark'); sfx('heart'); hearts(sc);
+        if (G.badges.friend) { banner('SCOUT IS BACK!', 'Don\'t forget to feed him every day this time.'); }
+        else { badge('friend'); addXP(40); banner('SCOUT JOINED YOU!', 'He will follow you, warn you of danger and fight by your side.'); }
+        tipOnce('scoutfood', 'Scout needs <b>meat every day</b> (raw is fine). If you forget, he\'ll go home!');
+        return;
+      }
+      if (G.scout.fed < G.day) {
+        if (!m) { hint('Scout is hungry! Hunt a rabbit or deer for meat — raw is fine for him.'); sfx('whine'); return; }
+        take(m, 1); G.scout.fed = G.day; sfx('eat'); sfx('bark'); hearts(sc);
+        toast('🐕 Scout gobbles up the ' + (m === 'rawmeat' ? 'raw meat' : 'meat') + '! He\'s happy until tomorrow.', 'ok');
+      } else { hearts(sc); sfx('heart'); sfx('bark'); }
+      if (G.scout.dug < G.day) {
+        G.scout.dug = G.day; const ch = nearestClosedChest();
+        if (ch && Math.random() < 0.7) toast('🐕 Scout sniffs the air and points ' + compassWord(ch.x - G.p.x, ch.z - G.p.z) + '. Treasure, ' + Math.round(dist2(ch.x, ch.z, G.p.x, G.p.z)) + ' steps away!', 'ok');
+        else { const it = pick(['stick', 'flint', 'stone', 'fibre', 'mushroom', 'herb']); give(it, 1, true); toast('🐕 Scout digs something up for you: ' + ITEMS[it].n + '!', 'ok'); }
+      } else if (G.scout.fed >= G.day) toast('🐕 Scout wags his tail.', 'ok');
+    }
+  };
+  POIS.push(R.scoutPoi);
+}
+/** Scout eats raw meat first (you can't use it without cooking), then cooked meat */
+function scoutMeat() { return inv('rawmeat') ? 'rawmeat' : inv('meat') ? 'meat' : null; }
+function scoutLeaves() {
+  G.scout.friend = false; G.scout.left = (G.scout.left || 0) + 1;
+  const s = R.scout, c = SITES.rayCamp; s.x = c.x + 3; s.z = c.z + 2;
+  if (R.report) R.report.scoutLeft = true;
+  toast('🐕 Scout got too hungry and went home to Uncle Ray\'s camp. Take him some meat to win him back!', 'warn', 12000);
+}
+function scoutHungerCheck() {
+  if (!G.scout.friend || G.scout.fed >= G.day) return;
+  if (G.hour >= 14 && G.scout.warned !== G.day) { G.scout.warned = G.day; sfx('whine'); toast('🐕 Scout is hungry! Feed him some meat today, or he\'ll go home.', 'warn', 8000); }
+  else if (G.hour >= 20 && G.scout.warned2 !== G.day) { G.scout.warned2 = G.day; sfx('whine'); toast('🐕 Scout\'s tummy is rumbling... feed him before midnight!', 'warn', 8000); }
+}
+function hearts(sc) { for (let i = 0; i < 4; i++) setTimeout(() => dmgNumber(sc.x + rnd(-0.4, 0.4), sc.y + 1 + rnd(0.3), sc.z + rnd(-0.4, 0.4), '❤', 'heart'), i * 120); }
+function scoutAlert(c) {
+  if (!G.scout.friend || R.scout.barkT > 0) return;
+  R.scout.barkT = 6; sfx('bark'); toast('🐕 Scout growls. ' + (c.boss ? c.def.n + ' is here!' : 'Something is coming — ' + compassWord(c.x - G.p.x, c.z - G.p.z) + '!'), 'warn');
+}
+function compassWord(dx, dz) { const a = Math.atan2(dx, -dz), i = Math.round(a / (Math.PI / 4)); return ['NORTH', 'NORTH-EAST', 'EAST', 'SOUTH-EAST', 'SOUTH', 'SOUTH-WEST', 'WEST', 'NORTH-WEST'][(i + 8) % 8]; }
+function updateScout(dt) {
+  const s = R.scout, p = G.p; if (!s) return; s.moving = 0; if (s.barkT > 0) s.barkT -= dt; if (s.bite > 0) s.bite -= dt;
+  if (G.scout.friend) {
+    const d = dist2(s.x, s.z, p.x, p.z);
+    if (d > 48 || R.teleScout) { R.teleScout = false; const a = p.yaw + rnd(-0.6, 0.6); s.x = p.x + Math.sin(a) * 3; s.z = p.z + Math.cos(a) * 3; }
+    let foe = null, fd = 11;
+    for (const c of R.creatures) { if (c.dead || c.def.passive || c.state === 'flee') continue; if (c.state === 'idle' && !c.boss) continue; const dd = dist2(c.x, c.z, s.x, s.z); if (dd < fd && dist2(c.x, c.z, p.x, p.z) < 14) { fd = dd; foe = c; } }
+    const go = (tx, tz, sp, stop) => { const dx = tx - s.x, dz = tz - s.z, l = Math.hypot(dx, dz); if (l > stop) { const nx = s.x + dx / l * sp * dt, nz = s.z + dz / l * sp * dt; if (heightAt(nx, nz) > -0.3) { const k = collide(nx, nz, 0.3); s.x = k[0]; s.z = k[1]; } s.moving = sp; s.yaw += angDiff(s.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 10); } return l; };
+    if (foe) { const l = go(foe.x, foe.z, 8.5, foe.def.r * foe.scale + 0.7); if (l < foe.def.r * foe.scale + 1.2 && s.bite <= 0) { s.bite = 1.1; damageCreature(foe, 6 + G.p.level, null); if (Math.random() < 0.4) sfx('bark'); } }
+    else if (d > 3.2) go(p.x, p.z, d > 9 ? 9.5 : d > 5 ? 6.5 : 4, 2.4);
+  }
+  s.y = lerp(s.y, heightAt(s.x, s.z), Math.min(1, dt * 12)); s.g.position.set(s.x, s.y, s.z); s.g.rotation.y = s.yaw;
+  const m = s.model;
+  if (s.moving > 0) { s.phase += dt * s.moving * 2.6; const k = Math.sin(s.phase) * 0.7; m.legs[0].rotation.x = k; m.legs[3].rotation.x = k; m.legs[1].rotation.x = -k; m.legs[2].rotation.x = -k; } else m.legs.forEach(l => l.rotation.x *= 0.8);
+  m.tail.rotation.y = Math.sin(R.t * (G.scout.friend ? 11 : 4)) * 0.6; m.head.rotation.x = Math.sin(R.t * 1.7) * 0.07 - (s.moving ? 0 : 0.12);
+  R.scoutPoi.x = s.x; R.scoutPoi.y = s.y + 0.5; R.scoutPoi.z = s.z;
+}
+
+/* =========================================================================
+   09_story: landmarks, props, notes, treasure, quests, Uncle Ray, endings
+   ========================================================================= */
+const CHESTS = [];          // { id, x, y, z, loot }
+const LM_POS = {};          // landmark id -> { x, z, r }
+function prop(parts, x, y, z, ry, mat) { const m = vcMesh(parts, mat); m.position.set(x, y, z); m.rotation.y = ry || 0; R.scene.add(m); return m; }
+/** a cluster of big rocks: list of [dx, dz, size, heightScale, dy] */
+function rocks(cx, cy, cz, list, color, noCol) {
+  const ps = [];
+  list.forEach((r, i) => { ps.push(part(ico(1, 0), color || 0x77746e, [r[0], (r[4] || 0) + r[2] * (r[3] || 0.8) * 0.45, r[1]], [i * 1.3, i * 2.1, i * 0.7], [r[2], r[2] * (r[3] || 0.8), r[2]], 0.13)); if (!noCol && !(r[4] > 1.5)) addCollider({ x: cx + r[0], z: cz + r[1], r: r[2] * 0.85 }); });
+  return prop(ps, cx, cy, cz);
+}
+function addPoi(o) { POIS.push(o); return o; }
+function readNote(id) {
+  if (!G.notes.includes(id)) { G.notes.push(id); addXP(25); }
+  sfx('page'); showNote(NOTES[id].t, NOTES[id].body);
+}
+function addChest(id, x, z, loot, ry) {
+  const y = heightAt(x, z), g = new THREE.Group();
+  const base = vcMesh([...planks(1.0, 0.45, 0.65, 3, true, 0, 0.25, 0), part(box(1.04, 0.08, 0.69), 0xd9a520, [0, 0.47, 0]), part(box(0.08, 0.5, 0.7), 0xd9a520, [-0.36, 0.26, 0]), part(box(0.08, 0.5, 0.7), 0xd9a520, [0.36, 0.26, 0])]);
+  const lid = vcMesh([part(box(1.04, 0.22, 0.69), 0x9c7446, [0, 0.11, 0.345]), part(box(0.08, 0.24, 0.7), 0xd9a520, [-0.36, 0.11, 0.345]), part(box(0.08, 0.24, 0.7), 0xd9a520, [0.36, 0.11, 0.345]), part(box(0.14, 0.16, 0.05), 0xffd54a, [0, 0.06, 0.7])]);
+  lid.position.set(0, 0.5, -0.345); g.add(base); g.add(lid); g.position.set(x, y, z); g.rotation.y = ry || 0; R.scene.add(g);
+  const c = { id, x, y, z, loot, lid }; CHESTS.push(c); addCollider({ x, z, r: 0.55 });
+  if (G.chests[id]) lid.rotation.x = -1.9;
+  addPoi({ id: 'chest_' + id, x, y: y + 0.4, z, reach: 3.6, on: () => !G.chests[id], label: 'Open the treasure chest', act: () => openChest(c) });
+}
+function openChest(c) {
+  G.chests[c.id] = true; G.stats.chests++; c.lid.rotation.x = -1.9; sfx('chest'); uiFlash('#ffe066', 0.3);
+  puff(c.x, c.y + 0.8, c.z, 0xffe066, 14, { size: 0.14, up: 3.5, speed: 2.5 });
+  give('idol', 1); for (const k in c.loot) give(k, c.loot[k]); addXP(30);
+  banner('TREASURE! ' + G.stats.chests + ' / 10', 'You found a Golden Idol.');
+  if (G.stats.chests === 1) tipOnce('idol', 'Golden Idols belong at the Stone Circle. Find all ten!');
+  if (G.stats.chests >= 10) badge('treasure');
+}
+function nearestClosedChest() { let b = null, bd = 1e9; for (const c of CHESTS) { if (G.chests[c.id]) continue; const d = dist2(c.x, c.z, G.p.x, G.p.z); if (d < bd) { bd = d; b = c; } } return b; }
+
+function buildLandmarks() {
+  const S = SITES, y = k => siteH(S[k]);
+  R.worldFires = []; R.worldRoofs = []; R.worldStations = [];
+  for (const k in S) LM_POS[k] = { x: S[k].x, z: S[k].z, r: S[k].r + 16 };
+  LM_POS.mirror = { x: LAKES[0].x, z: LAKES[0].z, r: 42 }; LM_POS.oasis = { x: LAKES[2].x, z: LAKES[2].z, r: 30 }; LM_POS.cove = { x: R.start.x, z: R.start.z, r: 30 };
+
+  /* --- Shipwreck Cove --- */
+  const st = R.start, wk = shorePoint(Math.PI / 2 + 0.05, -9);
+  prop([part(box(3.2, 1.6, 8), 0x7a4a2a, [0, 0.3, 0], [0, 0, 0.5]), part(box(3.0, 0.2, 7.6), 0x9c7446, [0.4, 1.0, 0], [0, 0, 0.5]), part(box(0.25, 6, 0.25), 0x5e4126, [1.4, 3.0, -1], [0.25, 0, 0.75]), part(box(2.6, 1.8, 0.08), 0xe9e2cf, [2.6, 3.8, -1.2], [0.25, 0, 0.75]), part(box(1.8, 1.2, 2.2), 0xf2efe6, [0.3, 1.6, 2.2], [0, 0, 0.5])], wk.x, -0.5, wk.z, 0.5);
+  prop([part(box(2.2, 0.12, 0.4), 0x8a623a, [3, 0.06, -2], [0, 0.6, 0]), part(box(1.8, 0.12, 0.4), 0x7d5833, [-4, 0.06, 1], [0, -0.4, 0]), part(cyl(0.35, 0.35, 0.8, 8), 0x8a623a, [5.5, 0.35, 2], [Math.PI / 2, 0.4, 0]), part(sph(0.5, 8, 6), 0xff7a1e, [-3, 0.2, -3], null, [1, 0.35, 1])], st.x, heightAt(st.x, st.z), st.z + 4);
+  const cr = { x: st.x + 2.5, z: st.z - 6 }; cr.y = heightAt(cr.x, cr.z);
+  prop([...planks(1.3, 0.9, 1.0, 4, true, 0, 0.47, 0), part(box(1.36, 0.1, 1.06), 0x5e4126, [0, 0.95, 0]), part(box(0.4, 0.3, 0.02), 0xf2efe6, [0, 0.55, 0.51])], cr.x, cr.y, cr.z, 0.3); addCollider({ x: cr.x, z: cr.z, r: 0.8 });
+  addPoi({ id: 'crate', x: cr.x, y: cr.y + 0.6, z: cr.z, reach: 3.8, on: () => !G.flags.crate, label: 'Search the supply crate', act: () => { G.flags.crate = true; give('rawfish', 2); give('coconut', 2); give('bandage', 1); give('flint', 1); sfx('chest'); readNote('skipper'); } });
+
+  /* --- Uncle Ray's camp + the orange balloon --- */
+  const rc = S.rayCamp, ry = y('rayCamp');
+  prop([part(cone(2.1, 2.2, 4), 0x5d7d4c, [0, 1.1, 0], [0, Math.PI / 4, 0]), part(box(0.9, 1.3, 0.05), 0x2f3d28, [0, 0.65, 1.42], [-0.6, 0, 0])], rc.x - 3, ry, rc.z - 3, 0.4); addCollider({ x: rc.x - 3, z: rc.z - 3, r: 1.5 });
+  const cf = structureModel('campfire'); cf.position.set(rc.x + 1, ry, rc.z + 0.5); R.scene.add(cf); addCollider({ x: rc.x + 1, z: rc.z + 0.5, r: 0.6 });
+  prop([...planks(1.1, 0.7, 0.8, 3, true, 0, 0.36, 0), part(box(0.5, 0.05, 0.36), 0xf2efe6, [0, 0.74, 0], [0, 0.3, 0]), part(box(0.24, 0.02, 0.34), 0x8a3a2a, [0.02, 0.77, 0], [0, 0.3, 0])], rc.x - 0.5, ry, rc.z - 3.5, -0.2); addCollider({ x: rc.x - 0.5, z: rc.z - 3.5, r: 0.7 });
+  addPoi({ id: 'campNote', x: rc.x - 0.5, y: ry + 0.8, z: rc.z - 3.5, reach: 3.8, label: 'Read Uncle Ray\'s journal', act: () => readNote('camp') });
+  R.balloon = new THREE.Group();
+  const bm = new THREE.Mesh(merge([part(sph(3.4, 12, 9), 0xff7a1e, [0, 0, 0], null, [1, 1.15, 1], 0.04), part(cone(1.2, 1.6, 8), 0xe8650f, [0, -4.3, 0], [Math.PI, 0, 0]), part(box(0.5, 0.5, 0.5), 0xffffff, [0, -5.6, 0])]), new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0x7a3000, emissiveIntensity: 0.5, fog: false }));
+  bm.position.y = 44; R.balloon.add(bm);
+  const rope = new THREE.Mesh(UNIT_BOX, new THREE.MeshBasicMaterial({ color: 0xe9e2cf })); rope.scale.set(0.06, 38, 0.06); rope.position.y = 19.5; R.balloon.add(rope);
+  R.balloon.position.set(rc.x + 4, ry, rc.z - 4); R.scene.add(R.balloon); prop([part(box(0.2, 1, 0.2), 0x5e4126, [0, 0.5, 0])], rc.x + 4, ry, rc.z - 4);
+
+  /* --- carved arrow posts leading to the tower --- */
+  const tw = S.tower, ty = y('tower');
+  [0.14, 0.38, 0.62, 0.84].forEach((t, i) => {
+    const x = lerp(rc.x, tw.x, t) + (i % 2 ? 4 : -4), z = lerp(rc.z, tw.z, t), h = heightAt(x, z), a = Math.atan2(tw.x - x, tw.z - z);
+    prop([part(box(0.16, 2.2, 0.16), 0x6b4a2b, [0, 1.1, 0]), part(box(0.1, 0.4, 1.2), 0xd9c9a0, [0, 1.8, 0.1]), part(cone(0.36, 0.5, 3), 0xd9c9a0, [0, 1.8, 0.9], [Math.PI / 2, 0, 0], [0.3, 1, 1]), part(box(0.11, 0.12, 0.7), 0xd9342b, [0, 1.8, 0.1])], x, h, z, a);
+    addCollider({ x, z, r: 0.2 });
+    addPoi({ id: 'arrow' + i, x, y: h + 1.6, z, reach: 3.6, label: 'Read the carving', act: () => readNote('arrow') });
+  });
+
+  /* --- Radio Tower --- */
+  const tp = []; let w = 1.7;
+  for (let i = 0; i < 6; i++) { const y0 = i * 3.6, w2 = w - 0.22; for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) tp.push(part(box(0.16, 3.7, 0.16), 0xb0b6bd, [sx * w, y0 + 1.8, sz * w])); tp.push(part(box(w * 2 + 0.2, 0.12, 0.12), 0x9aa1a9, [0, y0 + 3.6, w]), part(box(w * 2 + 0.2, 0.12, 0.12), 0x9aa1a9, [0, y0 + 3.6, -w]), part(box(0.12, 0.12, w * 2 + 0.2), 0x9aa1a9, [w, y0 + 3.6, 0]), part(box(0.12, 0.12, w * 2 + 0.2), 0x9aa1a9, [-w, y0 + 3.6, 0]), part(box(0.1, 0.1, w * 2.9), 0xc23b2b, [w, y0 + 1.8, 0], [0.9, 0, 0]), part(box(w * 2.9, 0.1, 0.1), 0xc23b2b, [0, y0 + 1.8, w], [0, 0, 0.9])); w = w2; }
+  tp.push(part(box(0.14, 5, 0.14), 0xdfe5ea, [0, 24, 0]));
+  prop(tp, tw.x, ty, tw.z); addCollider({ x: tw.x, z: tw.z, r: 2.2 });
+  prop([part(box(1.2, 1.3, 0.7), 0x5a6a5a, [0, 0.65, 0]), part(box(0.9, 0.5, 0.04), 0x1c2a1c, [0, 0.9, 0.36]), part(box(0.5, 0.05, 0.36), 0xf2efe6, [0, 1.33, 0], [0, 0.2, 0])], tw.x + 3.4, ty, tw.z + 1, -0.6); addCollider({ x: tw.x + 3.4, z: tw.z + 1, r: 0.8 });
+  R.towerDish = prop([part(cone(1.1, 0.6, 10), 0xe9eef2, [0, 0, 0.3], [Math.PI / 2, 0, 0]), part(box(0.08, 0.08, 0.9), 0x9aa1a9, [0, 0, 0.7]), part(box(0.1, 3.4, 0.1), 0x9aa1a9, [0, 1.7, -0.2])], tw.x, ty + 21.6, tw.z, 0.8); R.towerDish.visible = !!G.flags.radio;
+  R.towerLamp = new THREE.Mesh(sph(0.5, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a1a, fog: false })); R.towerLamp.position.set(tw.x, ty + 26.8, tw.z); R.scene.add(R.towerLamp);
+  addPoi({
+    id: 'radio', x: tw.x + 3.4, y: ty + 1.1, z: tw.z + 1, reach: 4,
+    label: () => !G.notes.includes('tower') ? 'Read the repair log' : G.flags.radio ? 'Listen to the radio' : (inv('coil') && inv('battery') && inv('antenna')) ? 'Repair the radio tower!' : 'Radio — missing parts (' + (inv('coil') + inv('battery') + inv('antenna')) + '/3)',
+    act: () => {
+      if (!G.notes.includes('tower')) { readNote('tower'); return; }
+      if (G.flags.radio) { sfx('radio'); showDialog(G.flags.rayFree ? ['RADIO: "...Kestrel Island, we hear you loud and clear."'] : ['RAY: "...west face of Frostpeak, Sam. Iron pickaxe. I\'ll be here. Not going anywhere, ha..."']); return; }
+      if (!(inv('coil') && inv('battery') && inv('antenna'))) { readNote('tower'); return; }
+      take('coil', 1); take('battery', 1); take('antenna', 1); G.flags.radio = true; R.towerDish.visible = true; badge('radio'); addXP(200); sfx('radio');
+      if (G.flags.rayFree) showDialog(['The tower hums into life. The red lamp on top starts to blink.', 'RAY: "You did it! Now we can call home. Come and talk to me."']);
+      else showDialog(DIALOGS.radio);
+    }
+  });
+
+  /* --- Old Grizzle's den (west) + a second bear cave (east forest) --- */
+  const dn = S.den, dy = y('den');
+  rocks(dn.x, dy, dn.z - 7, [[-4.2, 0, 3.4, 1.1], [4.2, 0, 3.4, 1.1], [0, -3.4, 4, 1.2], [0, 0.2, 3.6, 0.5, 4.4], [-6.8, 2.5, 2.2], [6.6, 2.8, 2.4], [-2.5, -5.5, 2.6], [3, -5.8, 2.8]], 0x6b665f);
+  prop([part(box(1.4, 0.09, 0.09), 0xe9e2cf, [2, 0.06, 4], [0, 0.5, 0]), part(box(1.0, 0.08, 0.08), 0xe9e2cf, [-3, 0.06, 5], [0, -0.8, 0]), part(box(0.9, 0.08, 0.08), 0xe9e2cf, [0.5, 0.06, 7], [0, 1.3, 0]), part(ico(0.3, 0), 0xe9e2cf, [-1.5, 0.2, 6.5]), part(box(4.2, 5, 0.3), 0x0a0c0e, [0, 2, -7.6])], dn.x, dy, dn.z);
+  const c2 = S.cave2, c2y = y('cave2');
+  rocks(c2.x, c2y, c2.z - 4, [[-2.6, 0, 2.3, 1.1], [2.6, 0, 2.3, 1.1], [0, -2.2, 2.7, 1.1], [0, 0, 2.5, 0.5, 3.0]], 0x77746e);
+  addChest('cave2', c2.x + 0.2, c2.z - 3.4, { rope: 2, arrow: 6, bandage: 1 }, 0);
+
+  /* --- forest secrets --- */
+  const gr = S.grotto, gy = y('grotto'), gl = []; for (let i = 0; i < 9; i++) { const a = 0.7 + i / 9 * TAU * 0.86; gl.push([Math.cos(a) * 5.4, Math.sin(a) * 5.4, 1.5 + (i % 3) * 0.5, 1.5]); }
+  rocks(gr.x, gy, gr.z, gl, 0x66705f); addChest('grotto', gr.x, gr.z, { bandage: 2, rope: 2, flint: 3 }, 2.6);
+  const wd = S.wolfDen, wy = y('wolfDen'), wp = [];
+  [[-5, -2, 1.3, 4.5], [-2.5, -5, 1.1, 5.6], [2, -5.5, 1.5, 4], [5, -2, 1.2, 5]].forEach(r => { wp.push(part(cone(r[2], r[3], 5), 0x6d6a66, [r[0], r[3] / 2, r[1]], [0, r[0], 0.08], null, 0.12)); addCollider({ x: wd.x + r[0], z: wd.z + r[1], r: r[2] * 0.8 }); });
+  prop(wp, wd.x, wy, wd.z); addChest('wolfDen', wd.x, wd.z - 3.4, { fang: 2, arrow: 8, meat: 2 }, 0);
+  const sp = S.stump, sy = y('stump');
+  prop([part(cyl(1.25, 1.6, 1.5, 9), 0x5e4126, [0, 0.75, 0], null, null, 0.1), part(cyl(0.95, 0.95, 0.1, 9), 0x2a1c12, [0, 1.5, 0]), part(box(0.5, 0.5, 1.6), 0x5e4126, [1.5, 0.2, 0.8], [0, 0.6, 0.2]), part(ico(0.5, 0), 0x4a8c38, [-1.3, 0.3, 0.6])], sp.x, sy, sp.z); addCollider({ x: sp.x, z: sp.z, r: 1.4 });
+  addChest('stump', sp.x + 1.3, sp.z - 1.7, { rope: 1, herb: 3, arrow: 5 }, 2.2);
+
+  /* --- Stone Circle + altar --- */
+  const ci = S.circle, cy = y('circle'), cp = [];
+  for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; cp.push(part(box(1.3, 3.6 + (i % 3) * 0.5, 0.8), i % 2 ? 0x807c74 : 0x8d8980, [Math.cos(a) * 8, 1.7, Math.sin(a) * 8], [(i % 3 - 1) * 0.06, -a + Math.PI / 2, (i % 2 ? 0.07 : -0.05)], null, 0.1)); addCollider({ x: ci.x + Math.cos(a) * 8, z: ci.z + Math.sin(a) * 8, r: 0.8 }); }
+  cp.push(part(cyl(1.3, 1.6, 0.9, 8), 0x9a958b, [0, 0.45, 0]), part(cyl(1.0, 1.0, 0.06, 8), 0x5a5750, [0, 0.92, 0]));
+  prop(cp, ci.x, cy, ci.z); addCollider({ x: ci.x, z: ci.z, r: 1.5 });
+  R.idolMesh = []; for (let i = 0; i < 10; i++) { const a = i / 10 * TAU, m = new THREE.Mesh(cone(0.13, 0.4, 5), new THREE.MeshLambertMaterial({ color: 0xffd24a, emissive: 0x8a6200 })); m.position.set(ci.x + Math.cos(a) * 0.75, cy + 1.15, ci.z + Math.sin(a) * 0.75); m.visible = !!G.flags.storm; R.scene.add(m); R.idolMesh.push(m); }
+  addPoi({
+    id: 'altar', x: ci.x, y: cy + 1, z: ci.z, reach: 4.2,
+    label: () => G.flags.storm ? 'The altar hums with power' : inv('idol') >= 10 ? 'Place the ten Golden Idols' : 'Stone altar — ten empty hollows (' + inv('idol') + '/10 idols)',
+    act: () => {
+      if (G.flags.storm) { hint('The idols glow softly. The island is at peace.'); return; }
+      if (inv('idol') < 10) { hint('Ten small hollows are carved into the altar. You have ' + inv('idol') + ' of 10 Golden Idols.'); if (!G.notes.includes('oasis')) hint('Ten hollows are carved into the altar. Something belongs here...'); return; }
+      take('idol', 10); G.flags.storm = true; R.idolMesh.forEach(m => m.visible = true); give('stormspear', 1); badge('storm'); addXP(500);
+      sfx('thunder'); sfx('zap'); R.flashT = 0.8; uiFlash('#fff', 0.8); R.shake = 0.8; G.p.held = 'melee'; refreshViewModel();
+      banner('⚡ THE STORM SPEAR', 'Lightning strikes the altar. The island has chosen you.');
+    }
+  });
+
+  /* --- Dust Flats: outpost, mine, oasis, bone yard --- */
+  const op = S.outpost, oy = y('outpost');
+  prop([...planks(4.4, 0.12, 4.4, 7, false, 0, 0.06, 0), ...planks(4.4, 2.5, 0.14, 8, true, 0, 1.3, -2.15), part(box(0.14, 2.5, 4.4), 0x86603a, [-2.15, 1.3, 0]), part(box(0.14, 2.5, 4.4), 0x7d5833, [2.15, 1.3, 0]), part(box(5, 0.14, 5), 0xa0886a, [0, 2.65, 0]), part(box(0.14, 2.5, 0.14), 0x5e4126, [-2.15, 1.3, 2.15]), part(box(0.14, 2.5, 0.14), 0x5e4126, [2.15, 1.3, 2.15]),
+  part(box(1.4, 0.08, 0.7), 0x8a623a, [-1.2, 0.8, -1.6]), part(box(0.08, 0.8, 0.08), 0x5e4126, [-1.8, 0.4, -1.3]), part(box(0.08, 0.8, 0.08), 0x5e4126, [-0.6, 0.4, -1.3]), part(box(0.4, 0.04, 0.3), 0xf2efe6, [-1.2, 0.86, -1.6], [0, 0.2, 0]),
+  part(box(0.8, 1.9, 0.5), 0x5a6a78, [1.5, 0.95, -1.75]), part(box(0.06, 0.2, 0.04), 0xd9a520, [1.25, 1.0, -1.49])], op.x, oy, op.z);
+  addCollider({ x: op.x, z: op.z - 2.15, hw: 2.2, hd: 0.14 }); addCollider({ x: op.x - 2.15, z: op.z, hw: 0.14, hd: 2.2 }); addCollider({ x: op.x + 2.15, z: op.z, hw: 0.14, hd: 2.2 });
+  R.worldRoofs.push({ x: op.x, z: op.z, r: 2.6 });
+  addPoi({ id: 'outNote', x: op.x - 1.2, y: oy + 0.95, z: op.z - 1.5, reach: 3.4, label: 'Read the outpost notes', act: () => readNote('outpost') });
+  addPoi({
+    id: 'locker', x: op.x + 1.5, y: oy + 1, z: op.z - 1.5, reach: 3.4,
+    label: () => G.flags.locker ? 'Ray\'s locker (empty)' : G.notes.includes('pack') ? 'Open Ray\'s locker — code 9 4' : 'Ray\'s locker — it needs a 2-digit code',
+    act: () => {
+      if (G.flags.locker) { readNote('locker'); return; }
+      if (!G.notes.includes('pack')) { hint('The locker has a 2-digit code lock. Maybe Ray wrote the code down somewhere... in his pack?'); sfx('deny'); return; }
+      G.flags.locker = true; sfx('chest'); if (!inv('bow')) give('bow', 1); give('arrow', 14); if (!inv('canteen')) { give('canteen', 1); G.flags.canteen = 5; } give('bandage', 2); readNote('locker');
+    }
+  });
+  const mi = S.mine, my = y('mine');
+  rocks(mi.x, my, mi.z - 6, [[-3.4, 0, 3, 1.2], [3.4, 0, 3, 1.2], [0, -3, 3.6, 1.3], [0, 0, 3, 0.5, 3.6]], 0x8a5a3c);
+  prop([part(box(0.3, 3.2, 0.3), 0x5e4126, [-1.6, 1.6, 0]), part(box(0.3, 3.2, 0.3), 0x5e4126, [1.6, 1.6, 0]), part(box(3.9, 0.3, 0.34), 0x5e4126, [0, 3.2, 0]), part(box(3, 3, 0.2), 0x0a0c0e, [0, 1.5, -0.6]), part(box(0.1, 1.2, 0.1), 0x5e4126, [3, 0.6, 2]), part(box(0.9, 0.6, 0.06), 0xd9c9a0, [3, 1.3, 2.04])], mi.x, my, mi.z - 4.2);
+  addPoi({ id: 'mineNote', x: mi.x + 3, y: my + 1.3, z: mi.z - 2.2, reach: 3.6, label: 'Read the mine survey', act: () => readNote('mine') });
+  addChest('mine', mi.x - 0.2, mi.z - 3.2, { iron: 2, arrow: 8, bandage: 2 }, 0);
+  const oa = LAKES[2];
+  { const x = oa.x - 12.5, z = oa.z + 3, h = Math.max(0.1, heightAt(x, z)); prop([part(cyl(0.12, 0.16, 0.4, 7), 0x7fc9a0, [0, 0.12, 0], [1.3, 0, 0.4]), part(cyl(0.05, 0.07, 0.14, 6), 0x7a5632, [0.12, 0.2, 0.2], [1.3, 0, 0.4])], x, h, z, 0, MAT_GLOW); addPoi({ id: 'bottle', x, y: h + 0.2, z, reach: 3.4, label: 'Open the old bottle', act: () => readNote('oasis') }); }
+  addChest('oasis', oa.x + 19.5, oa.z - 4, { coconut: 3, iron: 1, rope: 2 }, -1.5);
+  const by = S.boneyard, byy = y('boneyard'), bp = [];
+  for (let i = -3; i <= 3; i++) for (const s of [1, -1]) { bp.push(part(box(0.5, 4.2, 0.5), 0xe9e2cf, [s * 3.4, 2.0, i * 2.6], [0, 0, s * 0.25], null, 0.08), part(box(0.45, 3.2, 0.45), 0xddd5c0, [s * 2.3, 5.0, i * 2.6], [0, 0, -s * 0.95], null, 0.08)); addCollider({ x: by.x + s * 3.9, z: by.z + 8 + i * 2.6, r: 0.4 }); }
+  bp.push(part(box(0.7, 0.7, 19), 0xe9e2cf, [0, 0.3, 0]), part(box(3, 2.2, 3.4), 0xe9e2cf, [0, 1.1, 11.6], null, null, 0.08), part(box(2.2, 0.8, 2.6), 0xddd5c0, [0, 0.4, 14.2]), part(box(0.6, 0.6, 0.2), 0x1a1a1a, [0.8, 1.5, 13.31]), part(box(0.6, 0.6, 0.2), 0x1a1a1a, [-0.8, 1.5, 13.31]), part(cone(0.4, 2, 5), 0xddd5c0, [1.4, 2.8, 10.6], [0, 0, -0.5]), part(cone(0.4, 2, 5), 0xddd5c0, [-1.4, 2.8, 10.6], [0, 0, 0.5]));
+  prop(bp, by.x, byy, by.z + 8); addCollider({ x: by.x, z: by.z + 19.6, r: 1.9 });
+
+  /* --- Frostpeak: cabin, frozen lake, crystal cavern, summit --- */
+  const cb = S.cabin, cby = y('cabin'), LOG = [0x7a5632, 0x6b4a2b, 0x86603a];
+  const logs = (w, x, z, rot) => { const ps = []; for (let i = 0; i < 6; i++) ps.push(part(cyl(0.24, 0.24, w, 6), LOG[i % 3], [x, 0.24 + i * 0.46, z], [0, rot, Math.PI / 2])); return ps; };
+  prop([...planks(5.4, 0.12, 5.4, 8, false, 0, 0.06, 0), ...logs(5.6, 0, -2.6, 0), ...logs(5.6, -2.6, 0, Math.PI / 2), ...logs(5.6, 2.6, 0, Math.PI / 2), ...logs(1.7, -1.95, 2.6, 0), ...logs(1.7, 1.95, 2.6, 0),
+  part(box(6.4, 0.2, 3.8), 0x6d5a48, [0, 3.6, -1.5], [0.5, 0, 0]), part(box(6.4, 0.2, 3.8), 0x7a6652, [0, 3.6, 1.5], [-0.5, 0, 0]), part(box(6.5, 0.14, 3.9), 0xf2f7fb, [0, 3.75, -1.5], [0.5, 0, 0]), part(box(6.5, 0.14, 3.9), 0xf2f7fb, [0, 3.75, 1.5], [-0.5, 0, 0]),
+  part(box(0.9, 1.0, 0.8), 0x3b4046, [1.7, 0.5, -1.8]), part(box(0.3, 3.6, 0.3), 0x3b4046, [1.7, 2.8, -1.9]), part(box(1.3, 0.08, 0.8), 0x8a623a, [-1.6, 0.8, -1.9]), part(box(0.08, 0.8, 0.08), 0x5e4126, [-2.1, 0.4, -1.6]), part(box(0.08, 0.8, 0.08), 0x5e4126, [-1.1, 0.4, -1.6]), part(box(0.4, 0.04, 0.3), 0xf2efe6, [-1.6, 0.86, -1.9], [0, -0.2, 0]),
+  ...planks(0.9, 0.5, 0.6, 3, true, -2.0, 0.26, 0.6), part(box(0.94, 0.1, 0.64), 0x5e4126, [-2.0, 0.55, 0.6])], cb.x, cby, cb.z);
+  addCollider({ x: cb.x, z: cb.z - 2.6, hw: 2.8, hd: 0.26 }); addCollider({ x: cb.x - 2.6, z: cb.z, hw: 0.26, hd: 2.8 }); addCollider({ x: cb.x + 2.6, z: cb.z, hw: 0.26, hd: 2.8 }); addCollider({ x: cb.x - 1.95, z: cb.z + 2.6, hw: 0.85, hd: 0.26 }); addCollider({ x: cb.x + 1.95, z: cb.z + 2.6, hw: 0.85, hd: 0.26 });
+  const stove = new THREE.Mesh(UNIT_BOX, new THREE.MeshBasicMaterial({ color: 0xff7a1e })); stove.scale.set(0.5, 0.3, 0.05); stove.position.set(cb.x + 1.7, cby + 0.45, cb.z - 1.38); R.scene.add(stove);
+  R.worldFires.push({ x: cb.x + 1.7, y: cby, z: cb.z - 1.6 }); R.worldRoofs.push({ x: cb.x, z: cb.z, r: 3.1 });
+  const wb = structureModel('bench'); wb.position.set(cb.x + 0.2, cby + 0.1, cb.z + 4.6); wb.rotation.y = 0.2; R.scene.add(wb); addCollider({ x: cb.x + 0.2, z: cb.z + 4.6, r: 0.8 }); R.worldStations.push({ x: cb.x + 0.2, z: cb.z + 4.6, type: 'bench' });
+  addPoi({ id: 'cabBench', x: cb.x + 0.2, y: cby + 0.9, z: cb.z + 4.6, reach: 3.6, label: 'Use Ray\'s workbench', act: () => openPanel('craft', 'bench') });
+  addPoi({ id: 'cabNote', x: cb.x - 1.6, y: cby + 0.95, z: cb.z - 1.7, reach: 3.4, label: 'Read Uncle Ray\'s journal', act: () => readNote('cabin') });
+  addPoi({ id: 'cabChest', x: cb.x - 2.0, y: cby + 0.5, z: cb.z + 0.6, reach: 3.2, on: () => !G.flags.furs, label: 'Open Ray\'s fur chest', act: () => { G.flags.furs = true; sfx('chest'); give('fur', 4); give('hide', 2); give('rope', 1); give('meat', 2); tipOnce('coat', 'That is exactly enough for a <b>Fur Coat</b>. Use the workbench outside the cabin!'); } });
+  const il = S.icelake, iy = y('icelake');
+  prop([...planks(2.6, 2.2, 0.12, 5, true, 0, 1.1, -1.3), part(box(0.12, 2.2, 2.6), 0x86603a, [-1.3, 1.1, 0]), part(box(0.12, 2.2, 2.6), 0x7d5833, [1.3, 1.1, 0]), part(box(3.1, 0.14, 3.1), 0xf2f7fb, [0, 2.3, 0]), part(box(0.5, 0.04, 0.36), 0xf2efe6, [-0.7, 0.9, -1.2], [1.2, 0, 0])], il.x + 9, iy, il.z + 3, -0.8);
+  addCollider({ x: il.x + 9, z: il.z + 3, r: 1.5 }); R.worldRoofs.push({ x: il.x + 7.4, z: il.z + 4.4, r: 2.2 });
+  prop([part(cyl(1.0, 1.0, 0.05, 10), 0x16405f, [0, 0.03, 0]), part(cyl(1.25, 1.25, 0.03, 10), 0xd6ecf7, [0, 0.01, 0])], il.x, iy, il.z);
+  addPoi({ id: 'icehole', x: il.x, y: iy + 0.1, z: il.z, reach: 4.2, label: () => bestTool('rod') ? 'Fish in the ice hole' : 'An ice-fishing hole. You need a Fishing Rod.', act: () => { if (!bestTool('rod')) { hint('Craft a Fishing Rod first: 3 sticks, 1 rope, 1 flint.'); sfx('deny'); return; } if (!R.fish) startFishing(il.x, il.z, true); } });
+  addPoi({ id: 'lakeNote', x: il.x + 8, y: iy + 1.0, z: il.z + 3.6, reach: 3.6, label: 'Read the fishing log', act: () => readNote('lake') });
+  addChest('icelake', il.x + 9.6, il.z + 4.4, { crystal: 1, iron: 2, fish: 2 }, -0.8);
+  const cv = S.crystal, cvy = y('crystal');
+  rocks(cv.x - 7, cvy, cv.z, [[-3, -4, 3.6, 1.3], [-3, 4, 3.6, 1.3], [-5.5, 0, 4.4, 1.5], [-2.6, 0, 3.4, 0.5, 4.2]], 0x586270);
+  prop([part(box(0.3, 4.4, 4.4), 0x04121c, [0, 2.2, 0])], cv.x - 8.2, cvy, cv.z);
+  const cg = prop([part(ico(0.5, 0), 0x6fe3ff, [0, 1.2, -1.4], null, [0.5, 1.6, 0.5]), part(ico(0.5, 0), 0x86ecff, [0, 2.3, 1.2], [0.4, 0, 0.3], [0.45, 1.4, 0.45]), part(ico(0.4, 0), 0x57c8f5, [0, 0.6, 0.5], null, [0.5, 1.2, 0.5])], cv.x - 8.0, cvy, cv.z, 0, MAT_GLOW); cg.castShadow = false;
+  R.rockfall = rocks(cv.x - 6.4, cvy, cv.z, [[0, -1.3, 1.5], [0, 1.2, 1.6], [0.9, 0, 1.3], [0.2, -0.2, 1.4, 0.8, 1.6], [0.3, 0.9, 1.0, 0.8, 2.3]], 0x6e7888, true);
+  R.rockfallCol = addCollider({ x: cv.x - 6.2, z: cv.z, r: 2.4 });
+  if (G.flags.rayFree) { R.rockfall.visible = false; R.rockfallCol.off = true; }
+  addPoi({
+    id: 'rockfall', x: cv.x - 4.6, y: cvy + 1.2, z: cv.z, reach: 4.6, on: () => !G.flags.rayFree,
+    label: () => bestTool('pick') === 'ironpick' ? 'Dig through the cave-in!' : 'A cave-in blocks the cavern. You need an IRON pickaxe.',
+    act: () => {
+      if (bestTool('pick') !== 'ironpick') { hint(G.flags.radio ? 'Your tools just bounce off. Ray said: an IRON pickaxe.' : 'Blue light glows between the rocks. Your tools just bounce off. Only an Iron Pickaxe could break through.'); sfx('deny'); return; }
+      G.p.held = 'pick'; refreshViewModel(); R.cinematic = true; let n = 0;
+      const dig = () => { sfx('mine'); R.shake = 0.3; swingNow(0.4); puff(cv.x - 5.6, cvy + 1.2, cv.z, 0x8e98a8, 8, { size: 0.4 }); if (++n < 5) setTimeout(dig, 420); else { R.rockfall.visible = false; R.rockfallCol.off = true; G.flags.rayFree = true; badge('ray'); addXP(400); sfx('discover'); placeRay(); R.cinematic = false; showDialog(DIALOGS.rescue, () => { saveGame(); }); } };
+      dig();
+    }
+  });
+  const sm = S.summit, smy = y('summit');
+  prop([part(box(0.3, 5, 0.3), 0xb0b6bd, [0, 1.4, 0], [0, 0, 1.1]), part(box(0.25, 3, 0.25), 0x9aa1a9, [2.9, 2.7, 0], [0, 0, 0.3]), part(cone(1.2, 0.7, 10), 0xe9eef2, [3.6, 4.2, 0], [0, 0, 0.9]), ...[0, 1, 2, 3, 4, 5, 6, 7].map(i => part(box(2.6, 0.2, 0.2), 0x6b4a2b, [Math.cos(i * 0.8) * 2.2 - 4, 0.15 + (i % 2) * 0.15, Math.sin(i * 0.8) * 2.2 + 3], [0, i * 0.8 + 1.5, 0]))], sm.x + 5, smy, sm.z - 5);
+  addPoi({ id: 'sumNote', x: sm.x + 5.4, y: smy + 1.2, z: sm.z - 5, reach: 4, label: 'Read the scratched mast', act: () => readNote('summit') });
+
+  /* --- three shore chests (old rowboats) --- */
+  [['east', 0.12, { iron: 1, rope: 2, coconut: 2 }], ['north', -Math.PI / 2 - 0.42, { crystal: 1, fur: 2, bandage: 2 }], ['west', Math.PI + 0.22, { rope: 2, arrow: 8, bandage: 1 }]].forEach(([id, ang, loot]) => {
+    const q = shorePoint(ang, 9), h = heightAt(q.x, q.z);
+    prop([part(box(1.5, 0.6, 3.6), 0x7a4a2a, [0, 0.2, 0], [0, 0, 0.5]), part(box(1.3, 0.1, 3.4), 0x9c7446, [0.2, 0.5, 0], [0, 0, 0.5]), part(box(0.1, 0.1, 2.6), 0xd9c9a0, [1.6, 0.1, 0.5], [0, 0.4, 0])], q.x + 2.4, h, q.z, ang);
+    addChest(id, q.x, q.z, loot, -ang + Math.PI / 2); LM_POS['shore_' + id] = { x: q.x, z: q.z };
+  });
+
+  /* --- Uncle Ray --- */
+  const rm = humanModel(true); R.ray = { model: rm, g: rm.g, x: 0, z: 0 }; rm.g.visible = false; R.scene.add(rm.g);
+  R.rayPoi = addPoi({ id: 'ray', x: 0, y: 0, z: 0, reach: 4, on: () => !!G.flags.rayFree, label: 'Talk to Uncle Ray', act: talkToRay });
+  placeRay();
+  /* --- dropped backpack (after a blackout) --- */
+  R.packMesh = prop([part(box(0.6, 0.7, 0.4), 0xc23b2b, [0, 0.35, 0]), part(box(0.5, 0.2, 0.42), 0x8a2a1f, [0, 0.72, 0]), part(box(0.4, 0.3, 0.1), 0xd9a520, [0, 0.3, 0.24])], 0, 0, 0);
+  R.packPoi = addPoi({ id: 'pack', x: 0, y: 0, z: 0, reach: 3.8, on: () => !!G.pack, label: 'Pick up your backpack', act: () => { for (const k in G.pack.items) give(k, G.pack.items[k], true); toast('🎒 You got all your things back!', 'ok'); sfx('chest'); G.pack = null; refreshPack(); } });
+  refreshPack();
+}
+function refreshPack() { const p = G.pack; R.packMesh.visible = !!p; if (p) { const h = heightAt(p.x, p.z); R.packMesh.position.set(p.x, h, p.z); R.packPoi.x = p.x; R.packPoi.y = h + 0.5; R.packPoi.z = p.z; } }
+function spawnPackNote() {
+  if (R.packNote) return; const dn = SITES.den, h = siteH(dn);
+  prop([part(box(0.7, 0.5, 0.5), 0x4d6e3c, [0, 0.25, 0], [0, 0.3, 0.2]), part(box(0.4, 0.03, 0.3), 0xf2efe6, [0.5, 0.03, 0.3], [0, 0.5, 0])], dn.x, h, dn.z - 4.6);
+  R.packNote = addPoi({ id: 'packNote', x: dn.x, y: h + 0.4, z: dn.z - 4.6, reach: 3.8, label: 'Search Ray\'s torn pack', act: () => { if (!G.flags.packLoot) { G.flags.packLoot = true; give('bandage', 2); give('rope', 2); } readNote('pack'); } });
+}
+function placeRay() {
+  const r = R.ray; if (!G.flags.rayFree) { r.g.visible = false; return; }
+  let x, z;
+  if (G.flags.rayChoice && G.spawn) { x = G.spawn.x + 2.2; z = G.spawn.z + 1.5; } else { x = SITES.tower.x + 3.6; z = SITES.tower.z + 3.6; }
+  r.x = x; r.z = z; const h = groundAt(x, z); r.g.position.set(x, h, z); r.g.visible = true;
+  R.rayPoi.x = x; R.rayPoi.y = h + 1.3; R.rayPoi.z = z;
+}
+function talkToRay() {
+  if (!G.flags.radio) { showDialog(DIALOGS.rayTowerNoRadio); return; }
+  if (!G.flags.rayChoice) {
+    showDialog(['RAY: "The mainland heard us! A rescue helicopter can be here by morning."', 'RAY: "Or... the supply ship comes on Day 100. We could stay. Finish what you started. Leave this island as legends."', 'RAY: "Your call, kiddo."'], () => {
+      showChoice('What do you tell Uncle Ray?', [['🚁 Call the helicopter', 'Finish the story now and go home.', () => { G.flags.rayChoice = 'heli'; G.ending = 'heli'; showEnding('heli'); }], ['🏝️ Stay until Day 100!', 'Keep surviving with Uncle Ray at your camp.', () => { G.flags.rayChoice = 'stay'; placeRay(); showDialog(DIALOGS.rayStay); saveGame(); }]]);
+    }); return;
+  }
+  showDialog(DIALOGS.rayIdle);
+}
+
+/* ---------- landmark discovery ---------- */
+function checkLandmarks() {
+  const p = G.p;
+  for (const L of LANDMARKS) {
+    if (G.found[L.id]) continue; const q = LM_POS[L.id]; if (!q) continue;
+    if (dist2(p.x, p.z, q.x, q.z) < q.r) {
+      G.found[L.id] = true; addXP(40); sfx('discover'); banner('DISCOVERED', L.n);
+      if (Object.keys(G.found).length >= LANDMARKS.length) badge('explorer');
+    }
+  }
+}
+function badge(id) {
+  if (G.badges[id] || !BADGES[id]) return; G.badges[id] = G.day;
+  toast('🏅 Badge earned: <b>' + BADGES[id][1] + '</b>', 'gold'); addXP(25); sfx('quest');
+}
+function tipOnce(id, msg) { if (G.flags['tip_' + id]) return; G.flags['tip_' + id] = 1; toast('💡 ' + msg, 'tip', 9000); }
+
+/* ---------- quests ---------- */
+const partsHave = () => (inv('coil') || G.flags.radio ? 1 : 0) + (inv('battery') || G.flags.radio ? 1 : 0) + (inv('antenna') || G.flags.radio ? 1 : 0);
+const QUESTS = [
+  { t: 'Search the supply crate on the beach', wp: () => POIS.find(q => q.id === 'crate'), done: () => G.flags.crate },
+  { t: 'Collect 3 sticks, 3 stones and some reeds', s: () => 'Look on the ground. Press <b>E</b> to pick things up.  🥢 ' + Math.min(3, inv('stick')) + '/3   🪨 ' + Math.min(3, inv('stone')) + '/3   🌾 ' + Math.min(1, inv('fibre')) + '/1', done: () => (inv('stick') >= 3 && inv('stone') >= 3 && inv('fibre') >= 1) || bestTool('axe') },
+  { t: 'Craft a Stone Axe', s: () => 'Press <b>C</b> to open the Craft menu.', done: () => !!bestTool('axe') },
+  { t: 'Chop down a tree', s: () => 'Walk up to a tree and <b>left click</b>.', done: () => G.stats.wood >= 1 },
+  { t: 'Build a Campfire and light it', s: () => 'Press <b>B</b> to build. Then press <b>E</b> on the fire.', done: () => G.flags.fireLit },
+  { t: 'Cook the fish from the crate', s: () => 'Press <b>E</b> on your lit campfire. Raw food makes you sick!', done: () => G.stats.cooked >= 1 || G.scout.friend },
+  { t: 'Build a Shelter and sleep through the night', s: () => 'Press <b>B</b>. You can sleep after 7 pm.', done: () => G.flags.slept },
+  { t: 'Find Uncle Ray\'s camp', s: () => 'Look for the orange balloon to the north-west.', wp: () => SITES.rayCamp, done: () => G.notes.includes('camp') },
+  { t: 'Make friends with Scout', s: () => 'He wants meat — raw is fine! Hunt a rabbit or deer with a spear.', wp: () => R.scoutPoi, done: () => G.scout.friend },
+  { t: 'Follow the carved arrows to the Radio Tower', wp: () => SITES.tower, done: () => G.notes.includes('tower') },
+  { t: 'Find the 3 missing radio parts', s: () => (inv('coil') || G.flags.radio ? '✅' : '⬜') + ' Power Coil — Old Grizzle\'s den, WEST<br>' + (inv('battery') || G.flags.radio ? '✅' : '⬜') + ' Battery — Dust Flats, EAST' + (G.notes.includes('locker') ? ' (the Bone Yard)' : ' (Ray\'s outpost)') + '<br>' + (inv('antenna') || G.flags.radio ? '✅' : '⬜') + ' Antenna — Frostpeak summit, NORTH', wp: () => !(inv('coil') || G.flags.radio) ? (G.bossDead.grizzle ? R.packNote : SITES.den) : !(inv('battery') || G.flags.radio) ? (G.flags.locker ? SITES.boneyard : SITES.outpost) : SITES.summit, done: () => partsHave() >= 3 },
+  { t: 'Repair the Radio Tower', wp: () => SITES.tower, done: () => G.flags.radio },
+  { t: 'Free Uncle Ray from the Crystal Cavern', s: () => 'West face of Frostpeak. Bring an <b>Iron Pickaxe</b>' + (bestTool('pick') === 'ironpick' ? ' ✅' : ' (furnace + iron ore)') + '.', wp: () => SITES.crystal, done: () => G.flags.rayFree },
+  { t: 'Talk to Uncle Ray at the Radio Tower', wp: () => R.rayPoi, done: () => !!G.flags.rayChoice },
+  { t: 'Survive until the ship arrives on Day 100', s: () => 'Day ' + G.day + ' of 100. Build, explore, find all ten idols!', done: () => G.day >= 100 },
+  { t: 'You are a legend of Kestrel Island', s: () => 'Keep exploring for as long as you like.', done: () => false }
+];
+function updateQuests() {
+  // if the player has already done a later goal (explored ahead), skip the earlier ones
+  for (let i = QUESTS.length - 2; i > G.quest; i--) if (QUESTS[i].done()) { G.quest = i; break; }
+  let q = QUESTS[G.quest], guard = 0;
+  while (q && q.done() && guard++ < 20) {
+    G.quest++; addXP(30); sfx('quest'); toast('✅ ' + q.t, 'ok'); q = QUESTS[G.quest];
+    if (q) questPop(q.t);
+  }
+  R.quest = q || null; R.wp = q && q.wp ? q.wp() : null;
+}
+function updateStory(dt) {
+  if (R.balloon) { R.balloon.rotation.z = Math.sin(R.t * 0.5) * 0.04; R.balloon.rotation.x = Math.cos(R.t * 0.37) * 0.04; }
+  R.towerLamp.visible = !!G.flags.radio && Math.sin(R.t * 3) > 0;
+  const r = R.ray; if (r.g.visible) { const a = Math.atan2(G.p.x - r.x, G.p.z - r.z); r.g.rotation.y += angDiff(r.g.rotation.y, a) * Math.min(1, dt * 3); r.model.armL.rotation.x = Math.sin(R.t * 1.2) * 0.08; r.model.head.rotation.y = Math.sin(R.t * 0.6) * 0.15; }
+  // sparkle on unopened treasure chests so they catch the eye
+  if (Math.random() < dt * 3) { const c = nearestClosedChest(); if (c && dist2(c.x, c.z, G.p.x, G.p.z) < 40) puff(c.x + rnd(-0.5, 0.5), c.y + 0.9, c.z + rnd(-0.4, 0.4), 0xffe066, 1, { size: 0.07, up: 1.5, g: 0, speed: 0.3, life: 1.6, grow: 0.2 }); }
+}
+/** runs at each dawn */
+function storyNewDay() {
+  if (G.scout.friend && G.scout.fed < G.day - 1) scoutLeaves();
+  if (G.flags.rayChoice && G.flags.rayFree) { give('meat', 2, true); give('arrow', 3, true); toast('🧔 Uncle Ray cooked breakfast and made you some arrows.', 'ok'); placeRay(); }
+  if (G.day >= 10) badge('d10'); if (G.day >= 25) badge('d25'); if (G.day >= 50) badge('d50');
+  if (G.day >= 100 && !G.flags.ship) { G.flags.ship = true; badge('d100'); G.ending = G.ending || 'ship'; R.pendingEnding = G.flags.rayFree ? 'ship' : 'alone'; }
+}
+
+/* =========================================================================
+   10_ui: HUD, toasts, panels (pack/crafting, build, fire, chest, journal,
+          map, pause), dialogs, morning report, endings, title screen
+   ========================================================================= */
+let _dirty = true;
+function uiDirty() { _dirty = true; }
+const icon = id => id === 'hands' ? '✋' : (ITEMS[id] ? ITEMS[id].e[0] : '❔');
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+/* ---------- small feedback ---------- */
+function hint(msg, secs) { const h = $('hint'); h.innerHTML = tx(msg); h.classList.add('on'); clearTimeout(R.hintT); R.hintT = setTimeout(() => h.classList.remove('on'), (secs || 3.2) * 1000); }
+function toast(msg, kind, ms) {
+  const box = $('toasts'), d = document.createElement('div'); d.className = 'toast ' + (kind || ''); d.innerHTML = tx(msg); box.appendChild(d);
+  while (box.children.length > 5) box.removeChild(box.firstChild);
+  setTimeout(() => d.classList.add('out'), ms || 5000); setTimeout(() => d.remove(), (ms || 5000) + 600);
+}
+function lootToast(id, n) {
+  const box = $('loot'), now = performance.now();
+  let row = [...box.children].find(r => r.dataset.id === id && now - r._t < 2500);
+  if (row) { row._n += n; row._t = now; row.querySelector('b').textContent = '+' + row._n; row.classList.remove('bump'); void row.offsetWidth; row.classList.add('bump'); }
+  else {
+    row = document.createElement('div'); row.className = 'lootrow'; row.dataset.id = id; row._n = n; row._t = now;
+    row.innerHTML = '<b>+' + n + '</b> ' + icon(id) + ' ' + ITEMS[id].n; box.appendChild(row);
+    while (box.children.length > 6) box.removeChild(box.firstChild);
+  }
+  clearTimeout(row._k); row._k = setTimeout(() => { row.classList.add('out'); setTimeout(() => row.remove(), 500); }, 2600);
+}
+function banner(title, sub) {
+  const b = $('banner'); b.innerHTML = (title ? '<div class="bt">' + title + '</div>' : '') + (sub ? '<div class="bs">' + sub + '</div>' : '');
+  b.classList.remove('on'); void b.offsetWidth; b.classList.add('on'); clearTimeout(R.bannerT); R.bannerT = setTimeout(() => b.classList.remove('on'), 3800);
+}
+function questPop(t) { const q = $('quest'); q.classList.remove('pop'); void q.offsetWidth; q.classList.add('pop'); }
+function uiFlash(color, a) { const f = $('flash'); f.style.transition = 'none'; f.style.background = color; f.style.opacity = a; void f.offsetWidth; f.style.transition = 'opacity .7s'; f.style.opacity = 0; }
+function uiDamage() { const v = $('vignette'); v.classList.remove('hit'); void v.offsetWidth; v.classList.add('hit'); }
+function uiFade(on, ms, cb) { const f = $('fade'); f.style.transition = 'opacity ' + ms + 'ms'; f.style.opacity = on ? 1 : 0; f.style.pointerEvents = on ? 'all' : 'none'; if (cb) setTimeout(cb, ms + 30); }
+function dmgNumber(x, y, z, text, kind) {
+  const d = document.createElement('div'); d.className = 'num ' + (kind || ''); d.textContent = text; $('nums').appendChild(d);
+  R.nums.push({ d, x, y, z, t: 0, dx: rnd(-0.4, 0.4) });
+}
+const _pv = new THREE.Vector3();
+function updateNums(dt) {
+  for (let i = R.nums.length - 1; i >= 0; i--) {
+    const n = R.nums[i]; n.t += dt; if (n.t > 1.1) { n.d.remove(); R.nums.splice(i, 1); continue; }
+    _pv.set(n.x + n.dx * n.t, n.y + n.t * 1.2, n.z).project(R.camera);
+    if (_pv.z > 1) { n.d.style.display = 'none'; continue; }
+    n.d.style.display = ''; n.d.style.transform = 'translate(' + ((_pv.x + 1) / 2 * innerWidth) + 'px,' + ((1 - _pv.y) / 2 * innerHeight) + 'px) translate(-50%,-50%) scale(' + (n.t < 0.12 ? 1 + (0.12 - n.t) * 5 : 1) + ')';
+    n.d.style.opacity = n.t > 0.75 ? (1.1 - n.t) / 0.35 : 1;
+  }
+}
+
+/* ---------- HUD ---------- */
+const METERS = [['hp', '❤️', '#e8473f'], ['food', '🍗', '#e89a3f'], ['water', '💧', '#3fa0e8'], ['warm', '🔥', '#f0c23a'], ['stam', '⚡', '#8fd45a']];
+function buildHUD() {
+  $('meters').innerHTML = METERS.map(m => '<div class="meter" id="m_' + m[0] + '"><span class="mi">' + m[1] + '</span><div class="mb"><div class="mf" style="background:' + m[2] + '"></div><div class="mg"></div></div><span class="mv"></span></div>').join('');
+  const sc = document.createElement('div'); sc.id = 'scoutchip'; $('meters').appendChild(sc);
+  $('hotbar').innerHTML = HOTBAR.map((s, i) => '<div class="slot" id="hb_' + s + '"><span class="k">' + (i + 1) + '</span><span class="ic"></span><span class="c"></span></div>').join('');
+  HOTBAR.forEach(s => $('hb_' + s).onclick = () => selectSlot(s));
+  $('minimap').onclick = e => { e.stopPropagation(); if (R.started && !R.panel && !R.cinematic && !R.sleeping) openPanel('map'); };
+  $('minimap').title = 'Click to open the map (M)';
+  const cp = $('compassIn'); cp.innerHTML = '';
+  ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'].forEach((t, i) => { const d = document.createElement('span'); d.className = 'cm' + (t.length === 1 ? ' big' : ''); d.textContent = t; d.dataset.b = i * Math.PI / 4; cp.appendChild(d); });
+  for (let i = 0; i < 24; i++) { const d = document.createElement('span'); d.className = 'tick'; d.dataset.b = i * Math.PI / 12 + Math.PI / 24; cp.appendChild(d); }
+  R.compWp = document.createElement('span'); R.compWp.className = 'cwp'; R.compWp.innerHTML = '◆<i></i>'; cp.appendChild(R.compWp);
+}
+function compassPlace(el, bearing) {
+  const rel = angDiff(-G.p.yaw, bearing);
+  if (Math.abs(rel) > 1.35) { el.style.display = 'none'; return rel; }
+  el.style.display = ''; el.style.left = (50 + rel / 1.35 * 50) + '%'; el.style.opacity = 1 - Math.abs(rel) / 1.6; return rel;
+}
+function wpPos() { const w = R.wp; return w ? { x: w.x, z: w.z } : null; }
+const WEATHER_ICON = { clear: '☀️', cloudy: '⛅', rain: '🌧️', storm: '⛈️' };
+function hourStr(h) { const hh = Math.floor(h), mm = Math.floor((h - hh) * 60 / 10) * 10; return (hh % 12 || 12) + ':' + String(mm).padStart(2, '0') + (hh < 12 ? ' am' : ' pm'); }
+function updateHUD(dt) {
+  const p = G.p;
+  // meters
+  for (const [k] of METERS) {
+    const v = k === 'hp' ? p.hp / p.maxHp * 100 : p[k], el = $('m_' + k);
+    el.querySelector('.mf').style.width = clamp(v, 0, 100) + '%';
+    el.querySelector('.mv').textContent = k === 'hp' ? Math.ceil(p.hp) : Math.ceil(v);
+    el.classList.toggle('low', v < 25 && k !== 'stam'); el.classList.toggle('hide', k === 'stam' && v > 99.5);
+  }
+  const cold = R.temp < SURV.comfort && p.warm < 99, hot = R.heat;
+  $('m_warm').querySelector('.mg').className = 'mg ' + (cold ? 'cold' : R.nearFire && p.warm < 99.5 ? 'heat' : '');
+  $('m_water').querySelector('.mg').className = 'mg ' + (hot ? 'drain' : '');
+  const sch = $('scoutchip'), sst = !G.scout.friend ? '' : G.scout.fed >= G.day ? 'full' : 'hungry';
+  if (sch._s !== sst) { sch._s = sst; sch.style.display = sst ? '' : 'none'; sch.className = sst; sch.innerHTML = sst === 'full' ? '🐕 Scout: full ✓' : '🐕 Scout is hungry! 🥩'; }
+  $('temp').textContent = (cold ? '🥶 ' : hot ? '🥵 ' : '') + Math.round(R.temp) + '°';
+  $('temp').className = cold ? 'cold' : hot ? 'hot' : '';
+  // clock
+  const night = nightAmount();
+  $('day').textContent = 'DAY ' + G.day; $('time').textContent = (night > 0.5 ? '🌙 ' : '☀️ ') + hourStr(G.hour);
+  $('weather').textContent = (G.weather === 'clear' && night > 0.5 ? '🌙' : WEATHER_ICON[G.weather]) + (R.raid ? ' 🌕' : '') + (R.sheltered ? ' 🏠' : '');
+  $('dayprog').style.width = (G.day / 100 * 100) + '%';
+  // compass
+  for (const el of $('compassIn').children) if (el.dataset.b !== undefined) compassPlace(el, +el.dataset.b);
+  const w = wpPos();
+  if (w) { const d = dist2(w.x, w.z, p.x, p.z), rel = compassPlace(R.compWp, Math.atan2(w.x - p.x, -(w.z - p.z))); R.compWp.querySelector('i').textContent = Math.round(d) + 'm'; if (Math.abs(rel) > 1.35) { R.compWp.style.display = ''; R.compWp.style.left = (rel > 0 ? 98 : 2) + '%'; R.compWp.style.opacity = 0.8; } }
+  else R.compWp.style.display = 'none';
+  // quest
+  if (_dirty || (R.qT = (R.qT || 0) - dt) <= 0) {
+    R.qT = 0.5; const q = R.quest;
+    $('quest').innerHTML = q ? '<div class="ql">GOAL</div><div class="qt">' + q.t + '</div>' + (q.s ? '<div class="qs">' + tx(q.s()) + '</div>' : '') : '';
+  }
+  // hotbar
+  if (_dirty) {
+    for (const s of HOTBAR) {
+      const id = bestTool(s), el = $('hb_' + s);
+      el.classList.toggle('none', !id); el.classList.toggle('sel', G.p.held === s);
+      el.querySelector('.ic').textContent = id ? icon(id) : ''; el.querySelector('.c').textContent = s === 'bow' && id ? inv('arrow') : '';
+      el.title = id ? (id === 'hands' ? 'Hands' : ITEMS[id].n) : '';
+      el.style.background = id && id !== 'hands' && ITEMS[id].bg ? 'linear-gradient(180deg,' + ITEMS[id].bg + '66,#0006)' : '';
+    }
+    $('canteen').style.display = inv('canteen') ? '' : 'none'; $('canteen').innerHTML = '🧴 <b>' + (G.flags.canteen || 0) + '</b>/5 <kbd>G</kbd>';
+    $('lvl').textContent = 'LV ' + p.level; $('xpf').style.width = (p.xp / xpNeed(p.level) * 100) + '%';
+    if (R.panel === 'inv' || R.panel === 'craft' || R.panel === 'build' || R.panel === 'chest' || R.panel === 'fire') renderPanel();
+    _dirty = false;
+  }
+  // prompt
+  let pr = '';
+  if (R.build) pr = R.build.ok ? (R.touch ? '<kbd class="tk">✅</kbd>' : key('Click')) + ' Place ' + R.build.def.n + '  ' + key('R') + ' rotate  ' + key('X') + ' stop' : '❌ ' + (R.build.why || '');
+  else if (R.fish) pr = R.fish.phase === 'bite' ? '🐟 <b>CLICK NOW!</b>' : '🎣 Waiting for a bite...';
+  else {
+    pr = targetPrompt(R.target);
+    const t = R.target; if (t && t.kind === 'node' && NT[t.ref.t].hp && t.ref.hp < NT[t.ref.t].hp) { const k = t.ref.hp / NT[t.ref.t].hp; pr += '<div class="pbar"><div style="width:' + (k * 100) + '%"></div></div>'; }
+  }
+  if (pr !== R.lastPr) { $('prompt').innerHTML = pr; R.lastPr = pr; }
+  $('cross').className = R.target ? 'on' : '';
+  // boss + focus bars
+  const b = R.boss;
+  $('bossbar').style.display = b ? '' : 'none';
+  if (b) { $('bossname').textContent = b.def.n; $('bossfill').style.width = Math.max(0, b.hp / b.maxHp * 100) + '%'; }
+  const f = !b && R.focus && !R.focus.dead ? R.focus : null;
+  $('focus').style.display = f ? '' : 'none';
+  if (f) { $('focusname').textContent = f.def.n + (f.raid ? ' 🌕' : ''); $('focusfill').style.width = Math.max(0, f.hp / f.maxHp * 100) + '%'; }
+  // vignettes: low health, cold, wolf moon
+  const lowHp = p.hp / p.maxHp < 0.3;
+  $('vignette').style.boxShadow = lowHp ? 'inset 0 0 ' + (140 + Math.sin(R.t * 6) * 30) + 'px rgba(200,0,0,.55)' : cold && p.warm < 30 ? 'inset 0 0 160px rgba(140,200,255,.55)' : R.raid ? 'inset 0 0 160px rgba(120,0,0,.35)' : 'none';
+  drawMinimap();
+}
+
+/* ---------- map ---------- */
+const FOG_N = 90;
+function fogArr() { if (!R.fog) { R.fog = new Uint8Array(FOG_N * FOG_N); if (G.fog) for (let i = 0; i < G.fog.length; i++) { const c = G.fog.charCodeAt(i) - 48; for (let b = 0; b < 6; b++) { const j = i * 6 + b; if (j < R.fog.length) R.fog[j] = (c >> b) & 1; } } } return R.fog; }
+function fogSave() { const f = fogArr(); let s = ''; for (let i = 0; i < f.length; i += 6) { let c = 0; for (let b = 0; b < 6; b++) c |= (f[i + b] || 0) << b; s += String.fromCharCode(48 + c); } G.fog = s; }
+function revealFog() {
+  const f = fogArr(), cx = Math.floor((G.p.x + HALF) / WORLD * FOG_N), cz = Math.floor((G.p.z + HALF) / WORLD * FOG_N), r = 6;
+  for (let x = -r; x <= r; x++) for (let z = -r; z <= r; z++) { if (x * x + z * z > r * r) continue; const i = cx + x, j = cz + z; if (i >= 0 && j >= 0 && i < FOG_N && j < FOG_N && !f[j * FOG_N + i]) { f[j * FOG_N + i] = 1; R.fogDirty = true; } }
+}
+/** a tiny FOG_N×FOG_N parchment mask; drawn scaled-up with smoothing so the explored edge fades softly */
+function fogCanvas() {
+  if (!R.fogCv) { R.fogCv = document.createElement('canvas'); R.fogCv.width = R.fogCv.height = FOG_N; R.fogDirty = true; }
+  if (R.fogDirty) {
+    R.fogDirty = false; const f = fogArr(), ctx = R.fogCv.getContext('2d'), img = ctx.createImageData(FOG_N, FOG_N);
+    for (let i = 0; i < f.length; i++) { const n = hash2(i, 7) * 18; img.data[i * 4] = 226 + n * 0.5; img.data[i * 4 + 1] = 212 + n * 0.4; img.data[i * 4 + 2] = 180 + n * 0.2; img.data[i * 4 + 3] = f[i] ? 0 : 255; }
+    ctx.putImageData(img, 0, 0);
+    // blur a 4x copy so explored edges fade softly instead of looking blocky
+    if (!R.fogSoft) { R.fogSoft = document.createElement('canvas'); R.fogSoft.width = R.fogSoft.height = FOG_N * 4; }
+    const sc = R.fogSoft.getContext('2d'); sc.clearRect(0, 0, FOG_N * 4, FOG_N * 4); sc.imageSmoothingEnabled = true;
+    try { sc.filter = 'blur(5px)'; } catch (e) { }
+    sc.drawImage(R.fogCv, -2, -2, FOG_N * 4 + 4, FOG_N * 4 + 4); sc.filter = 'none';
+  }
+  return R.fogSoft;
+}
+const fogAt = (x, z) => { const i = Math.floor((x + HALF) / WORLD * FOG_N), j = Math.floor((z + HALF) / WORLD * FOG_N); return i >= 0 && j >= 0 && i < FOG_N && j < FOG_N && fogArr()[j * FOG_N + i] === 1; };
+function prerenderMap() {
+  const S = 360, cv = document.createElement('canvas'); cv.width = cv.height = S; const ctx = cv.getContext('2d'), img = ctx.createImageData(S, S), c = [0, 0, 0];
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+    const x = -HALF + (i + 0.5) * WORLD / S, z = -HALF + (j + 0.5) * WORLD / S, h = heightAt(x, z), o = (j * S + i) * 4;
+    if (h < 0) { const d = clamp(-h / 6, 0, 1); img.data[o] = 40 - d * 20; img.data[o + 1] = 120 - d * 50; img.data[o + 2] = 190 - d * 60; img.data[o + 3] = 255; continue; }
+    const sh = clamp(1 + (heightAt(x - 2, z - 2) - h) * 0.12, 0.7, 1.25); terrainColor(x, z, h, 1, c);
+    img.data[o] = clamp(c[0] * 255 * sh, 0, 255); img.data[o + 1] = clamp(c[1] * 255 * sh, 0, 255); img.data[o + 2] = clamp(c[2] * 255 * sh, 0, 255); img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  // forests as darker dots
+  ctx.fillStyle = 'rgba(20,60,25,.55)'; for (const n of NODES) if (NT[n.t].cls === 'tree' && n.t !== 'deadtree') { ctx.fillRect((n.x + HALF) / 2 - 1, (n.z + HALF) / 2 - 1, 2, 2); }
+  R.mapImg = cv;
+}
+const toMap = (v, S) => (v + HALF) / WORLD * S;
+function drawMarkers(ctx, S, scale, mini) {
+  const p = G.p;
+  for (const s of G.structures) if (s.k === 'flag' || s.k === 'bed' || s.k === 'campfire') { ctx.font = (mini ? 11 : 18) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(s.k === 'flag' ? '🚩' : s.k === 'bed' ? '🛏️' : '🔥', toMap(s.x, S), toMap(s.z, S)); }
+  ctx.fillStyle = '#7a5632'; for (const s of G.structures) if (s.k === 'floor' || s.k === 'wall' || s.k === 'roof') ctx.fillRect(toMap(s.x, S) - 1.5 * scale, toMap(s.z, S) - 1.5 * scale, 3 * scale, 3 * scale);
+  if (G.pack) { ctx.font = (mini ? 13 : 20) + 'px sans-serif'; ctx.fillText('🎒', toMap(G.pack.x, S), toMap(G.pack.z, S)); }
+  if (G.scout.friend && R.scout && !mini) { ctx.font = '14px sans-serif'; ctx.fillText('🐕', toMap(R.scout.x, S), toMap(R.scout.z, S)); }
+  const w = wpPos();
+  if (w) { let x = toMap(w.x, S), z = toMap(w.z, S); if (mini) { x = clamp(x, -1e9, 1e9); } ctx.fillStyle = '#ffd24a'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2; star(ctx, x, z, mini ? 6 : 10); }
+  // player arrow
+  const px = toMap(p.x, S), pz = toMap(p.z, S), a = -p.yaw;
+  ctx.save(); ctx.translate(px, pz); ctx.rotate(a); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#d9342b'; ctx.lineWidth = mini ? 2 : 3;
+  const k = mini ? 6 : 10; ctx.beginPath(); ctx.moveTo(0, -k); ctx.lineTo(k * 0.7, k * 0.7); ctx.lineTo(0, k * 0.3); ctx.lineTo(-k * 0.7, k * 0.7); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore();
+}
+function star(ctx, x, y, r) { ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = i / 10 * TAU - Math.PI / 2, rr = i % 2 ? r * 0.45 : r; ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); } ctx.closePath(); ctx.stroke(); ctx.fill(); }
+function drawMinimap() {
+  if (!R.mapImg) return;
+  R.mmT = (R.mmT || 0) - 1; if (R.mmT > 0) return; R.mmT = 3;
+  const cv = $('minimap'), ctx = cv.getContext('2d'), W = cv.width, S = 720, p = G.p;   // S: map drawn at 1px = 1m
+  ctx.save(); ctx.clearRect(0, 0, W, W); ctx.beginPath(); ctx.arc(W / 2, W / 2, W / 2 - 2, 0, TAU); ctx.clip();
+  ctx.fillStyle = '#1d4f78'; ctx.fillRect(0, 0, W, W);
+  ctx.translate(W / 2 - toMap(p.x, S), W / 2 - toMap(p.z, S)); ctx.imageSmoothingEnabled = true; ctx.drawImage(R.mapImg, 0, 0, S, S); ctx.drawImage(fogCanvas(), 0, 0, S, S);
+  for (const L of LANDMARKS) if (G.found[L.id] && LM_POS[L.id]) { ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(L.e, toMap(LM_POS[L.id].x, S), toMap(LM_POS[L.id].z, S)); }
+  drawMarkers(ctx, S, 1, true);
+  ctx.restore();
+  // waypoint arrow on the rim when off the minimap
+  const w = wpPos();
+  if (w) { const dx = w.x - p.x, dz = w.z - p.z, d = Math.hypot(dx, dz); if (d > W / 2 - 8) { const a = Math.atan2(dz, dx), r = W / 2 - 9; ctx.fillStyle = '#ffd24a'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2; star(ctx, W / 2 + Math.cos(a) * r, W / 2 + Math.sin(a) * r, 6); } }
+  ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(W / 2, W / 2, W / 2 - 2, 0, TAU); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('N', W / 2, 12);
+}
+function mapView() {
+  if (R.mapAll) return { x0: -HALF, z0: -HALF, span: WORLD };
+  const f = fogArr(); let i0 = FOG_N, j0 = FOG_N, i1 = -1, j1 = -1;
+  for (let j = 0; j < FOG_N; j++) for (let i = 0; i < FOG_N; i++) if (f[j * FOG_N + i]) { if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j; }
+  if (i1 < 0) return { x0: G.p.x - 100, z0: G.p.z - 100, span: 200 };
+  const c = WORLD / FOG_N, pad = 24;
+  let x0 = -HALF + i0 * c - pad, x1 = -HALF + (i1 + 1) * c + pad, z0 = -HALF + j0 * c - pad, z1 = -HALF + (j1 + 1) * c + pad;
+  const span = clamp(Math.max(x1 - x0, z1 - z0, 200), 200, WORLD), cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  return { x0: clamp(cx - span / 2, -HALF, HALF - span), z0: clamp(cz - span / 2, -HALF, HALF - span), span };
+}
+function renderMap(box) {
+  const S = Math.min(640, innerHeight - (R.touch ? 92 : 190), innerWidth - 80), v = mapView(), k = S / v.span;
+  const found = Object.keys(G.found).length;
+  box.innerHTML = '<h2>🗺️ Kestrel Island <button class="mini" data-a="mapall">' + (R.mapAll ? '🔍 Zoom to where I\'ve explored' : '🏝️ Show the whole island') + '</button></h2><canvas id="bigmap" width="' + S + '" height="' + S + '"></canvas><div class="mapkey">⭐ goal &nbsp; ➤ you &nbsp; 🎒 your dropped pack &nbsp;·&nbsp; The map fills in as you explore. Places found: <b>' + found + ' / ' + LANDMARKS.length + '</b></div>';
+  const ctx = $('bigmap').getContext('2d'), C = (x, z) => [(x - v.x0) * k, (z - v.z0) * k];
+  ctx.fillStyle = '#e2d4b4'; ctx.fillRect(0, 0, S, S);
+  ctx.imageSmoothingEnabled = true;
+  const m = 360 / WORLD; ctx.drawImage(R.mapImg, (v.x0 + HALF) * m, (v.z0 + HALF) * m, v.span * m, v.span * m, 0, 0, S, S);
+  // grid every 100 m
+  ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1;
+  for (let g = -300; g <= 300; g += 100) { const [gx] = C(g, 0), [, gz] = C(0, g); ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, S); ctx.moveTo(0, gz); ctx.lineTo(S, gz); ctx.stroke(); }
+  // fog of war, soft-edged
+  const fc = fogCanvas(), fm = FOG_N * 4 / WORLD; ctx.drawImage(fc, (v.x0 + HALF) * fm, (v.z0 + HALF) * fm, v.span * fm, v.span * fm, 0, 0, S, S);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  // region names appear once you've been near them
+  ctx.font = 'bold ' + Math.round(clamp(S / 24, 14, 26)) + 'px Georgia,serif'; ctx.fillStyle = 'rgba(70,50,25,.55)';
+  for (const [name, x, z] of [['FROSTPEAK', -20, -250], ['DUST FLATS', 215, 10], ['DEEPWOOD', -150, 95]]) if (fogAt(x, z) || fogAt(x, z + 40)) { const [px, pz] = C(x, z); ctx.fillText(name, px, pz); }
+  // your base
+  for (const s of G.structures) if (s.k === 'floor' || s.k === 'wall' || s.k === 'roof') { const [px, pz] = C(s.x, s.z), w = Math.max(3, 3 * k); ctx.fillStyle = '#7a5632'; ctx.fillRect(px - w / 2, pz - w / 2, w, w); }
+  ctx.font = '18px sans-serif';
+  for (const s of G.structures) if (s.k === 'flag' || s.k === 'bed' || s.k === 'campfire' || s.k === 'shelter') { const [px, pz] = C(s.x, s.z); ctx.fillText({ flag: '🚩', bed: '🛏️', campfire: '🔥', shelter: '⛺' }[s.k], px, pz); }
+  // discovered landmarks
+  for (const L of LANDMARKS) if (G.found[L.id] && LM_POS[L.id]) {
+    const [x, z] = C(LM_POS[L.id].x, LM_POS[L.id].z); if (x < -20 || z < -20 || x > S + 20 || z > S + 20) continue;
+    ctx.font = '22px sans-serif'; ctx.fillText(L.e, x, z);
+    ctx.font = 'bold 12px sans-serif'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.strokeText(L.n, x, z + 18); ctx.fillStyle = '#fff'; ctx.fillText(L.n, x, z + 18);
+  }
+  ctx.font = '20px sans-serif';
+  if (G.pack) { const [px, pz] = C(G.pack.x, G.pack.z); ctx.fillText('🎒', px, pz); }
+  if (G.scout.friend && R.scout) { const [px, pz] = C(R.scout.x, R.scout.z); ctx.font = '15px sans-serif'; ctx.fillText('🐕', px + 8, pz + 8); }
+  const w = wpPos();
+  if (w) { let [px, pz] = C(w.x, w.z); px = clamp(px, 12, S - 12); pz = clamp(pz, 12, S - 12); ctx.fillStyle = '#ffd24a'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2; star(ctx, px, pz, 11); }
+  const [px, pz] = C(G.p.x, G.p.z);
+  ctx.save(); ctx.translate(px, pz); ctx.rotate(-G.p.yaw); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#d9342b'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(8, 8); ctx.lineTo(0, 3); ctx.lineTo(-8, 8); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore();
+  ctx.strokeStyle = '#5a4630'; ctx.lineWidth = 4; ctx.strokeRect(2, 2, S - 4, S - 4);
+  ctx.fillStyle = '#5a4630'; ctx.font = 'bold 18px Georgia,serif'; ctx.fillText('N ▲', S - 30, 22);
+  ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(Math.round(v.span) + ' m across', 10, S - 12);
+  bindPanel(box);
+}
+/* ---------- panels ---------- */
+function openPanel(name, arg, opts) {
+  if (R.build && name !== 'pause') cancelBuild();
+  if (R.fish) stopFishing();
+  R.panel = name; R.panelArg = arg; R.panelNext = null; R.panelOnClose = opts && opts.onClose;
+  R.keys = {}; R.mouseDown = false; if (R.touchReset) R.touchReset();
+  $('panel').className = 'on p_' + name; R.panelOpenT = performance.now(); renderPanel();
+  if (document.pointerLockElement) document.exitPointerLock();
+  sfx('click');
+}
+function closePanel() {
+  if (!R.panel) return;
+  const cb = R.panelOnClose; R.panelOnClose = null; R.panelNext = null;
+  $('panel').className = ''; R.panel = null; R.panelArg = null; R.closedAt = R.t;
+  if (cb) cb();
+  if (!R.panel && R.started) lockPointer();
+}
+const closeBtn = '<button class="x" data-a="close">✕</button>';
+function stationNear(type) {
+  const p = G.p;
+  if (type === 'fire') return !!nearestFlame(p.x, p.z, 4.5, true);
+  for (const s of G.structures) if (s.k === type && dist2(s.x, s.z, p.x, p.z) < 4.5) return true;
+  for (const s of R.worldStations) if (s.type === type && dist2(s.x, s.z, p.x, p.z) < 4.5) return true;
+  return false;
+}
+const STATION_NAME = { bench: 'a Workbench', furnace: 'a Furnace', fire: 'a lit Campfire' };
+function costHTML(cost) { return Object.keys(cost).map(k => '<span class="cost ' + (inv(k) >= cost[k] ? 'ok' : 'no') + '" title="' + ITEMS[k].n + '">' + icon(k) + ' ' + inv(k) + '/' + cost[k] + '</span>').join(''); }
+function itemSlot(id, n, act) { const d = ITEMS[id]; return '<div class="item" data-a="' + act + '" data-id="' + id + '" style="' + (d.bg ? 'background:linear-gradient(180deg,' + d.bg + '55,#0004)' : '') + '"><span class="ic">' + d.e[0] + '</span><span class="n">' + (n > 1 ? n : '') + '</span><div class="tip"><b>' + d.n + '</b><br>' + d.d + '</div></div>'; }
+const ITEM_ORDER = Object.keys(ITEMS);
+const PACK_GROUPS = [['tools', '⚔️ Tools and weapons', 'click to hold'], ['wear', '🧥 Clothes and armour', 'worn automatically'], ['food', '🍗 Food and medicine', 'click to eat'], ['mat', '🪵 Materials', 'for crafting and building'], ['story', '⭐ Special', 'story items']];
+function packGroup(id) { const d = ITEMS[id]; return d.story ? 'story' : d.tool || id === 'canteen' || id === 'arrow' ? 'tools' : d.wear ? 'wear' : d.food ? 'food' : 'mat'; }
+const CRAFT_GROUPS = [['tools', '⚔️ Tools and weapons'], ['wear', '🧥 Clothes and armour'], ['supp', '🎒 Supplies'], ['furn', '🏭 Furnace']];
+function craftGroup(id) { const d = ITEMS[id]; return id === 'iron' ? 'furn' : d.wear ? 'wear' : d.tool ? 'tools' : 'supp'; }
+const BUILD_GROUPS = [['🔥 Survival', ['campfire', 'shelter', 'bed', 'collector', 'garden', 'torchpost']], ['🏠 Cabin pieces', ['floor', 'wall', 'door', 'roof']], ['🛠️ Workshop', ['bench', 'furnace', 'chest']], ['🛡️ Defence and decoration', ['spikes', 'flag']]];
+const INV_TABS = [['inv', '🎒 Pack', 'TAB', 'What you are carrying'], ['craft', '🛠️ Craft', 'C', 'Make tools, weapons and gear to carry'], ['build', '🏠 Build', 'B', 'Place things in the world — fires, shelters, walls']];
+function invTabs(P) {
+  const cur = INV_TABS.find(t => t[0] === P);
+  return '<div class="tabs bigtabs">' + INV_TABS.map(t => '<button class="tab ' + (t[0] === P ? 'sel' : '') + '" data-a="ptab" data-id="' + t[0] + '">' + t[1] + (R.touch ? '' : ' <kbd>' + t[2] + '</kbd>') + '</button>').join('') + '</div><p class="tabsub">' + cur[3] + '</p>';
+}
+function switchInvTab(t) { if (R.panel === t) { closePanel(); return; } R.panel = t; $('panel').className = 'on p_' + t; renderPanel(); sfx('click'); }
+function renderPanel() {
+  const box = $('panelBox'), P = R.panel, p = G.p; let h = '';
+  if (P === 'inv' || P === 'craft' || P === 'build') h += closeBtn + invTabs(P);
+  if (P === 'inv') {
+    const items = ITEM_ORDER.filter(id => inv(id) > 0);
+    if (R.touch && R.invInfo && ITEMS[R.invInfo]) h += '<div class="invinfo">' + ITEMS[R.invInfo].e[0] + ' <b>' + ITEMS[R.invInfo].n + '</b> — ' + ITEMS[R.invInfo].d + '</div>';
+    if (!items.length) h += '<p class="dim">Your pack is empty! Pick things up with <kbd>E</kbd>.</p>';
+    h += '<div class="pgroups">';
+    for (const [gid, gname, tipTxt] of PACK_GROUPS) {
+      const ids = items.filter(id => packGroup(id) === gid); if (!ids.length) continue;
+      h += '<div class="grp"><h4>' + gname + ' <span>' + tipTxt + '</span></h4><div class="grid">' + ids.map(id => itemSlot(id, inv(id), 'use')).join('') + '</div></div>';
+    }
+    h += '</div>';
+    const wr = []; if (armorValue()) wr.push('🛡️ ' + Math.round(armorValue() * 100) + '% armour'); if (wearStat('warm', 0, Math.max)) wr.push('🧥 +' + wearStat('warm', 0, Math.max) + '° warmth'); if (dmgMult() > 1.01) wr.push('⚔️ +' + Math.round((dmgMult() - 1) * 100) + '% damage');
+    if (wr.length) h += '<p class="gear">You are wearing: ' + wr.join(' &nbsp; ') + '</p>';
+    h += '<p class="foot">Want to make something? Open <b>🛠️ Craft</b> <kbd>C</kbd> for tools and gear, or <b>🏠 Build</b> <kbd>B</kbd> for things you place in the world.</p>';
+  } else if (P === 'craft') {
+    const atBench = stationNear('bench'), atFurn = stationNear('furnace');
+    h += '<p class="station">' + (atBench || atFurn ? '✅ You are at ' + [atBench ? 'a 🛠️ <b>Workbench</b>' : '', atFurn ? 'a 🏭 <b>Furnace</b>' : ''].filter(Boolean).join(' and ') + ' — everything it unlocks can be made here.' : 'Some things need a 🛠️ <b>Workbench</b> or 🏭 <b>Furnace</b>. Build one in the 🏠 Build tab, then come here while standing next to it.') + '</p><div class="rgrid">';
+    for (const [gid, gname] of CRAFT_GROUPS) {
+      const list = RECIPES.filter(r => r.station !== 'fire' && craftGroup(r.id) === gid).map(r => {
+        const d = ITEMS[r.id], near = !r.station || stationNear(r.station), owned = d.tool && bestTool(d.tool.slot) && ITEMS[bestTool(d.tool.slot)].tool.tier >= d.tool.tier;
+        return { r, d, near, owned, can: near && canAfford(r.cost) };
+      }).sort((x, y) => (y.can - x.can) || (x.owned - y.owned) || (y.near - x.near));
+      h += '<div class="grp"><h4>' + gname + '</h4><div class="recipes">';
+      for (const { r, d, near, owned, can } of list)
+        h += '<div class="rec ' + (can ? 'can' : '') + (owned ? ' owned' : '') + '"><span class="ric">' + d.e[0] + '</span><div class="rt"><b>' + d.n + (r.n ? ' ×' + r.n : '') + '</b>' + (owned ? ' <span class="dim">(you have one)</span>' : '') + '<div class="rd">' + d.d + '</div><div>' + costHTML(r.cost) + (r.station ? ' <span class="need ' + (near ? 'ok' : '') + '">' + (r.station === 'bench' ? '🛠️ Workbench' : '🏭 Furnace') + (near ? ' ✓' : '') + '</span>' : '') + '</div></div><button data-a="craft" data-id="' + r.id + '" ' + (can ? '' : 'disabled') + '>Make</button></div>';
+      h += '</div></div>';
+    }
+    h += '</div><p class="foot">🍳 Cooking happens at a lit campfire — look at the fire and press <kbd>E</kbd>.</p>';
+  } else if (P === 'build') {
+    h += '<div class="bgroups">';
+    for (const [gname, ids] of BUILD_GROUPS) {
+      h += '<div class="grp"><h4>' + gname + '</h4><div class="bgrid">';
+      for (const id of ids) { const b = BUILD_BY_ID[id], can = canAfford(b.cost); h += '<div class="bcard ' + (can ? 'can' : '') + '" data-a="build" data-id="' + b.id + '"><div class="bic">' + b.e[0] + '</div><b>' + b.n + '</b><div class="rd">' + b.d + '</div><div>' + costHTML(b.cost) + '</div></div>'; }
+      h += '</div></div>';
+    }
+    h += '</div><p class="foot">Click a card, then point where it should go and click to place it. Floors, walls and roofs snap together — build a real cabin! <kbd>X</kbd> takes things apart (you get half back).</p>';
+  } else if (P === 'fire') {
+    const s = R.panelArg, d = s.d;
+    h += closeBtn + '<h2>🔥 Campfire</h2><div class="firebar"><div style="width:' + (d.fuel / 12 * 100) + '%"></div></div><p class="center">' + (d.lit ? 'Burning — <b>' + d.fuel.toFixed(1) + ' hours</b> of fuel left' : d.fuel > 0 ? 'Fuel ready (' + d.fuel.toFixed(1) + 'h). Light it!' : 'The fire pit is empty. Add fuel first.') + '</p>';
+    h += '<div class="row center"><button data-a="fuel" data-id="stick" ' + (inv('stick') ? '' : 'disabled') + '>+ 🥢 Stick <small>(¾ h) · ' + inv('stick') + '</small></button><button data-a="fuel" data-id="wood" ' + (inv('wood') ? '' : 'disabled') + '>+ 🪵 Wood <small>(3 h) · ' + inv('wood') + '</small></button>' + (d.lit ? '' : '<button class="big" data-a="light" ' + (d.fuel > 0 ? '' : 'disabled') + '>🔥 Light it</button>') + '</div>';
+    h += '<h3>🍳 Cooking</h3>' + (d.lit ? '' : '<p class="dim center">Light the fire to cook.</p>') + '<div class="recipes">';
+    for (const r of RECIPES.filter(r => r.station === 'fire')) { const can = d.lit && canAfford(r.cost), it = ITEMS[r.id]; h += '<div class="rec ' + (can ? 'can' : '') + '"><span class="ric">' + it.e[0] + '</span><div class="rt"><b>' + it.n + '</b><div class="rd">' + it.d + '</div><div>' + costHTML(r.cost) + '</div></div><button data-a="craft" data-id="' + r.id + '" ' + (can ? '' : 'disabled') + '>Cook</button><button data-a="cookall" data-id="' + r.id + '" ' + (can ? '' : 'disabled') + '>All</button></div>'; }
+    h += '</div><p class="foot">Cooked food fills you up much more than raw. Rain puts out fires without a roof.</p>';
+  } else if (P === 'chest') {
+    const s = R.panelArg, ci = s.d.items, mine = ITEM_ORDER.filter(id => inv(id) > 0 && !ITEMS[id].story), stored = ITEM_ORDER.filter(id => ci[id] > 0);
+    h += closeBtn + '<h2>📦 Storage Chest</h2><div class="cols"><div class="col"><h3>Your pack <button class="mini" data-a="depositall">Store all materials ➜</button></h3><div class="grid">' + (mine.map(id => itemSlot(id, inv(id), 'put')).join('') || '<p class="dim">Empty</p>') + '</div></div>';
+    h += '<div class="col"><h3>In the chest <button class="mini" data-a="takeall">⬅ Take all</button></h3><div class="grid">' + (stored.map(id => itemSlot(id, ci[id], 'get')).join('') || '<p class="dim">Empty</p>') + '</div></div></div><p class="foot">Click an item to move it. Things in chests are safe if you black out.</p>';
+  } else if (P === 'journal') {
+    const tab = R.jTab || 'notes';
+    h += closeBtn + '<h2>📓 Sam\'s Journal</h2><div class="tabs">' + [['notes', '📜 Notes'], ['badges', '🏅 Badges'], ['stats', '📊 Stats'], ['help', '❓ How to play']].map(t => '<button class="tab ' + (tab === t[0] ? 'sel' : '') + '" data-a="jtab" data-id="' + t[0] + '">' + t[1] + '</button>').join('') + '</div><div class="jbody">';
+    if (tab === 'notes') h += G.notes.length ? G.notes.map(id => '<div class="noteln" data-a="note" data-id="' + id + '">📜 ' + NOTES[id].t + '</div>').join('') : '<p class="dim">No notes found yet. Explore the island!</p>';
+    if (tab === 'badges') { h += '<div class="badges">' + Object.keys(BADGES).map(k => { const b = BADGES[k], got = G.badges[k]; return '<div class="badge ' + (got ? 'got' : '') + '"><span>' + (got ? b[0] : '🔒') + '</span><b>' + b[1] + '</b><small>' + b[2] + '</small></div>'; }).join('') + '</div>'; }
+    if (tab === 'stats') { const st = G.stats; h += '<table class="stats">' + [['📅 Day', G.day + ' / 100'], ['⭐ Level', p.level], ['🗺️ Places found', Object.keys(G.found).length + ' / ' + LANDMARKS.length], ['💰 Treasure chests', st.chests + ' / 10'], ['🌳 Trees chopped', st.wood], ['⚔️ Creatures defeated', st.kills], ['👑 Bosses defeated', st.bosses + ' / 3'], ['🐟 Fish caught', st.fish], ['🔨 Things built', st.built], ['🛠️ Things crafted', st.crafted], ['👣 Distance walked', (st.dist / 1000).toFixed(1) + ' km'], ['💫 Blackouts', st.blackouts]].map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') + '</table>'; }
+    if (tab === 'help') h += helpHTML();
+    h += '</div>';
+  } else if (P === 'map') { box.innerHTML = closeBtn; const d = document.createElement('div'); box.appendChild(d); renderMap(d); bindPanel(box); box.onclick = null; return; }
+  else if (P === 'pause') {
+    h += '<h2>⏸️ Paused</h2><div class="menu"><button class="big" data-a="close">▶ Keep playing</button></div>' + settingsHTML() + '<div class="menu">' + (R.touch && (document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen) ? '<button data-a="fs">⛶ Full screen</button>' : '') + '<button data-a="save">💾 Save game</button><button data-a="quit">🏠 Save and quit to title</button></div><p class="foot">Your game also saves automatically every time you sleep.</p>';
+  } else if (P === 'msg') {
+    const a = R.panelArg; h += '<h2>' + a.t + '</h2><div class="msg">' + a.html + '</div><div class="menu"><button class="big" data-a="next">' + (a.btn || 'OK') + '</button></div>'; R.panelNext = () => closePanel();
+  } else if (P === 'note') {
+    const a = R.panelArg; h += '<div class="paper"><h2>' + esc(a.t) + '</h2><div class="pbody">' + esc(a.body).replace(/\n/g, '<br>') + '</div></div><div class="menu"><button class="big" data-a="next">Close</button></div>'; R.panelNext = () => closePanel();
+  } else if (P === 'dialog') {
+    const a = R.panelArg, line = a.lines[a.i], who = line.match(/^([A-Z]{2,}):\s*/);
+    h += '<div class="dlg">' + (who ? '<div class="who">' + (who[1] === 'RAY' ? '🧔 Uncle Ray' : who[1] === 'RADIO' ? '📻 Radio' : who[1]) + '</div>' : '') + '<div class="line">' + esc(who ? line.slice(who[0].length) : line) + '</div><div class="dnext">' + (a.i + 1 < a.lines.length ? 'Click or press E ▶' : 'Click or press E ✔') + '</div></div>';
+    R.panelNext = () => { a.i++; if (a.i < a.lines.length) { renderPanel(); sfx('click'); } else closePanel(); };
+  } else if (P === 'choice') {
+    const a = R.panelArg; h += '<h2>' + a.q + '</h2><div class="choices">' + a.opts.map((o, i) => '<div class="choice" data-a="choose" data-id="' + i + '"><b>' + o[0] + '</b><small>' + o[1] + '</small></div>').join('') + '</div>';
+  } else if (P === 'morning') {
+    const a = R.panelArg; h += '<div class="morning"><div class="mday">DAY ' + G.day + '</div><div class="msub">' + a.sub + '</div><ul>' + a.lines.map(l => '<li>' + l + '</li>').join('') + '</ul><div class="tipbox">💡 ' + a.tip + '</div></div><div class="menu"><button class="big" data-a="next">☀️ Start the day</button></div>'; R.panelNext = () => closePanel();
+  } else if (P === 'ending') {
+    h += R.panelArg; R.panelNext = null;
+  }
+  box.innerHTML = tx(h); bindPanel(box);
+  box.onclick = P === 'dialog' ? () => { if (performance.now() - (R.panelOpenT || 0) < 300) return; if (R.panelNext) R.panelNext(); } : null;
+}
+function bindPanel(box) {
+  box.querySelectorAll('[data-a]').forEach(el => { if (el.dataset.a === 'set') { bindSetting(el); return; } el.onclick = e => { e.stopPropagation(); if (performance.now() - (R.panelOpenT || 0) < 300) return; panelAction(el.dataset.a, el.dataset.id, el); }; });
+}
+function panelAction(a, id, el) {
+  audioInit();
+  const s = R.panelArg;
+  switch (a) {
+    case 'close': closePanel(); break;
+    case 'next': if (R.panelNext) R.panelNext(); else closePanel(); break;
+    case 'use': {
+      const d = ITEMS[id]; R.invInfo = id;
+      if (d.food) { eat(id); renderPanel(); }
+      else if (d.tool) { G.p.held = d.tool.slot; refreshViewModel(); closePanel(); }
+      else if (id === 'canteen') { drinkCanteen(); renderPanel(); }
+      else { if (R.touch) renderPanel(); else hint(d.d); }
+      break;
+    }
+    case 'craft': case 'cookall': craft(id, a === 'cookall'); break;
+    case 'build': { const b = BUILD_BY_ID[id]; if (!canAfford(b.cost)) { sfx('deny'); el.classList.add('shake'); setTimeout(() => el.classList.remove('shake'), 400); return; } closePanel(); startBuild(id); break; }
+    case 'fuel': addFuel(s, id); renderPanel(); break;
+    case 'light': lightFire(s); renderPanel(); break;
+    case 'put': { const n = inv(id); take(id, n); s.d.items[id] = (s.d.items[id] || 0) + n; if (ITEMS[id].tool && G.p.held === ITEMS[id].tool.slot && !bestTool(G.p.held)) G.p.held = 'hands'; refreshViewModel(); sfx('click'); renderPanel(); break; }
+    case 'get': give(id, s.d.items[id], true); delete s.d.items[id]; sfx('click'); renderPanel(); break;
+    case 'depositall': for (const k of ITEM_ORDER) { const d = ITEMS[k]; if (inv(k) && !d.tool && !d.wear && !d.story && !d.food && k !== 'canteen') { s.d.items[k] = (s.d.items[k] || 0) + inv(k); delete G.inv[k]; } } uiDirty(); sfx('click'); renderPanel(); break;
+    case 'takeall': for (const k in s.d.items) give(k, s.d.items[k], true); s.d.items = {}; sfx('click'); renderPanel(); break;
+    case 'jtab': R.jTab = id; renderPanel(); break;
+    case 'ptab': switchInvTab(id); break;
+    case 'mapall': R.mapAll = !R.mapAll; renderPanel(); break;
+    case 'note': { const n = NOTES[id]; openPanel('note', { t: n.t, body: n.body }, { onClose: () => openPanel('journal') }); break; }
+    case 'choose': { const o = s.opts[+id]; R.panelOnClose = null; closePanel(); o[2](); break; }
+    case 'save': saveGame(); toast('💾 Game saved', 'ok'); break;
+    case 'quit': saveGame(); location.reload(); break;
+    case 'endkeep': closePanel(); break;
+    case 'fs': goFullscreen(); break;
+  }
+}
+function craft(id, all) {
+  const r = RECIPES.find(q => q.id === id); if (!r) return;
+  let made = 0;
+  do {
+    if (r.station && !stationNear(r.station)) { hint('You need to be next to ' + STATION_NAME[r.station] + '.'); sfx('deny'); break; }
+    if (!canAfford(r.cost)) { if (!made) { hint('Not enough materials.'); sfx('deny'); } break; }
+    pay(r.cost); give(id, r.n || 1, true); made++;
+    G.stats.crafted++; addXP(r.xp || 3);
+    if (r.station === 'fire') G.stats.cooked++;
+  } while (all && made < 30);
+  if (!made) return;
+  const d = ITEMS[id]; sfx(r.station === 'fire' ? 'sizzle' : 'craft');
+  toast((r.station === 'fire' ? '🍳 Cooked ' : '🔨 Made ') + d.e[0] + ' ' + d.n + (made * (r.n || 1) > 1 ? ' ×' + made * (r.n || 1) : ''), 'ok', 2500);
+  if (id === 'iron') badge('iron');
+  if (d.tool) { const best = bestTool(d.tool.slot); if (best === id) { G.p.held = d.tool.slot; refreshViewModel(); } }
+  if (d.wear) toast('You are now wearing the ' + d.n + '.', 'ok', 3000);
+  if (id === 'axe') tipOnce('axe', 'Your axe is in hotbar slot <b>2</b>. Walk up to a tree and left click!');
+  if (id === 'torch') tipOnce('torch', 'Press <b>T</b> any time to hold your torch. Wolves hate it!');
+  if (id === 'canteen') { G.flags.canteen = G.flags.canteen || 0; tipOnce('canteen', 'Fill your canteen at any water with <b>E</b>, then drink with <b>G</b>.'); }
+  renderPanel();
+}
+function showMessage(t, html, cb, btn) { openPanel('msg', { t, html, btn }, { onClose: cb }); }
+function showNote(t, body) { openPanel('note', { t, body }); }
+function showDialog(lines, cb) { openPanel('dialog', { lines, i: 0 }, { onClose: cb }); }
+function showChoice(q, opts) { openPanel('choice', { q, opts }); }
+function showMorningReport(cb) {
+  const p = G.p, r = R.report, lines = [];
+  lines.push(r.bed ? '🛏️ You slept in a cosy bed. Health restored: <b>' + Math.ceil(p.hp) + '/' + p.maxHp + '</b>' : '⛺ You slept in your shelter. Health: <b>' + Math.ceil(p.hp) + '/' + p.maxHp + '</b>');
+  if (p.food < 30) lines.push('🍗 Your tummy is rumbling. <b>Eat something soon!</b>');
+  if (p.water < 30) lines.push('💧 You are very thirsty. <b>Find water!</b>');
+  if (p.warm < 40) lines.push('🥶 You got cold in the night. A fire or a roof would help.');
+  if (r.fireRain) lines.push('🌧️ Rain put your campfire out. Build a <b>Thatch Roof</b> over it.');
+  else if (r.fireOut) lines.push('🔥 Your campfire burned out in the night.');
+  if (r.scoutLeft) lines.push('🐕 <b>Scout got too hungry and went home</b> to Uncle Ray\'s camp. Take him some meat to win him back.');
+  else if (G.scout.friend) lines.push('🐕 Scout is hungry. <b>Feed him meat today</b> (raw is fine).');
+  if (G.weather === 'rain' || G.weather === 'storm') lines.push('🌧️ It\'s raining this morning.');
+  if (G.day % 10 === 0) lines.push('🌕 <b>TONIGHT IS A WOLF MOON!</b> Get your base ready. Walls, spikes and a good weapon.');
+  else if (G.day % 10 === 9) lines.push('🌕 Tomorrow night is a Wolf Moon...');
+  if (G.day === 100) lines.push('🚢 <b>The ship is coming today!</b>');
+  const left = 100 - G.day;
+  openPanel('morning', { sub: left > 0 ? left + ' days until the ship comes' : 'The ship is here!', lines, tip: TIPS[G.day % TIPS.length] }, { onClose: cb });
+}
+function showEnding(kind) {
+  const st = G.stats, title = { heli: '🚁 HOME AT LAST', ship: '🚢 DAY 100 — LEGENDS OF KESTREL ISLAND', alone: '🚢 DAY 100 — THE SHIP ARRIVES' }[kind];
+  const story = {
+    heli: 'The helicopter lands right next to the Radio Tower. Uncle Ray grabs Scout, you grab your journal, and Kestrel Island shrinks below you into the blue.<br><br>Back home, nobody believes half of your stories. That\'s okay. <b>You know they\'re true.</b>',
+    ship: 'On the morning of Day 100 a ship\'s horn echoes across Shipwreck Cove. Skipper Jo kept her promise!<br><br>She stares at your camp, your tools, your trophies — and at Uncle Ray, who can\'t stop telling everyone how you saved him.<br><br><b>You survived 100 days. You are a legend.</b>',
+    alone: 'On the morning of Day 100 a ship\'s horn echoes across Shipwreck Cove. Skipper Jo kept her promise!<br><br>You survived 100 days on your own. But somewhere on Frostpeak, Uncle Ray is still waiting...<br><br><b>You can keep playing to find him.</b>'
+  }[kind];
+  sfx('horn'); setTimeout(() => sfx('levelup'), 1400);
+  const html = '<div class="ending"><h1>' + title + '</h1><p>' + story + '</p><div class="estats"><span>📅 Day ' + G.day + '</span><span>⭐ Level ' + G.p.level + '</span><span>💰 ' + st.chests + '/10 treasure</span><span>👑 ' + st.bosses + '/3 bosses</span><span>🗺️ ' + Object.keys(G.found).length + '/' + LANDMARKS.length + ' places</span><span>🏅 ' + Object.keys(G.badges).length + '/' + Object.keys(BADGES).length + ' badges</span></div><p class="dim">' + (st.chests < 10 ? 'Still ' + (10 - st.chests) + ' Golden Idols hidden out there...' : '') + '</p><div class="menu"><button class="big" data-a="endkeep">🏝️ Keep exploring</button></div></div>';
+  saveGame(); openPanel('ending', html);
+}
+function helpHTML() {
+  if (R.touch) return touchHelpHTML() + '<p><b>Staying alive:</b> keep ❤️ health, 🍗 food, 💧 water and 🔥 warmth up. If health hits zero you black out and drop your pack.</p><p><b>Nights</b> are cold and wolves come out. Build a campfire and a shelter, then sleep after 7 pm. <b>Every 10th night is a Wolf Moon!</b></p>';
+  return '<table class="help">' + [['W A S D', 'Walk'], ['Mouse', 'Look around'], ['Arrow keys', 'Look around (no mouse needed)'], ['Shift', 'Sprint'], ['Space', 'Jump'], ['Left click', 'Chop, mine, attack, shoot, fish'], ['E', 'Pick up, talk, use, open, drink'], ['1 – 7  or  mouse wheel', 'Switch tool'], ['TAB', 'Your pack'], ['C', 'Craft tools, weapons and gear'], ['B', 'Build things in the world'], ['F', 'Quick-eat the best food'], ['G', 'Drink from canteen'], ['T', 'Hold your torch'], ['M', 'Map'], ['J', 'Journal'], ['X', 'Take apart something you built'], ['Esc', 'Pause and settings']].map(r => '<tr><td><kbd>' + r[0] + '</kbd></td><td>' + r[1] + '</td></tr>').join('') + '</table>' +
+    '<p><b>Staying alive:</b> keep ❤️ health, 🍗 food, 💧 water and 🔥 warmth up. If food, water or warmth hit zero you lose health. If health hits zero you black out and drop your pack.</p><p><b>Nights</b> are cold and wolves come out. Build a campfire and a shelter, then sleep after 7 pm to skip the night.</p><p><b>Every 10th night is a Wolf Moon.</b> A whole pack of wolves attacks, and they are not afraid of fire. Build walls!</p>';
+}
+function settingsHTML() {
+  return '<div class="settings"><label>🖱️ Mouse speed <input type="range" min="0.3" max="2.5" step="0.1" value="' + R.sens + '" data-a="set" data-id="sens"></label>' +
+    '<label>🔊 Volume <input type="range" min="0" max="1" step="0.05" value="' + R.vol + '" data-a="set" data-id="vol"></label>' +
+    '<label>🎵 Music <input type="checkbox" ' + (R.music ? 'checked' : '') + ' data-a="set" data-id="music"></label>' +
+    '<label>🖥️ Graphics <select data-a="set" data-id="quality">' + [1, 2, 3, 4].map(q => '<option value="' + q + '" ' + (R.quality === q ? 'selected' : '') + '>' + GFXQ[q].n + '</option>').join('') + '</select></label>' +
+    (R.touch ? '' : '<label>👀 Look mode <select data-a="set" data-id="look"><option value="lock" ' + (!R.dragLook ? 'selected' : '') + '>Mouse look (click to lock)</option><option value="drag" ' + (R.dragLook ? 'selected' : '') + '>Click and drag to look</option></select></label>') + '</div>';
+}
+function bindSetting(el) {
+  const id = el.dataset.id; el.onclick = e => e.stopPropagation();
+  const apply = () => {
+    if (id === 'sens') R.sens = +el.value; if (id === 'vol') setVolume(+el.value); if (id === 'music') R.music = el.checked;
+    if (id === 'quality') { setQuality(+el.value); R.gfxManual = true; } if (id === 'look') R.dragLook = el.value === 'drag';
+    saveSettings();
+  };
+  el.oninput = apply; el.onchange = apply;
+}
+function bindSettingsInputs(root) { root.querySelectorAll('[data-a="set"]').forEach(bindSetting); }
+function saveSettings() { try { localStorage.setItem(SAVE_KEY + '_set', JSON.stringify({ sens: R.sens, vol: R.vol, music: R.music, quality: R.quality, drag: R.dragLook, gfxV: 2, gfxManual: !!R.gfxManual })); } catch (e) { } }
+function loadSettings() { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY + '_set') || 'null'); if (s) { R.sens = s.sens || 1; R.vol = s.vol === undefined ? 0.7 : s.vol; R.music = s.music !== false; R.quality = s.gfxV ? (s.quality || 3) : (s.quality === 1 ? 1 : 3); R.gfxManual = !!s.gfxManual; R.dragLook = !!s.drag; } } catch (e) { } }
+
+/* =========================================================================
+   11_main: boot, title screen, time + weather, save/load, the game loop
+   ========================================================================= */
+
+/* ---------- time and weather (game hours) ---------- */
+function advanceTime(gh, quiet) {
+  G.hour += gh;
+  if (G.hour >= 24) { G.hour -= 24; G.day++; onNewDay(quiet); }
+  G.weatherHrs -= gh;
+  if (G.weatherHrs <= 0) nextWeather(quiet);
+}
+function nextWeather(quiet) {
+  const w = G.weather, r = Math.random(), early = G.day < 3;
+  let n, h;
+  if (w === 'clear') { if (r < 0.55) { n = 'cloudy'; h = rnd(3, 6); } else { n = 'clear'; h = rnd(5, 10); } }
+  else if (w === 'cloudy') {
+    if (!early && r < 0.42) { n = 'rain'; h = rnd(2.5, 5); }
+    else if (!early && G.day >= 4 && r < 0.56) { n = 'storm'; h = rnd(2, 3.5); }
+    else { n = 'clear'; h = rnd(6, 12); }
+  } else { n = 'cloudy'; h = rnd(2, 4); }
+  const was = G.weather; G.weather = n; G.weatherHrs = h;
+  if (quiet || n === was || !R.started) return;
+  const snow = R.biome === 'snow';
+  if (n === 'rain') toast(snow ? '🌨️ Heavy snow is falling.' : '🌧️ It\'s starting to rain. Fires without a roof will go out!', 'warn');
+  if (n === 'storm') { toast('⛈️ A thunderstorm! Find shelter.', 'warn'); sfx('thunder'); }
+  if (n === 'clear' && (was === 'cloudy')) toast('☀️ The sky is clearing.', 'ok', 3000);
+}
+function onNewDay(quiet) {
+  respawnNodes(); structuresNewDay(); storyNewDay();
+  if (!quiet && R.started) { banner('DAY ' + G.day, (100 - G.day > 0 ? (100 - G.day) + ' days until the ship comes' : 'The ship is coming!')); sfx('quest'); saveGame(); }
+}
+
+/* ---------- save / load ---------- */
+function saveGame() {
+  if (!R.started) return;
+  fogSave(); G.p.y = Math.max(G.p.y, groundAt(G.p.x, G.p.z));
+  const json = JSON.stringify(G, (k, v) => k[0] === '_' ? undefined : v);
+  R.memSave = json;
+  try { localStorage.setItem(SAVE_KEY, json); } catch (e) { }
+  R.lastSave = R.t;
+}
+function readSave() {
+  let raw = null; try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { }
+  raw = raw || R.memSave; if (!raw) return null;
+  try { const s = JSON.parse(raw); if (!s || s.v !== SAVE_VERSION) return null; return s; } catch (e) { return null; }
+}
+function mergeSave(s) {
+  const d = newGameState();
+  if (s.scout && s.scout.friend && s.scout.fed === undefined) s.scout.fed = s.day;   // older saves: don't punish
+  for (const k in d) if (s[k] === undefined) s[k] = d[k];
+  for (const k of ['p', 'stats', 'scout']) for (const q in d[k]) if (s[k][q] === undefined) s[k][q] = d[k][q];
+  return s;
+}
+/** bring the already-built world in line with a loaded save */
+function applyWorldState() {
+  applyNodeState(); rebuildStructures(); refreshPack();
+  R.towerDish.visible = !!G.flags.radio; R.idolMesh.forEach(m => m.visible = !!G.flags.storm);
+  R.rockfall.visible = !G.flags.rayFree; R.rockfallCol.off = !!G.flags.rayFree;
+  for (const c of CHESTS) c.lid.rotation.x = G.chests[c.id] ? -1.9 : 0;
+  if (G.bossDead.grizzle) spawnPackNote();
+  placeRay(); R.fog = null; fogArr();
+  if (G.scout.friend) { R.scout.x = G.p.x + 2; R.scout.z = G.p.z + 2; }
+}
+
+/* ---------- renderer + scene ---------- */
+function setQuality(q) {
+  q = clamp((q | 0) || 3, 1, 4); R.quality = q; R.Q = GFXQ[q]; if (!R.renderer) return;
+  const Q = R.Q, r = R.renderer, gl2 = r.capabilities.isWebGL2;
+  r.setPixelRatio(Math.min(devicePixelRatio || 1, Q.pr));
+  R.sun.castShadow = Q.shadow > 0;
+  if (Q.shadow && R.sun.shadow.mapSize.x !== Q.shadow) { R.sun.shadow.mapSize.set(Q.shadow, Q.shadow); if (R.sun.shadow.map) { R.sun.shadow.map.dispose(); R.sun.shadow.map = null; } }
+  R.shExt = Q.shExt; const sc = R.sun.shadow.camera; sc.left = -Q.shExt; sc.right = Q.shExt; sc.top = Q.shExt; sc.bottom = -Q.shExt; sc.updateProjectionMatrix();
+  if (R.grass) R.grass.visible = Q.tufts || !gl2;
+  gfxBuildGrass(gl2 ? Q.grass : 0, Q.gR);
+  gfxLightPool(Q.lights, Q.fireShadow);
+  GU.uAO.value = gl2 ? Q.ao : 0;
+  PP.on = Q.post && PP.ok;
+  onResize();
+}
+function onResize() { if (R.touch && R.started && !R.panel && innerHeight > innerWidth) openPanel('pause'); if (!R.renderer) return; R.camera.aspect = innerWidth / innerHeight; R.camera.updateProjectionMatrix(); R.renderer.setSize(innerWidth, innerHeight);
+  const db = R.renderer.getDrawingBufferSize(new THREE.Vector2()); if (GFX.uPx) GFX.uPx.value = db.y / (2 * Math.tan(R.camera.fov * Math.PI / 360)); if (PP.on) ppResize(); }
+function initWorld() {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setSize(innerWidth, innerHeight); document.body.insertBefore(renderer.domElement, document.body.firstChild);
+  R.renderer = renderer;
+  R.scene = new THREE.Scene();
+  R.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.08, 1300); R.camera.rotation.order = 'YXZ'; R.scene.add(R.camera);
+  buildTerrain(R.scene);
+  R.start = shorePoint(Math.PI / 2 - 0.06, 7);
+  buildSky(R.scene); buildPrecip(R.scene); buildFx(R.scene);
+  placeNodes(R.scene); buildLandmarks(); initScout();
+  gfxBakeTerrain(); buildLife(R.scene); ppInit();
+  R.torchLight = new THREE.PointLight(0xffa850, 0, 18, 1.6); R.torchLight.position.set(0.3, 0.1, -0.5); R.torchLight.userData.on = false; R.camera.add(R.torchLight);
+  prerenderMap(); buildHUD();
+  setupInput(renderer.domElement);
+  addEventListener('resize', onResize);
+  setQuality(R.quality);
+}
+
+/* ---------- title screen + intro ---------- */
+function showTitle() {
+  const s = readSave(), t = $('title');
+  t.innerHTML = '<div class="logo"><div class="l1">STRANDED</div><div class="l2">100 DAYS ON KESTREL ISLAND</div></div>' +
+    '<div class="menu">' + (s ? '<button class="big" id="tContinue">▶ Continue <small>— Day ' + s.day + ', Level ' + s.p.level + '</small></button>' : '') +
+    '<button class="' + (s ? '' : 'big') + '" id="tNew">🏝️ New Adventure</button><button id="tHelp">❓ How to play</button></div>' +
+    '<div id="tExtra"></div><div class="credit">Made for Caspar · Built with three.js · ' + (R.touch ? 'Touch controls on · play with your phone sideways' : 'Best with a mouse and keyboard') + '</div>';
+  t.style.display = '';
+  if (s) $('tContinue').onclick = () => { audioInit(); goFullscreen(); G = mergeSave(s); applyWorldState(); startGame(false); };
+  $('tNew').onclick = () => {
+    audioInit(); goFullscreen();
+    if (s && !confirm('Start a brand new adventure? Your saved game will be replaced.')) return;
+    if (s) { try { localStorage.removeItem(SAVE_KEY); } catch (e) { } location.reload(); return; }
+    playIntro(0);
+  };
+  $('tHelp').onclick = () => { audioInit(); $('tExtra').innerHTML = '<div class="tbox">' + helpHTML() + settingsHTML() + '</div>'; bindSettingsInputs($('tExtra')); };
+  if (new URLSearchParams(location.search).has('fresh') || sessionStorage.getItem('stranded_new')) { sessionStorage.removeItem('stranded_new'); }
+}
+const INTRO_ART = ['⛵🌊', '⛈️🌊🪨', '🏝️'];
+function playIntro(i) {
+  if (i >= INTRO.length) { startGame(true); return; }
+  const [h, body] = INTRO[i], t = $('title');
+  t.innerHTML = '<div class="intro"><div class="art">' + INTRO_ART[i] + '</div><h2>' + h + '</h2><p>' + body + '</p><div class="menu"><button class="big" id="iNext">' + (i < INTRO.length - 1 ? 'Next ▶' : '🏝️ Wake up') + '</button><button id="iSkip">Skip</button></div></div>';
+  sfx(i === 1 ? 'thunder' : 'page');
+  $('iNext').onclick = () => playIntro(i + 1); $('iSkip').onclick = () => startGame(true);
+}
+function startGame(isNew) {
+  $('title').style.display = 'none'; $('hud').style.display = '';
+  if (isNew) {
+    G = newGameState(); G.p.x = R.start.x; G.p.z = R.start.z; G.p.yaw = 0.15;
+  }
+  G.p.y = groundAt(G.p.x, G.p.z); R.ground = G.p.y; G.p.vy = 0;
+  R.started = true; R.paused = false; R.acc = 0;
+  R.vmId = null; refreshViewModel(); updateQuests(); uiDirty();
+  if (isNew) { setTimeout(() => { banner('DAY 1', 'Survive 100 days. Find Uncle Ray.'); }, 500); setTimeout(() => toast('💡 <b>WASD</b> to walk, <b>mouse</b> to look. Press <b>E</b> on the crate!', 'tip', 9000), 2200); saveGame(); }
+  else banner('DAY ' + G.day, 'Welcome back, Sam.');
+  lockPointer();
+}
+
+/* ---------- per-second checks ---------- */
+function slowTick() {
+  const p = G.p, b = biomeAt(p.x, p.z);
+  if (b !== R.biome) {
+    R.biome = b;
+    if (b === 'snow') tipOnce('snow', 'Brrr! Frostpeak is freezing. You need a <b>Fur Coat</b> (4 fur, 2 hide, 1 rope) to stay long.');
+    if (b === 'desert') tipOnce('desert', 'The Dust Flats. The sun makes you thirsty twice as fast. Cactus fruit is food <i>and</i> water!');
+  }
+  R.stepKind = p.y < -0.2 ? 'water' : groundAt(p.x, p.z) > heightAt(p.x, p.z) + 0.08 ? 'wood' : b === 'snow' ? 'snow' : b === 'desert' ? 'sand' : 'grass';
+  updateSpawner(); checkLandmarks(); updateQuests(); revealFog(); scoutHungerCheck();
+  if (G.day === 1 && G.hour > 17.5 && G.hour < 19) tipOnce('dusk', 'The sun is setting! Build a <b>Campfire</b> and a <b>Lean-to Shelter</b> (press <b>B</b>) before dark.');
+  if (G.p.food < 20) tipOnce('hungry', 'You are getting hungry! Press <b>F</b> to eat. Cooked food is best.');
+  if (G.p.water < 20) tipOnce('thirsty', 'You are thirsty! Look at a lake or the sea and press <b>E</b> to drink.');
+  if (R.t - R.lastSave > 60 && !R.panel && !R.cinematic) saveGame();
+  if (R.pendingEnding && !R.panel && !R.sleeping && !R.cinematic) { const k = R.pendingEnding; R.pendingEnding = null; showEnding(k); }
+}
+
+/* ---------- loop ---------- */
+let _last = performance.now(), _secT = 0, _fpsN = 0, _fpsT = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (now - _last) / 1000); _last = now;
+  _fpsN++; _fpsT += dt; if (_fpsT > 1) { R.fps = _fpsN / _fpsT; _fpsN = 0; _fpsT = 0; }
+  R.t += dt;
+  if (!R.started) { titleCamera(dt); renderFrame(dt); return; }
+  const live = !R.panel && !R.sleeping;
+  if (live && !R.cinematic) {
+    R.acc += dt;
+    while (R.acc >= TICK) {
+      R.acc -= TICK; const gh = TICK / HOUR_SECONDS;
+      ambientTemp(); survivalStep(gh, { sprint: R.sprinting }); structuresStep(gh); advanceTime(gh, false);
+    }
+  } else R.acc = 0;
+  if (live) {
+    updatePlayer(dt); updateCreatures(dt); updateScout(dt); updateArrows(dt); updateFishing(dt); updateBuildGhost();
+    _secT -= dt; if (_secT <= 0) { _secT = 1; slowTick(); }
+    R.target = R.build ? null : findTarget();
+    // falling trees and pop-in effects
+    for (let i = R.fx.length - 1; i >= 0; i--) {
+      const f = R.fx[i]; f.t += dt;
+      if (f.kind === 'fall') { f.m.rotation.x = Math.min(Math.PI / 2, f.t * f.t * 2.4); if (f.t > 2.2) { f.m.position.y -= dt * 2; } if (f.t > 3) { R.scene.remove(f.m); R.fx.splice(i, 1); } else if (f.t > 1.1 && !f.dust) { f.dust = true; const a = f.m.rotation.y; puff(f.m.position.x + Math.sin(a) * 4, f.m.position.y + 0.3, f.m.position.z + Math.cos(a) * 4, 0x9a8a6a, 14, { size: 0.5 }); R.shake = Math.max(R.shake, 0.15); } }
+      if (f.kind === 'pop') { const k = Math.min(1, f.t / 0.25); f.m.scale.setScalar(0.6 + 0.4 * k + Math.sin(k * Math.PI) * 0.12); if (k >= 1) { f.m.scale.setScalar(1); R.fx.splice(i, 1); } }
+    }
+  } else updatePlayerCamOnly();
+  updateViewModel(dt); updateStructures(dt); updateStory(dt);
+  R.torchLight.intensity = R.torchLight.userData.on ? (0.5 + nightAmount() * 1.0) * (1 + Math.sin(R.t * 17) * 0.06) : 0;
+  updateHUD(dt); updateNums(dt); updateTouch(dt);
+  renderFrame(dt);
+}
+function updatePlayerCamOnly() { const p = G.p; R.camera.position.set(p.x, p.y + (R.eye || 1.62), p.z); R.camera.rotation.set(p.pitch, p.yaw, 0); R.camera.getWorldDirection(_fwd); }
+function renderFrame(dt) {
+  if (!R.renderer) return;
+  updateSky(dt); updatePrecip(dt); updateFx(dt); audioAmbient(dt);
+  R.camera.rotation.order = 'YXZ';
+  gfxUpdate(dt);
+  gfxRender();
+}
+function titleCamera(dt) {
+  const a = R.t * 0.035 + 2.2, c = R.camera, r = 230;
+  G.hour = 17.3;
+  c.rotation.order = 'YXZ';
+  c.position.set(Math.cos(a) * r, 88, Math.sin(a) * r);
+  c.lookAt(0, 8, -20);
+  R.biome = 'forest';
+}
+
+/* ---------- boot ---------- */
+function boot() {
+  loadSettings(); initTouch();
+  if (!window.WebGLRenderingContext) { $('loading').innerHTML = 'Sorry — this browser can\'t show 3D graphics (WebGL).'; return; }
+  try { initWorld(); }
+  catch (e) { $('loading').innerHTML = 'Something went wrong while building the island:<br><small>' + esc(e.message) + '</small>'; console.error(e); return; }
+  $('loading').style.display = 'none';
+  showTitle();
+  requestAnimationFrame(frame);
+}
+window.addEventListener('load', () => setTimeout(boot, 30));
+
+/* =========================================================================
+   12_touch: phone + tablet support — virtual joystick, drag-to-look,
+             on-screen buttons, touch-friendly wording, portrait guard
+   ========================================================================= */
+const IS_TOUCH = (() => {
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.has('touch')) return q.get('touch') !== '0';
+    return matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && !matchMedia('(pointer: fine)').matches);
+  } catch (e) { return false; }
+})();
+R.touch = IS_TOUCH;
+
+/* rewrite keyboard instructions into touch instructions */
+const TX_RULES = [
+  [/<b>WASD<\/b> to walk, <b>mouse<\/b> to look/g, '<b>left thumb</b> to walk, <b>right thumb</b> to look'],
+  [/Sprint with SHIFT\. Jump with SPACE\./g, 'Push the joystick all the way to sprint. Tap ⤴ to jump.'],
+  [/Left click to place · <b>R<\/b> to rotate · <b>X<\/b> or right click to stop/g, 'Tap ✅ to place · ↻ to rotate · ✕ to stop'],
+  [/<b>left click<\/b>|left click/gi, 'tap <b>⚔️</b>'],
+  [/Click or press E/g, 'Tap'], [/[Cc]lick now!/g, 'TAP ⚔️ NOW!'], [/then click!/g, 'then tap ⚔️!'],
+  [/<b>E<\/b>/g, '<b>✋ USE</b>'], [/<b>C<\/b> to open the Craft menu/g, '<b>🎒</b>, then the <b>Craft</b> tab'], [/\(press <b>C<\/b>\)/g, '(🎒 → Craft)'], [/<b>TAB<\/b>|\bTAB\b/g, '<b>🎒</b>'], [/<b>B<\/b>/g, '<b>🔨</b>'], [/<b>F<\/b>/g, '<b>🍗</b>'],
+  [/<b>G<\/b>|\bG to drink/g, m => m.length > 8 ? '💧 to drink' : '<b>💧</b>'], [/<b>T<\/b>/g, '<b>🔥</b>'], [/\(M\)/g, '(🗺️)'],
+  [/press X to take/g, 'tap ✕ to take'],
+  [/\bPress\b/g, 'Tap'], [/\bpress\b/g, 'tap'], [/\bClick\b/g, 'Tap'], [/\bclick\b/g, 'tap']
+];
+function tx(s) { if (!R.touch || typeof s !== 'string') return s; for (const [a, b] of TX_RULES) s = s.replace(a, b); return s; }
+
+const TB = {};   // touch buttons by id
+function tbtn(id, label, cls, down, up) {
+  const b = document.createElement('div'); b.id = id; b.className = 'tb ' + (cls || ''); b.innerHTML = label;
+  b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); audioWake(); b.classList.add('down'); if (down) down(e); });
+  const end = e => { b.classList.remove('down'); if (up) up(e); };
+  b.addEventListener('pointerup', end); b.addEventListener('pointercancel', end); b.addEventListener('pointerleave', end);
+  b.addEventListener('contextmenu', e => e.preventDefault());
+  b.addEventListener('touchstart', e => e.preventDefault(), { passive: false });   // stops the ghost click after a tap
+  TB[id] = b; return b;
+}
+function audioWake() { audioInit(); if (AU.ctx && AU.ctx.state === 'suspended') AU.ctx.resume(); }
+
+function initTouch() {
+  document.body.classList.toggle('touch', R.touch);
+  if (!R.touch) return;
+  if (!localStorage.getItem || !(() => { try { return localStorage.getItem(SAVE_KEY + '_set'); } catch (e) { return null; } })()) R.quality = 1;   // phones start on "Fast"
+  const layer = document.createElement('div'); layer.id = 'touchLayer'; document.body.appendChild(layer);
+  layer.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+  layer.innerHTML = '<div id="joyBase"><div id="joyKnob"></div></div>';
+  const base = $('joyBase'), knob = $('joyKnob'), JR = 56;
+  let joy = null, look = null;
+  layer.addEventListener('pointerdown', e => {
+    e.preventDefault(); audioWake();
+    if (!R.started || R.panel || R.cinematic) return;
+    try { layer.setPointerCapture(e.pointerId); } catch (er) { }
+    if (e.clientX < innerWidth * 0.42 && !joy) {
+      joy = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      base.style.left = e.clientX + 'px'; base.style.top = e.clientY + 'px'; base.classList.add('on'); knob.style.transform = '';
+    } else if (!look) look = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  });
+  layer.addEventListener('pointermove', e => {
+    e.preventDefault();
+    if (joy && e.pointerId === joy.id) {
+      let dx = e.clientX - joy.x, dy = e.clientY - joy.y; const d = Math.hypot(dx, dy);
+      if (d > JR) { dx *= JR / d; dy *= JR / d; }
+      knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      const m = Math.min(1, d / JR);
+      R.joy = m < 0.15 ? null : { x: dx / JR, y: -dy / JR, mag: m };
+      knob.classList.toggle('run', m > 0.93);
+    } else if (look && e.pointerId === look.id) {
+      const s = 0.0055 * R.sens, p = G.p;
+      p.yaw -= (e.clientX - look.x) * s; p.pitch = clamp(p.pitch - (e.clientY - look.y) * s, -1.45, 1.45);
+      look.x = e.clientX; look.y = e.clientY;
+    }
+  });
+  const end = e => {
+    if (joy && e.pointerId === joy.id) { joy = null; R.joy = null; base.classList.remove('on'); }
+    if (look && e.pointerId === look.id) look = null;
+  };
+  layer.addEventListener('pointerup', end); layer.addEventListener('pointercancel', end);
+  R.touchReset = () => { joy = null; look = null; R.joy = null; base.classList.remove('on'); R.tAct = false; R.keys = {}; for (const k in TB) TB[k].classList.remove('down'); };
+
+  const box = document.createElement('div'); box.id = 'tbtns'; document.body.appendChild(box);
+  // right-hand action cluster
+  box.appendChild(tbtn('tAct', '⚔️', 'big', () => { R.tAct = true; R.tActNew = true; touchAction(); }, () => { R.tAct = false; }));
+  box.appendChild(tbtn('tUse', '✋<small>USE</small>', 'mid', () => { if (R.build) { R.build.rot = (R.build.rot + 1) % 4; return; } interact(); }));
+  box.appendChild(tbtn('tJump', '⤴', 'mid', () => { R.keys.Space = true; }, () => { R.keys.Space = false; }));
+  box.appendChild(tbtn('tEat', '🍗', 'sm', () => quickEat()));
+  box.appendChild(tbtn('tDrink', '💧<i></i>', 'sm', () => drinkCanteen()));
+  box.appendChild(tbtn('tTorch', '🔥', 'sm', () => { G.p.held = G.p.held === 'torch' ? 'hands' : (bestTool('torch') ? 'torch' : G.p.held); if (!bestTool('torch')) hint('Craft a Torch first: 2 sticks + 2 fibre.'); refreshViewModel(); }));
+  box.appendChild(tbtn('tTake', '✕<small>TAKE APART</small>', 'pill', () => tryDismantle()));
+  box.appendChild(tbtn('tCancel', '✕<small>STOP</small>', 'pill', () => cancelBuild()));
+  // menu column
+  const menu = document.createElement('div'); menu.id = 'tmenu'; box.appendChild(menu);
+  menu.appendChild(tbtn('tPack', '🎒', 'menu', () => openPanel('inv')));
+  menu.appendChild(tbtn('tBuild', '🔨', 'menu', () => { if (R.build) cancelBuild(); else openPanel('build'); }));
+  menu.appendChild(tbtn('tMap', '🗺️', 'menu', () => openPanel('map')));
+  menu.appendChild(tbtn('tJournal', '📓', 'menu', () => openPanel('journal')));
+  menu.appendChild(tbtn('tPause', '⏸', 'menu', () => openPanel('pause')));
+  // portrait guard
+  const rot = document.createElement('div'); rot.id = 'rotate'; rot.innerHTML = '<div><div class="ph">📱</div>Turn your phone sideways to play</div>'; document.body.appendChild(rot);
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('dblclick', e => e.preventDefault());
+}
+function goFullscreen() {
+  if (!R.touch) return;
+  try {
+    const el = document.documentElement, f = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (f && !document.fullscreenElement) { const p = f.call(el, { navigationUI: 'hide' }); if (p && p.then) p.then(() => { try { screen.orientation.lock('landscape').catch(() => { }); } catch (e) { } }).catch(() => { }); }
+  } catch (e) { }
+}
+function touchUsable(t) {
+  if (!t) return false;
+  if (t.kind === 'water') return true;
+  if (t.kind === 'poi') { const l = typeof t.ref.label === 'function' ? t.ref.label() : t.ref.label; return !!l; }
+  if (t.kind === 'struct') return !!STRUCT[t.ref.k].use;
+  if (t.kind === 'node') return !nodeNeeds(t.ref) && !(NT[t.ref.t].cls === 'stay' && t.ref.gone);
+  return false;
+}
+function touchAction() {
+  if (!R.started || R.panel || R.cinematic || R.sleeping) return;
+  if (R.build) { placeBuild(); return; }
+  primaryAction();
+}
+let _tState = '';
+function updateTouch(dt) {
+  if (!R.touch) return;
+  if (R.panel && (R.joy || R.tAct)) R.touchReset();
+  // hold the action button to keep chopping / mining / attacking / shooting
+  if (R.tAct && !R.tActNew && !R.panel && !R.build && !R.fish && !R.cinematic && R.swing <= 0 && heldDef().tool.cls !== 'rod') {
+    const t = R.target;
+    if (!(t && (t.kind === 'poi' || t.kind === 'struct' || t.kind === 'water'))) primaryAction();
+  }
+  R.tActNew = false;
+  const t = R.target, cls = heldDef().tool.cls;
+  const actIcon = R.build ? '✅' : R.fish ? '🎣' : icon(heldId());
+  const use = touchUsable(t), take = !R.build && t && t.kind === 'struct';
+  const st = actIcon + '|' + use + '|' + take + '|' + !!R.build + '|' + (G.flags.canteen || 0) + '|' + !!inv('canteen') + '|' + !!bestTool('torch') + '|' + (cls === 'torch') + '|' + !!R.started + '|' + (R.fish && R.fish.phase);
+  if (st === _tState) return; _tState = st;
+  TB.tAct.innerHTML = actIcon; TB.tAct.classList.toggle('bite', !!(R.fish && R.fish.phase === 'bite'));
+  TB.tUse.innerHTML = R.build ? '↻<small>ROTATE</small>' : '✋<small>USE</small>';
+  TB.tUse.classList.toggle('on', use || !!R.build);
+  TB.tTake.style.display = take ? '' : 'none'; TB.tCancel.style.display = R.build ? '' : 'none';
+  TB.tDrink.style.display = inv('canteen') ? '' : 'none'; TB.tDrink.querySelector('i').textContent = G.flags.canteen || 0;
+  TB.tTorch.style.display = bestTool('torch') ? '' : 'none'; TB.tTorch.classList.toggle('on', cls === 'torch');
+  document.body.classList.toggle('playing', !!R.started);
+}
+function touchHelpHTML() {
+  return '<table class="help">' + [['Left thumb', 'Walk — push all the way to sprint'], ['Right thumb', 'Drag to look around'], ['⚔️', 'Chop, mine, attack, shoot, fish (hold to keep going)'], ['✋ USE', 'Pick up, talk, open, drink, sleep, cook'], ['⤴', 'Jump'], ['🍗 💧 🔥', 'Quick-eat · drink from canteen · hold torch'], ['Hotbar', 'Tap a tool to hold it'], ['🎒 🔨 🗺️ 📓 ⏸', 'Pack and crafting · build · map · journal · pause'], ['While building', '✅ place · ↻ rotate · ✕ stop']].map(r => '<tr><td><b>' + r[0] + '</b></td><td>' + r[1] + '</td></tr>').join('') + '</table>';
+}
+// ---- added in Phase 3: read-only view for the parity checks (tests/golden) ----
+export { G, R, HGT, NODES, NODE_MESH, LAKES, SITES, GRID, CELL, WORLD_SEED, SAVE_KEY, SAVE_VERSION, groundAt, lightFire };

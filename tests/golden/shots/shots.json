@@ -10,7 +10,7 @@
       "pitch": -0.02,
       "hour": 12,
       "weather": "clear",
-      "fps": 14,
+      "fps": 31,
       "biome": "forest"
     },
     {
@@ -21,7 +21,7 @@
       "pitch": 0.02,
       "hour": 18.9,
       "weather": "clear",
-      "fps": 12,
+      "fps": 31,
       "biome": "forest"
     },
     {
@@ -33,7 +33,7 @@
       "hour": 23,
       "weather": "clear",
       "fire": 2,
-      "fps": 12,
+      "fps": 29,
       "biome": "forest"
     },
     {
@@ -44,7 +44,7 @@
       "pitch": 0.08,
       "hour": 11,
       "weather": "clear",
-      "fps": 13,
+      "fps": 31,
       "biome": "snow"
     },
     {
@@ -55,7 +55,7 @@
       "pitch": -0.03,
       "hour": 13,
       "weather": "clear",
-      "fps": 13,
+      "fps": 34,
       "biome": "desert"
     },
     {
@@ -66,10 +66,11 @@
       "pitch": -0.02,
       "hour": 14,
       "weather": "storm",
-      "fps": 12,
+      "fps": 30,
       "biome": "forest"
     }
   ],
+  "hook": "classic-script shim",
   "gpu": "ANGLE (Intel, Intel(R) UHD Graphics 620 (0x00005917) Direct3D11 vs_5_0 ps_5_0, D3D11)",
   "quality": "High",
   "errors": []

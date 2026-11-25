@@ -74,6 +74,12 @@ export function prepPage(key, save, settings, seed) {
       t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
       return ((t ^ t >>> 14) >>> 0) / 4294967296;
     };
+    // Restart the sequence when the game boots (it boots on 'load'). three.js draws random
+    // numbers for object IDs while it loads, and how many depends on the three.js build
+    // (the original's embedded copy: 120 calls; npm's, tree-shaken: 112). Without the
+    // restart, the grass, flowers and animals would be laid out differently per build.
+    // This listener is added before the game's own, so it runs first.
+    addEventListener('load', () => { a = seed >>> 0; });
   }
 }
 export const HIGH_SETTINGS = { sens: 1, vol: 0, music: false, quality: 3, drag: true, gfxV: 2, gfxManual: true };
@@ -84,7 +90,8 @@ export async function openGame(browser, target, { beforeLoad } = {}) {
   const errors = [];
   page.on('pageerror', e => errors.push(String(e && e.message || e)));
   page.on('console', m => { if (m.type() === 'error' && !/^Failed to load resource/.test(m.text())) errors.push(m.text()); });
-  page.on('response', r => { if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.url()}`); });
+  // /favicon.ico is requested by the browser itself over http (the game has never had one)
+  page.on('response', r => { if (r.status() >= 400 && !/\/favicon\.ico$/.test(r.url())) errors.push(`HTTP ${r.status()} ${r.url()}`); });
   if (beforeLoad) await page.evaluateOnNewDocument(beforeLoad.fn, ...(beforeLoad.args || []));
   await page.goto(toUrl(target), { waitUntil: 'load', timeout: 120000 });
   await page.waitForFunction(() => {
@@ -93,5 +100,13 @@ export async function openGame(browser, target, { beforeLoad } = {}) {
   }, { timeout: 180000, polling: 250 });
   const failed = await page.evaluate(() => { const l = document.getElementById('loading'); return l.style.display === 'none' ? null : l.textContent; });
   if (failed) throw new Error('Game failed to boot: ' + failed);
-  return { page, errors };
+  // From Phase 3 the game is an ES module and exposes a read-only window.__stranded.
+  // The original single file (a classic script) doesn't, so give it an equivalent view:
+  // indirect eval at global scope can read the script's top-level const/let/functions.
+  const hook = await page.evaluate(() => {
+    if (window.__stranded) return 'module export';
+    window.__stranded = new Proxy({}, { get: (_, k) => typeof k === 'string' ? (0, eval)(k) : undefined });
+    return 'classic-script shim';
+  });
+  return { page, errors, hook };
 }

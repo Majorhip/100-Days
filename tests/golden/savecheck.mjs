@@ -16,13 +16,14 @@ try {
   errors = o.errors;
   title = await o.page.evaluate(() => { const b = document.getElementById('tContinue'); return b ? b.textContent : null; });
   if (!title) throw new Error('No Continue button: the save was not recognised.');
+  console.log(`reading game state via: ${o.hook}`);
   await o.page.click('#tContinue');
-  await o.page.waitForFunction(() => R.started === true, { timeout: 60000 });
-  got = await o.page.evaluate(() => JSON.parse(JSON.stringify({
+  await o.page.waitForFunction(() => window.__stranded.R.started === true, { timeout: 60000 });
+  got = await o.page.evaluate(() => { const { G } = window.__stranded; return JSON.parse(JSON.stringify({
     v: G.v, day: G.day, p: { level: G.p.level, xp: G.p.xp, maxHp: G.p.maxHp, held: G.p.held },
     inv: G.inv, structures: G.structures.map(s => [s.k, s.x, s.y, s.z, s.ry, s.d]),
     nodeState: G.nodeState, chests: G.chests, bossDead: G.bossDead, flags: G.flags, notes: G.notes, quest: G.quest
-  })));
+  })); });
 } finally { await close(); }
 
 const exp = {

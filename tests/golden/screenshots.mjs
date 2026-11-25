@@ -39,17 +39,19 @@ const raw = readFileSync(FIXTURE, 'utf8');
 const { browser, close } = await launch({ gpu: true });
 const meta = { target, date: new Date().toISOString().slice(0, 10), views: [] };
 try {
-  const { page, errors } = await openGame(browser, target, { beforeLoad: { fn: prepPage, args: [SAVE_KEY, raw, HIGH_SETTINGS, 12345] } });
+  const { page, errors, hook } = await openGame(browser, target, { beforeLoad: { fn: prepPage, args: [SAVE_KEY, raw, HIGH_SETTINGS, 12345] } });
+  meta.hook = hook;
   meta.gpu = await page.evaluate(() => {
-    const gl = R.renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const gl = window.__stranded.R.renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
     return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
   });
   await page.click('#tContinue');
-  await page.waitForFunction(() => R.started === true, { timeout: 60000 });
-  meta.quality = await page.evaluate(() => R.Q.n);
+  await page.waitForFunction(() => window.__stranded.R.started === true, { timeout: 60000 });
+  meta.quality = await page.evaluate(() => window.__stranded.R.Q.n);
 
   for (const v of VIEWS) {
     await page.evaluate(v => {
+      const { G, R, groundAt, lightFire } = window.__stranded;
       R.cinematic = true; R.invuln = 1e9;
       G.hour = v.hour; G.weather = v.weather; G.weatherHrs = 99;
       G.p.x = v.x; G.p.z = v.z; G.p.y = groundAt(v.x, v.z); G.p.vy = 0; G.p.yaw = v.yaw; G.p.pitch = v.pitch;
@@ -57,7 +59,7 @@ try {
       if (v.fire !== undefined) { const s = G.structures.find(q => q.id === v.fire); if (s && !s.d.lit) { s.d.fuel = Math.max(s.d.fuel, 8); lightFire(s); } }
     }, v);
     await new Promise(r => setTimeout(r, SETTLE_MS));
-    const info = await page.evaluate(() => ({ fps: Math.round(R.fps || 0), biome: R.biome, hour: G.hour, weather: G.weather }));
+    const info = await page.evaluate(() => { const { G, R } = window.__stranded; return { fps: Math.round(R.fps || 0), biome: R.biome, hour: G.hour, weather: G.weather }; });
     const file = join(OUT, v.name + '.png');
     await page.screenshot({ path: file });
     meta.views.push({ ...v, ...info });

@@ -11,6 +11,7 @@
     "golden:fingerprint": "node tests/golden/fingerprint.mjs",
     "golden:save": "node tests/golden/savecheck.mjs",
     "golden:shots": "node tests/golden/screenshots.mjs",
+    "golden:newgame": "node tests/golden/newgame.mjs",
     "golden:build": "node tests/golden/compare-build.mjs"
   },
   "devDependencies": {

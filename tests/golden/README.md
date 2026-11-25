@@ -1,4 +1,4 @@
-# Golden reference (Phase 1)
+# Golden reference
 
 What "the same game" means, recorded from `original/Stranded-100-Days-PC.html` (SHA-256 `F292FE87D7BFFA0EBD8E070A45CA67994509444A5462FF859A615CC61FC50B3A`) before anything was changed. Every script takes an optional target: a file path or a URL (for example `dist/index.html` or `http://localhost:5173/`). With no target it uses the original.
 
@@ -6,11 +6,20 @@ The scripts drive the Chrome installed on this PC through `puppeteer-core`, with
 
 | Check | Command | Pass |
 |---|---|---|
+| Built file | `npm run build`, then `node tests/golden/compare-build.mjs` | prints `PASS` (game code = original, only the listed lines added; markup and CSS same) |
 | Island | `node tests/golden/fingerprint.mjs [target]` | prints `PASS` (hash identical) |
 | Save | `node tests/golden/savecheck.mjs [target]` | prints `PASS` (fixture loads; day, inventory, structures match) |
-| Graphics | `node tests/golden/screenshots.mjs [target]` | shots in `shots-latest/` match `shots/` by eye |
+| New game | `node tests/golden/newgame.mjs [target]` | prints `PASS` (starts, walks, clock runs, zero page errors incl. shader errors) |
+| Graphics | `node tests/golden/screenshots.mjs [target]` | shots in `shots-latest/` match `shots/` by eye, differences inside the noise baseline |
 
 `--write` on `fingerprint.mjs` or `screenshots.mjs` re-records the golden files. Only do that from the original file.
+
+## How the checks read the game
+The checks read the game's state through `window.__stranded`:
+- **From Phase 3 on**, this is the game's own read-only export: `src/main.js` sets it to the module namespace of `src/legacy.js`.
+- **For the original single file**, which has no such export, `browser.mjs` adds an equivalent shim. It uses indirect `eval` at global scope, which can read a classic script's top-level `const`, `let` and functions.
+
+The output says which one was used.
 
 ## World fingerprint (`world-fingerprint.json`)
 These are SHA-256 hashes of:
@@ -22,8 +31,6 @@ These are SHA-256 hashes of:
 - the start point
 
 There's an overall hash plus one hash per part, so a failure names what changed. Checked: two runs give the same hash, and bumping `WORLD_SEED` by one fails it.
-
-The script reads the game's top-level variables (`HGT`, `NODES`, `LAKES`, `SITES`, `NODE_MESH`, `R`). That only works while the game is a classic `<script>`. Phase 3 will need a small read-only debug hook to expose them.
 
 ## Save fixture (`../fixtures/save-v3.json`)
 This is a real version 3 save: Day 10, Level 7, 32 item types, 27 structures (house, a bed, a bench, two campfires), 23 changed nodes and 3 bosses killed.
@@ -37,12 +44,25 @@ These are six views at **High**, 1600 × 900, captured on an Intel UHD 620 (D3D1
 5. Dust Flats
 6. storm
 
-Each view loads the fixture save, sets the position, time and weather, freezes the clock and waits 9 s for the sky and fog to settle. `Math.random` is seeded in the test browser only.
+Each view loads the fixture save, sets the position, time and weather, freezes the clock and waits 9 s for the sky and fog to settle.
 
-**Noise baseline:** recapturing the unchanged original gives a mean colour difference of **0.6–4.7** (out of 255) per shot, mostly from grass moving in the wind, rain and animals. The meadow and storm views are the noisiest (up to ~4.7), and the figure depends on the frame rate at capture time: the golden shots were taken at ~13 fps, later runs at ~30 fps. A real visual change shows up well above that, and you should still look at the images.
+**Seeding:** `Math.random` is seeded in the test browser only, and the sequence **restarts when the game boots** (the `load` event). The game uses `Math.random` for purely visual things, such as where grass blades and flowers grow and where animals wander, so in real play these differ on every load. three.js also draws random numbers for object IDs while it loads, and how many depends on the three.js build: 120 calls for the original's embedded copy, 112 for npm's tree-shaken one. Without the restart at boot, every build would plant a different meadow. The golden shots were re-recorded from the original with this seeding during Phase 3.
+
+**Noise baseline:** recapturing the unchanged original gives a mean colour difference of **0.7–3.4** (out of 255) per shot. The storm view is the noisiest, from rain and gusts, followed by the meadow (grass sway). A real visual change shows up well above that, and you should still look at the images.
 
 ## Phase 2 result (Vite scaffold)
-- `node tests/golden/compare-build.mjs` passes: both inline scripts in `dist/index.html` are byte-identical to the original, and so are the CSS text and the markup. The only extra is Vite's trailing `/*$vite$:1*/` CSS comment. Size: 959,144 bytes, against 959,102.
-- The fingerprint and save check pass against `dist/index.html` opened from disk and against `npm run dev`.
-- The screenshots from both match by eye. Their differences (1.5–4.7) equal a control run of the original at the same frame rate (1.5–4.5).
-- On the dev server the browser asks for `/favicon.ico` and gets a 404. The original has no favicon either.
+- `compare-build.mjs` (Phase 2 version) passed:
+  - Both inline scripts in `dist/index.html` were byte-identical to the original, and so were the CSS text and the markup.
+  - The only extra was Vite's trailing `/*$vite$:1*/` CSS comment.
+  - Size: 959,144 bytes, against 959,102.
+- The fingerprint and save check passed against `dist/index.html` opened from disk and against `npm run dev`. The screenshots matched by eye.
+- On the dev server the browser asks for `/favicon.ico` and gets a 404. The original has no favicon either, so the checks ignore that request.
+
+## Phase 3 result (lift and shift)
+- **`compare-build.mjs` passes:**
+  - `src/legacy.js` is the original game script byte for byte, plus two added lines: `import * as THREE from 'three';` at the top, and a read-only `export { … }` at the bottom.
+  - three.js is npm `three@0.128.0`.
+  - The built page has the original markup and CSS, and one inlined module script.
+- **The built file is 768,910 bytes**, against 959,102. The difference comes from minification and from dropping the parts of three.js the game doesn't use.
+- **The fingerprint, save check and new-game check pass** on `dist/index.html` opened from disk and on `npm run dev`.
+- **Screenshots of the build differ from golden by 0.8–3.2**, inside the original's own 0.7–3.4, and match by eye.
