@@ -4,19 +4,18 @@
 // The code between @moved-from and @end-moved must stay byte-identical to the original
 // (tests/golden/compare-build.mjs); changes go through tests/golden/approved-edits.mjs.
 
-import './data/story.js';   // load order: runs after the previous part of the original script
+import './world/gathering.js';   // load order: runs after the previous part of the original script
 import * as THREE from 'three';
 import { TAU, clamp, lerp, dist2, rnd, pick, angDiff } from './core/math.js';
 import { $ } from './ui/dom.js';
-import { wr, wrr } from './core/rng.js';
-import { hash2, fbm } from './core/noise.js';
+import { hash2 } from './core/noise.js';
 import { HOUR_SECONDS, TICK, SAVE_KEY, SAVE_VERSION, WORLD, HALF, BUILD_CELL } from './core/constants.js';
 import { box, cyl, cone, ico, sph, part, merge } from './core/geometry.js';
-import { GU, litMat, windShadow, MAT_VC, MAT_VC_TOOL, MAT_VC_DS, MAT_GLOW, vcMesh } from './gfx/core.js';
+import { GU, litMat, MAT_VC, MAT_VC_TOOL, MAT_VC_DS, MAT_GLOW, vcMesh } from './gfx/core.js';
 import { newGameState, G, R, setG } from './state.js';
 import { AU, audioInit, sfx, audioAmbient, setVolume } from './audio/audio.js';
 import { LAKES, SITES, biomeW, biomeAt, siteH, heightAt, slopeAt, shorePoint, inSite, terrainColor } from './world/terrain.js';
-import { SH_CELL, SH, shKey, shCell, addCollider, removeCollider, collide } from './world/collision.js';
+import { addCollider, removeCollider, collide } from './world/collision.js';
 import { nightAmount, puff } from './world/sky.js';
 import { GFXQ } from './gfx/quality.js';
 import { GFX } from './gfx/textures.js';
@@ -24,7 +23,7 @@ import { buildTerrain, gfxBakeTerrain } from './gfx/terrain.js';
 import { buildSky, updateSky } from './gfx/sky.js';
 import { buildPrecip, updatePrecip } from './gfx/weather.js';
 import { buildFx, updateFx, flameGroup } from './gfx/fx.js';
-import { gfxBuildGrass, gfxNodeMat } from './gfx/grass.js';
+import { gfxBuildGrass } from './gfx/grass.js';
 import { buildLife } from './gfx/life.js';
 import { PP, ppInit, ppResize, gfxRender } from './gfx/post.js';
 import { gfxLightPool, gfxUpdate } from './gfx/update.js';
@@ -33,213 +32,10 @@ import { RECIPES } from './data/recipes.js';
 import { BUILD_BY_ID } from './data/buildings.js';
 import { CREATURES } from './data/creatures.js';
 import { NOTES, DIALOGS, INTRO, LANDMARKS, BADGES, TIPS } from './data/story.js';
+import { NT, NODES, placeNodes } from './world/nodes.js';
+import { nodeNear, respawnNodes, applyNodeState, pickNode, hitNode, nodeNeeds } from './world/gathering.js';
 
 // @moved-from: original
-
-/* =========================================================================
-   04_nodes: trees, rocks, plants and pickups — placement, instancing, gathering
-   cls: tree (axe) | rock (pickaxe) | crystal (iron pickaxe) | pick (hands) | stay (hands, plant remains)
-   ========================================================================= */
-const NT = {
-  pine: { n: 'Pine Tree', cls: 'tree', hp: 5, col: 0.38, aim: 1.5, drops: { wood: 4, stick: 2 }, respawn: 5, xp: 3 },
-  oak: { n: 'Oak Tree', cls: 'tree', hp: 6, col: 0.42, aim: 1.5, drops: { wood: 5, stick: 2 }, respawn: 5, xp: 3 },
-  snowpine: { n: 'Snowy Pine', cls: 'tree', hp: 5, col: 0.38, aim: 1.5, drops: { wood: 4, stick: 1 }, respawn: 6, xp: 3 },
-  deadtree: { n: 'Dead Tree', cls: 'tree', hp: 3, col: 0.3, aim: 1.4, drops: { wood: 2, stick: 3 }, respawn: 8, xp: 2 },
-  palm: { n: 'Palm Tree', cls: 'stay', col: 0.3, aim: 1.6, verb: 'Shake down a coconut', drops: { coconut: 1 }, respawn: 2, xp: 1 },
-  cactus: { n: 'Cactus', cls: 'stay', col: 0.4, aim: 1.2, verb: 'Pick cactus fruit', drops: { cactusfruit: 2 }, respawn: 3, xp: 1 },
-  bush: { n: 'Berry Bush', cls: 'stay', aim: 0.6, verb: 'Pick berries', drops: { berries: 3 }, respawn: 3, xp: 1 },
-  boulder: { n: 'Boulder', cls: 'rock', hp: 4, col: 0.85, aim: 0.6, drops: { stone: 3 }, bonus: ['flint', 0.45], respawn: 7, xp: 3 },
-  ironrock: { n: 'Iron Rock', cls: 'rock', hp: 5, col: 0.85, aim: 0.6, drops: { ore: 2, stone: 1 }, respawn: 7, xp: 5 },
-  crystal: { n: 'Glow Crystal', cls: 'crystal', hp: 5, col: 0.6, aim: 0.7, drops: { crystal: 1 }, respawn: 12, xp: 10 },
-  reed: { n: 'Reeds', cls: 'pick', aim: 0.6, verb: 'Gather fibre', drops: { fibre: 2 }, respawn: 3, xp: 1 },
-  sticks: { n: 'Sticks', cls: 'pick', aim: 0.1, verb: 'Pick up sticks', drops: { stick: 2 }, respawn: 3, xp: 1 },
-  stones: { n: 'Loose Stones', cls: 'pick', aim: 0.1, verb: 'Pick up stones', drops: { stone: 2 }, respawn: 4, xp: 1 },
-  flintp: { n: 'Flint', cls: 'pick', aim: 0.1, verb: 'Pick up flint', drops: { flint: 1 }, respawn: 4, xp: 1 },
-  mushroom: { n: 'Mushrooms', cls: 'pick', aim: 0.1, verb: 'Pick mushrooms', drops: { mushroom: 1 }, respawn: 3, xp: 1 },
-  herb: { n: 'Healing Herb', cls: 'pick', aim: 0.2, verb: 'Pick herb', drops: { herb: 1 }, respawn: 4, xp: 1 }
-};
-const NODES = [];
-const NODE_MESH = {};
-const _white = new THREE.Color(1, 1, 1);
-
-function nodeGeos() {
-  const g = {};
-  g.pine = [merge([part(cyl(0.16, 0.27, 2.0, 5), 0x6b4a2b, [0, 1.0, 0]), part(cone(1.6, 2.4, 6), 0x2c6634, [0, 2.7, 0]), part(cone(1.25, 2.1, 6), 0x34753a, [0, 3.9, 0], [0, 0.5, 0]), part(cone(0.85, 1.8, 6), 0x3f8540, [0, 5.0, 0], [0, 1, 0])])];
-  g.snowpine = [merge([part(cyl(0.16, 0.27, 2.0, 5), 0x5a4030, [0, 1.0, 0]), part(cone(1.6, 2.4, 6), 0x2f5c48, [0, 2.7, 0]), part(cone(1.3, 2.1, 6), 0xdfe9f2, [0, 3.9, 0], [0, 0.5, 0]), part(cone(0.9, 1.8, 6), 0xf7fbff, [0, 5.0, 0], [0, 1, 0])])];
-  g.oak = [merge([part(cyl(0.22, 0.36, 2.3, 6), 0x5e4126, [0, 1.15, 0]), part(cyl(0.1, 0.14, 1.1, 5), 0x5e4126, [0.55, 2.4, 0.1], [0, 0, -0.9]),
-  part(ico(1.75, 1), 0x4a8c38, [0, 3.7, 0], null, [1, 0.85, 1], 0.09), part(ico(1.15, 0), 0x57993f, [1.25, 3.1, 0.35], [0.3, 0.5, 0], null, 0.09), part(ico(1.2, 0), 0x3f7c33, [-1.05, 3.2, -0.55], [0.6, 0.2, 0.4], null, 0.09), part(ico(0.95, 0), 0x61a445, [0.1, 4.75, -0.2], [0.2, 0.9, 0], null, 0.09)])];
-  g.deadtree = [merge([part(cyl(0.1, 0.24, 2.8, 5), 0x7d684e, [0, 1.4, 0]), part(cyl(0.05, 0.09, 1.3, 4), 0x7d684e, [0.42, 2.3, 0], [0, 0, -0.85]), part(cyl(0.04, 0.08, 1.1, 4), 0x715d45, [-0.36, 1.9, 0.1], [0.2, 0, 0.95]), part(cyl(0.03, 0.06, 0.9, 4), 0x7d684e, [0.05, 3.0, -0.25], [-0.6, 0, 0.15])])];
-  const leaves = []; for (let i = 0; i < 7; i++) { const a = i / 7 * TAU; leaves.push(part(box(2.1, 0.07, 0.55), i % 2 ? 0x4f9a3f : 0x5fae48, [0.62 + Math.cos(a) * 0.95, 4.42, -Math.sin(a) * 0.95], [0, a, -0.42])); }
-  g.palm = [merge([part(cyl(0.17, 0.22, 1.7, 6), 0x9a7a52, [0.03, 0.85, 0], [0, 0, -0.06]), part(cyl(0.15, 0.17, 1.6, 6), 0x8f7049, [0.2, 2.35, 0], [0, 0, -0.16]), part(cyl(0.13, 0.15, 1.5, 6), 0x9a7a52, [0.47, 3.75, 0], [0, 0, -0.24]), ...leaves]),
-  merge([part(sph(0.17, 6, 5), 0x6b4a2b, [0.45, 4.25, 0.18]), part(sph(0.17, 6, 5), 0x5e4126, [0.78, 4.22, -0.1]), part(sph(0.16, 6, 5), 0x6b4a2b, [0.6, 4.18, -0.25])])];
-  g.cactus = [merge([part(cyl(0.27, 0.31, 2.4, 7), 0x4c8c49, [0, 1.2, 0]), part(sph(0.27, 7, 4), 0x4c8c49, [0, 2.4, 0]), part(cyl(0.15, 0.15, 0.6, 6), 0x47854a, [0.5, 1.3, 0], [0, 0, Math.PI / 2]), part(cyl(0.15, 0.16, 0.9, 6), 0x4c8c49, [0.76, 1.72, 0]), part(cyl(0.14, 0.14, 0.5, 6), 0x47854a, [-0.45, 1.0, 0], [0, 0, Math.PI / 2]), part(cyl(0.14, 0.15, 0.7, 6), 0x4c8c49, [-0.68, 1.33, 0])]),
-  merge([part(sph(0.13, 6, 5), 0xe0457a, [0, 2.72, 0]), part(sph(0.11, 6, 5), 0xe0457a, [0.76, 2.25, 0]), part(sph(0.11, 6, 5), 0xd03a6c, [-0.68, 1.76, 0])])];
-  const bz = []; const bp = [[0.1, 0.95, 0.35], [0.62, 0.7, 0.45], [-0.45, 0.8, 0.3], [0.5, 0.75, -0.35], [-0.2, 1.0, -0.2], [-0.62, 0.55, -0.1], [0.3, 0.5, 0.68], [0.85, 0.5, 0.05]];
-  for (const p of bp) bz.push(part(sph(0.1, 6, 4), 0xe2334c, p, null, null, 0.1));
-  g.bush = [merge([part(ico(0.75, 0), 0x3c7c38, [0, 0.55, 0], [0.4, 0.3, 0], null, 0.1), part(ico(0.55, 0), 0x468a3d, [0.55, 0.42, 0.22], [0.1, 0.9, 0.3], null, 0.1), part(ico(0.55, 0), 0x357034, [-0.45, 0.45, -0.25], [0.7, 0.1, 0.2], null, 0.1)]), merge(bz)];
-  g.boulder = [merge([part(ico(1, 0), 0x8b8b87, [0, 0.45, 0], [0.4, 0.2, 0.1], [1.15, 0.78, 0.98], 0.13), part(ico(0.55, 0), 0x7e7e7b, [0.85, 0.25, 0.4], [0.9, 0.5, 0.2], [1, 0.8, 1], 0.13)])];
-  g.ironrock = [merge([part(ico(1, 0), 0x6d5f58, [0, 0.5, 0], [0.2, 0.7, 0.1], [1.1, 0.85, 1], 0.12), part(box(0.34, 0.3, 0.34), 0xc96a2c, [0.55, 0.85, 0.3], [0.5, 0.4, 0.2]), part(box(0.3, 0.26, 0.3), 0xd87a36, [-0.5, 0.7, 0.45], [0.2, 0.9, 0.5]), part(box(0.28, 0.3, 0.26), 0xb85c24, [0.1, 1.05, -0.4], [0.7, 0.2, 0.3]), part(box(0.24, 0.22, 0.24), 0xd87a36, [-0.25, 0.4, -0.85], [0.3, 0.3, 0.6])])];
-  const cr = (x, z, h, r, tx, tz, c) => [part(cyl(r, r * 1.15, h, 6), c, [x + tx * h * 0.25, h / 2, z + tz * h * 0.25], [tz * 0.5, 0, -tx * 0.5], null, 0.12), part(cone(r, r * 2, 6), c, [x + tx * h * 0.52, h + r * 0.75, z + tz * h * 0.52], [tz * 0.5, 0, -tx * 0.5], null, 0.12)];
-  g.crystal = [merge([...cr(0, 0, 1.5, 0.26, 0, 0, 0x6fe3ff), ...cr(0.42, 0.1, 0.95, 0.19, 0.7, 0.1, 0x57c8f5), ...cr(-0.36, 0.2, 0.8, 0.17, -0.6, 0.3, 0x86ecff), ...cr(0.05, -0.4, 0.7, 0.15, 0.1, -0.7, 0x57c8f5)])];
-  const rd = []; for (let i = 0; i < 7; i++) { const a = i * 2.4, r = 0.1 + (i % 3) * 0.12, h = 1.2 + (i % 4) * 0.22; rd.push(part(cone(0.05, h, 4), i % 2 ? 0xa3b356 : 0x8ea248, [Math.cos(a) * r, h / 2, Math.sin(a) * r], [Math.sin(a) * 0.12, 0, Math.cos(a) * 0.12])); if (i % 2 === 0) rd.push(part(box(0.07, 0.24, 0.07), 0x6b4a2b, [Math.cos(a) * r, h * 0.92, Math.sin(a) * r])); }
-  g.reed = [merge(rd)];
-  g.sticks = [merge([part(box(1.0, 0.07, 0.08), 0x7a5632, [0, 0.05, 0], [0, 0.3, 0]), part(box(0.9, 0.07, 0.07), 0x6b4a2b, [0.05, 0.1, 0.05], [0, -0.7, 0.05]), part(box(0.8, 0.06, 0.07), 0x86603a, [-0.05, 0.14, -0.02], [0, 1.4, -0.04])])];
-  g.stones = [merge([part(ico(0.2, 0), 0x9a9a96, [0, 0.12, 0], [0.3, 0, 0.5], [1.2, 0.8, 1], 0.12), part(ico(0.16, 0), 0x86868a, [0.3, 0.1, 0.12], [0.8, 0.2, 0], null, 0.12), part(ico(0.14, 0), 0xa3a39e, [-0.12, 0.08, 0.28], [0.1, 0.6, 0.3], null, 0.12)])];
-  g.flintp = [merge([part(cone(0.16, 0.26, 3), 0x2f353b, [0, 0.1, 0], [1.2, 0.3, 0.2]), part(cone(0.12, 0.2, 3), 0x4a535c, [0.2, 0.08, 0.1], [1.4, 1.2, 0])])];
-  g.mushroom = [merge([part(cyl(0.05, 0.07, 0.24, 6), 0xf1e6cf, [0, 0.12, 0]), part(cone(0.2, 0.16, 7), 0xd8402c, [0, 0.3, 0]), part(cyl(0.035, 0.05, 0.16, 6), 0xf1e6cf, [0.22, 0.08, 0.1]), part(cone(0.13, 0.11, 7), 0xe25a3a, [0.22, 0.2, 0.1])])];
-  g.herb = [merge([part(cyl(0.02, 0.03, 0.4, 4), 0x3f8a3c, [0, 0.2, 0]), part(ico(0.11, 0), 0xff6fae, [0, 0.45, 0]), part(box(0.26, 0.03, 0.1), 0x4a9a44, [0.1, 0.16, 0], [0, 0.4, 0.4]), part(box(0.26, 0.03, 0.1), 0x4a9a44, [-0.1, 0.22, 0.03], [0, -0.5, -0.4])])];
-  return g;
-}
-
-function placeNodes(scene) {
-  const occ = new Set();
-  const free = (x, z, sp) => { const k = Math.floor(x / sp) * 4096 + Math.floor(z / sp); if (occ.has(k)) return false; occ.add(k); return true; };
-  const inLake = (x, z, pad) => LAKES.some(L => Math.hypot(x - L.x, z - L.z) < L.r + pad);
-  const add = (t, x, z, s, ry) => { NODES.push({ t, x, z, y: heightAt(x, z), s: s || 1, ry: ry === undefined ? wr() * TAU : ry, hp: NT[t].hp || 1, gone: false }); };
-  /** scatter `count` nodes; ok(x,z,w,h) decides if a random spot is acceptable */
-  const scatter = (t, count, ok, smin, smax, sp, sitePad = 2.5) => {
-    let placed = 0, tries = 0;
-    while (placed < count && tries < count * 60) {
-      tries++;
-      const x = wrr(-320, 320), z = wrr(-320, 320), h = heightAt(x, z);
-      if (h < 1.25) continue;
-      if (inSite(x, z, sitePad) || inLake(x, z, -2)) continue;
-      const w = biomeW(x, z); if (!ok(x, z, w, h)) continue;
-      if (!free(x, z, sp || 2.4)) continue;
-      add(t, x, z, wrr(smin || 0.85, smax || 1.3)); placed++;
-    }
-  };
-  const dense = (x, z, o) => fbm(x * 0.022 + o, z * 0.022 + o, 2);
-  scatter('pine', 640, (x, z, w, h) => w.forest > 0.55 && h > 2.4 && dense(x, z, 3) > 0.40 && slopeAt(x, z) < 0.7, 0.85, 1.5);
-  scatter('oak', 250, (x, z, w, h) => w.forest > 0.6 && h > 2.4 && dense(x, z, 60) > 0.46 && slopeAt(x, z) < 0.6, 0.9, 1.4, 3.2);
-  scatter('snowpine', 300, (x, z, w, h) => w.snow > 0.55 && h < 44 && dense(x, z, 20) > 0.42 && slopeAt(x, z) < 0.8, 0.85, 1.45);
-  scatter('deadtree', 70, (x, z, w) => w.desert > 0.6, 0.8, 1.3);
-  scatter('cactus', 125, (x, z, w, h) => w.desert > 0.6 && h > 2.3 && slopeAt(x, z) < 0.5, 0.75, 1.35);
-  scatter('palm', 40, (x, z, w, h) => w.snow < 0.2 && h > 1.3 && h < 2.7, 0.9, 1.25, 4);
-  scatter('boulder', 120, (x, z, w) => w.forest > 0.5, 0.6, 1.5, 3);
-  scatter('boulder', 80, (x, z, w) => w.desert > 0.5, 0.7, 1.8, 3);
-  scatter('boulder', 100, (x, z, w) => w.snow > 0.5, 0.7, 1.9, 3);
-  scatter('ironrock', 34, (x, z, w, h) => w.desert > 0.6 && (slopeAt(x, z) > 0.3 || h > 9), 0.8, 1.2, 3);
-  scatter('ironrock', 18, (x, z, w, h) => w.snow > 0.6 && h > 14 && h < 40, 0.8, 1.2, 3);
-  scatter('crystal', 26, (x, z, w, h) => w.snow > 0.7 && h > 30, 0.8, 1.4, 3);
-  scatter('bush', 135, (x, z, w, h) => w.forest > 0.6 && h > 2.3, 0.85, 1.25);
-  scatter('reed', 150, (x, z, w, h) => w.snow < 0.3 && ((h < 3.0) || inLake(x, z, 10) || (w.forest > 0.6 && dense(x, z, 90) < 0.36)), 0.8, 1.3, 1.6);
-  scatter('sticks', 210, (x, z, w) => w.forest > 0.5, 0.85, 1.2, 1.6);
-  scatter('sticks', 50, (x, z, w) => w.forest < 0.5, 0.85, 1.2, 1.6);
-  scatter('stones', 190, () => true, 0.85, 1.3, 1.6);
-  scatter('flintp', 100, (x, z, w) => w.snow < 0.6, 0.9, 1.3, 1.6);
-  scatter('mushroom', 100, (x, z, w, h) => w.forest > 0.6 && dense(x, z, 3) > 0.44, 0.9, 1.4, 1.6);
-  scatter('herb', 75, (x, z, w) => w.snow < 0.3, 0.9, 1.3, 1.6);
-  // hand-placed clusters: a fair start, the oasis, the mine, the crystal cavern, the frozen lake
-  const ring = (t, cx, cz, r0, r1, n, s0, s1) => { for (let i = 0; i < n; i++) { const a = i / n * TAU + wrr(-0.3, 0.3), r = wrr(r0, r1), x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r; if (heightAt(x, z) > 1.2) add(t, x, z, wrr(s0 || 0.9, s1 || 1.2)); } };
-  const st = R.start;
-  ring('sticks', st.x, st.z - 14, 4, 16, 6); ring('stones', st.x, st.z - 14, 5, 17, 5); ring('reed', st.x, st.z - 16, 7, 18, 5);
-  ring('flintp', st.x, st.z - 14, 8, 18, 2); ring('mushroom', st.x, st.z - 26, 4, 14, 3); ring('bush', st.x, st.z - 30, 6, 16, 3);
-  ring('palm', LAKES[2].x, LAKES[2].z, 17, 22, 7, 0.95, 1.3); ring('reed', LAKES[2].x, LAKES[2].z, 15, 19, 8);
-  ring('ironrock', SITES.mine.x, SITES.mine.z, 6, 11, 9, 0.9, 1.3); ring('boulder', SITES.mine.x, SITES.mine.z, 11, 15, 6, 1.2, 1.9);
-  ring('crystal', SITES.crystal.x, SITES.crystal.z, 6, 11, 7, 0.9, 1.5); ring('crystal', SITES.summit.x, SITES.summit.z, 12, 17, 6, 1.1, 1.7);
-  ring('reed', LAKES[1].x, LAKES[1].z, 10, 14, 7); ring('reed', LAKES[0].x, LAKES[0].z, 27, 33, 14);
-  ring('herb', SITES.rayCamp.x, SITES.rayCamp.z, 10, 16, 3); ring('mushroom', SITES.grotto.x, SITES.grotto.z, 3, 6, 5);
-
-  // build one InstancedMesh (plus an optional overlay for fruit) per node type
-  const geos = nodeGeos(), counts = {};
-  for (const n of NODES) counts[n.t] = (counts[n.t] || 0) + 1;
-  for (const t in NT) {
-    const c = counts[t] || 0; if (!c) continue;
-    const mat = gfxNodeMat(t);
-    const m = windShadow(new THREE.InstancedMesh(geos[t][0], mat, c)); m.castShadow = NT[t].cls !== 'pick' || t === 'reed'; m.receiveShadow = true; m.frustumCulled = false;
-    let ov = null; if (geos[t][1]) { ov = windShadow(new THREE.InstancedMesh(geos[t][1], mat === MAT_GLOW ? MAT_VC : mat, c)); ov.frustumCulled = false; ov.receiveShadow = true; scene.add(ov); }
-    scene.add(m); NODE_MESH[t] = { m, ov, geo: geos[t][0], i: 0 };
-  }
-  const col = new THREE.Color();
-  NODES.forEach((n, idx) => {
-    const nm = NODE_MESH[n.t]; n.i = nm.i++; n.idx = idx;
-    setNodeMatrix(n, true, true);
-    const k = 0.86 + wr() * 0.28; col.setRGB(k, k * (0.96 + wr() * 0.08), k); nm.m.setColorAt(n.i, col); if (nm.ov) nm.ov.setColorAt(n.i, _white);
-    if (NT[n.t].col) n.col = addCollider({ x: n.x, z: n.z, r: NT[n.t].col * n.s });
-    shCell(n.x, n.z).nodes.push(n);
-  });
-  for (const t in NODE_MESH) { const nm = NODE_MESH[t]; nm.m.instanceMatrix.needsUpdate = true; if (nm.m.instanceColor) nm.m.instanceColor.needsUpdate = true; if (nm.ov) { nm.ov.instanceMatrix.needsUpdate = true; nm.ov.instanceColor.needsUpdate = true; } }
-  buildGrass(scene);
-}
-const _nm = new THREE.Matrix4(), _nq = new THREE.Quaternion(), _np = new THREE.Vector3(), _ns = new THREE.Vector3(), _ne = new THREE.Euler();
-function setNodeMatrix(n, showBase, showOverlay) {
-  const nm = NODE_MESH[n.t]; _ne.set(0, n.ry, 0); _nq.setFromEuler(_ne); _np.set(n.x, n.y - 0.05, n.z);
-  _ns.setScalar(showBase ? n.s : 0.0001); nm.m.setMatrixAt(n.i, _nm.compose(_np, _nq, _ns)); nm.m.instanceMatrix.needsUpdate = true;
-  if (nm.ov) { _ns.setScalar(showOverlay ? n.s : 0.0001); nm.ov.setMatrixAt(n.i, _nm.compose(_np, _nq, _ns)); nm.ov.instanceMatrix.needsUpdate = true; }
-}
-function buildGrass(scene) {
-  const geo = merge([part(cone(0.07, 0.55, 3), 0x58a53f, [0, 0.27, 0]), part(cone(0.06, 0.45, 3), 0x4c9638, [0.14, 0.22, 0.05], [0, 0, -0.3]), part(cone(0.06, 0.42, 3), 0x63b047, [-0.1, 0.2, 0.1], [0.3, 0, 0.3])]);
-  const N = 3400, m = new THREE.InstancedMesh(geo, MAT_VC, N); m.frustumCulled = false; m.receiveShadow = true;
-  const col = new THREE.Color(); let i = 0, tries = 0;
-  while (i < N && tries < N * 30) {
-    tries++; const x = wrr(-320, 320), z = wrr(-320, 320), h = heightAt(x, z); if (h < 2) continue;
-    const w = biomeW(x, z); if (w.snow > 0.4) continue; if (w.desert > 0.5 && wr() > 0.22) continue;
-    _ne.set(0, wr() * TAU, 0); _nq.setFromEuler(_ne); _np.set(x, h - 0.03, z); _ns.setScalar(wrr(0.8, 1.8));
-    m.setMatrixAt(i, _nm.compose(_np, _nq, _ns));
-    if (w.desert > 0.5) col.setRGB(1.5, 1.05, 0.6); else { const k = 0.8 + wr() * 0.4; col.setRGB(k, k, k * 0.9); }
-    m.setColorAt(i, col); i++;
-  }
-  m.count = i; m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; scene.add(m); R.grass = m;
-}
-
-/* ---------- gathering ---------- */
-function nodeNear(x, z, range, fn) {
-  const r = Math.ceil(range / SH_CELL);
-  for (let gx = -r; gx <= r; gx++) for (let gz = -r; gz <= r; gz++) {
-    const cell = SH.get(shKey(x + gx * SH_CELL, z + gz * SH_CELL)); if (!cell) continue;
-    for (const n of cell.nodes) if (!n.gone) fn(n);
-  }
-}
-function dropsOf(n, mult) {
-  const def = NT[n.t], out = {};
-  for (const k in def.drops) out[k] = Math.round(def.drops[k] * (mult || 1));
-  if (def.bonus && Math.random() < def.bonus[1]) out[def.bonus[0]] = 1;
-  return out;
-}
-function depleteNode(n, quiet) {
-  const def = NT[n.t];
-  n.gone = true; G.nodeState[n.idx] = G.day + def.respawn;
-  if (def.cls === 'stay') setNodeMatrix(n, true, false);
-  else { setNodeMatrix(n, false, false); if (n.col) n.col.off = true; }
-  if (quiet) return;
-  if (def.cls === 'tree') {
-    // a real mesh takes the instance's place and topples over
-    const m = new THREE.Mesh(NODE_MESH[n.t].geo, MAT_VC); m.position.set(n.x, n.y, n.z); m.rotation.y = n.ry; m.scale.setScalar(n.s); m.castShadow = true;
-    const a = Math.atan2(n.x - G.p.x, n.z - G.p.z), piv = new THREE.Group();
-    piv.position.copy(m.position); piv.rotation.order = 'YXZ'; piv.rotation.y = a; m.position.set(0, 0, 0); m.rotation.y = n.ry - a; piv.add(m);
-    R.scene.add(piv); R.fx.push({ kind: 'fall', m: piv, t: 0 }); sfx('treefall');
-  } else if (def.cls === 'rock' || def.cls === 'crystal') { puff(n.x, n.y + 0.6, n.z, def.cls === 'crystal' ? 0x9eeaff : 0x9a9a96, 12, { size: 0.35 }); }
-}
-function restoreNode(n) { n.gone = false; n.hp = NT[n.t].hp || 1; setNodeMatrix(n, true, true); if (n.col) n.col.off = false; delete G.nodeState[n.idx]; }
-function respawnNodes() {
-  for (const k in G.nodeState) {
-    if (G.nodeState[k] <= G.day) { const n = NODES[k]; if (!n) { delete G.nodeState[k]; continue; } if (dist2(n.x, n.z, G.p.x, G.p.z) > 30 || NT[n.t].cls === 'stay') restoreNode(n); }
-  }
-}
-function applyNodeState() { for (const k in G.nodeState) { const n = NODES[k], d = G.nodeState[k]; if (n) { depleteNode(n, true); G.nodeState[k] = d; } else delete G.nodeState[k]; } }
-/** hands-only pickup */
-function pickNode(n) {
-  const def = NT[n.t], d = dropsOf(n);
-  for (const k in d) give(k, d[k]);
-  depleteNode(n); addXP(def.xp); sfx('pickup'); swingNow(0.22);
-  if (n.t === 'palm') { puff(n.x + 0.6, n.y + 4.2, n.z, 0x5fae48, 5, { size: 0.2 }); }
-}
-/** one tool swing landing on a tree / rock / crystal */
-function hitNode(n, tool) {
-  const def = NT[n.t], isTree = def.cls === 'tree';
-  n.hp -= Math.max(1, tool.power);
-  sfx(isTree ? 'chop' : 'mine'); R.shake = Math.max(R.shake, 0.08);
-  puff(n.x + (G.p.x - n.x) * 0.25, G.p.y + 1.2, n.z + (G.p.z - n.z) * 0.25, isTree ? 0xb8905a : def.cls === 'crystal' ? 0xa6f0ff : 0xb0b0aa, 5, { size: 0.12, grow: 1, speed: 2.6, g: 9 });
-  if (n.hp <= 0) {
-    const d = dropsOf(n, tool.tier >= 2 ? 1.5 : 1);
-    for (const k in d) give(k, d[k]);
-    if (isTree) G.stats.wood++;
-    depleteNode(n); addXP(def.xp);
-  }
-}
-/** which tool class does this node need? null = hands */
-function nodeNeeds(n) { const c = NT[n.t].cls; return c === 'tree' ? 'axe' : c === 'rock' || c === 'crystal' ? 'pick' : null; }
 
 /* =========================================================================
    05_models: procedural low-poly models — animals, people, tools, structures
@@ -2456,4 +2252,4 @@ function touchHelpHTML() {
 }
 // @end-moved
 
-export { NT, NODES, NODE_MESH, _white, nodeGeos, placeNodes, _nm, _nq, _np, _ns, _ne, setNodeMatrix, buildGrass, nodeNear, dropsOf, depleteNode, restoreNode, respawnNodes, applyNodeState, pickNode, hitNode, nodeNeeds, UNIT_BOX, lam, bx, quadruped, scorpionModel, ANIMALS, humanModel, toolModel, WOODC, planks, structureModel, inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP, ambientTemp, SURV, survivalStep, hurtPlayer, blackout, eat, quickEat, drinkCanteen, drinkHere, FLOORS, groundAt, _fwd, updatePlayer, refreshViewModel, swingNow, updateViewModel, POIS, findTarget, targetPrompt, TKEY, key, primaryAction, interact, resolveSwing, shootBow, updateArrows, startFishing, tryCast, stopFishing, fishClick, updateFishing, setupInput, lockPointer, selectSlot, STRUCT, ROOFS, WALLS, cellKey, structColliders, spawnStructure, removeStructure, rebuildStructures, startBuild, cancelBuild, aimPoint, updateBuildGhost, placeBuild, tryDismantle, isRoofed, structPrompt, useStructure, lightFire, douse, addFuel, structuresStep, structuresNewDay, nearestFlame, updateStructures, trySleep, spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };
+export { UNIT_BOX, lam, bx, quadruped, scorpionModel, ANIMALS, humanModel, toolModel, WOODC, planks, structureModel, inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP, ambientTemp, SURV, survivalStep, hurtPlayer, blackout, eat, quickEat, drinkCanteen, drinkHere, FLOORS, groundAt, _fwd, updatePlayer, refreshViewModel, swingNow, updateViewModel, POIS, findTarget, targetPrompt, TKEY, key, primaryAction, interact, resolveSwing, shootBow, updateArrows, startFishing, tryCast, stopFishing, fishClick, updateFishing, setupInput, lockPointer, selectSlot, STRUCT, ROOFS, WALLS, cellKey, structColliders, spawnStructure, removeStructure, rebuildStructures, startBuild, cancelBuild, aimPoint, updateBuildGhost, placeBuild, tryDismantle, isRoofed, structPrompt, useStructure, lightFire, douse, addFuel, structuresStep, structuresNewDay, nearestFlame, updateStructures, trySleep, spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };

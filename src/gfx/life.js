@@ -11,7 +11,7 @@ import { G, R } from '../state.js';
 import { heightAt } from '../world/terrain.js';
 import { _c1 } from '../world/sky.js';
 import { GFX } from './textures.js';
-import { nodeNear } from '../legacy.js';
+import { nodeNear } from '../world/gathering.js';
 
 // @moved-from: original
 

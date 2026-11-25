@@ -13,7 +13,8 @@ import { G, R } from '../state.js';
 import { LAKES, SITES, biomeW, finalH, HGT, terrainColor } from '../world/terrain.js';
 import { makeNoiseTex, GFX } from './textures.js';
 import { waterMaterial } from './water.js';
-import { NT, NODES, CHESTS } from '../legacy.js';
+import { NT, NODES } from '../world/nodes.js';
+import { CHESTS } from '../legacy.js';
 
 // @moved-from: original
 

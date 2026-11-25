@@ -29,4 +29,6 @@ export * from './data/recipes.js';
 export * from './data/buildings.js';
 export * from './data/creatures.js';
 export * from './data/story.js';
+export * from './world/nodes.js';
+export * from './world/gathering.js';
 export * from './legacy.js';
