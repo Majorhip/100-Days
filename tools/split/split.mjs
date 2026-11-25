@@ -19,6 +19,14 @@ import { analyzeScript, originalScript, ROOT } from './analyze.mjs';
 import { SPEC } from './spec.mjs';
 import { EDITS as ALL_EDITS } from '../../tests/golden/approved-edits.mjs';
 
+// The migration is finished once src/ holds code written after it (ledger kind 'module'):
+// regenerating src/ from the original would wipe that code, so refuse.
+if (ALL_EDITS.some(e => e.kind === 'module') && !process.argv.includes('--force')) {
+  console.error('Phase 4 is finished and src/ now contains code added after the migration (see the "module" entries in\n' +
+    'tests/golden/approved-edits.mjs). Regenerating src/ from the original would delete it, so split.mjs will not run.\n' +
+    'Edit the modules directly instead.');
+  process.exit(1);
+}
 const m = String(process.argv[2] || '').match(/^4\.(\d+)$/);
 if (!m) { console.error('usage: node tools/split/split.mjs 4.<step>   (e.g. 4.2, 4.10)'); process.exit(2); }
 const step = parseInt(m[1], 10), stage = '4.' + step;

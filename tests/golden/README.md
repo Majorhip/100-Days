@@ -150,5 +150,22 @@ Each view loads the fixture save, sets the position, time and weather, freezes t
 - **What they can't prove yet:** the four targets themselves (forage only ≈ −36, fire + cooked forage ≈ −2, fire + fishing ≈ −9, hunting + fire ≈ 0). They depend on what a typical forage, fishing or hunting day gathers, and that model isn't in the repository. Inventing one that lands on these numbers would prove nothing, so this is marked `todo` in `survival.test.js` until the original day model turns up.
 - **Observation, not changed:** in water deeper than you are tall, the player walks along the lakebed (Mirror Lake: 3.2 m down). The original does the same.
 
+## Export / Import save (the first feature after the freeze)
+MIGRATION.md §7 asks for this as insurance before the game goes to Caspar. Saves live in the browser, and a new copy of the game file may not see them.
+- **Pause menu:** 📤 **Export save** downloads `stranded-day<N>-<date>.json`, after saving first. 📥 **Import save** checks the file is a version 3 Stranded save, asks before replacing anything, then restarts at the title, where Continue picks it up.
+- **Title screen:** 📂 **Load a save file**, for a copy of the game with no save yet. After it, the title offers Continue.
+- **The code** is in `src/ui/savefile.js`. `src/main.js` imports it after the whole game has loaded, so it can't change the original load order. It catches clicks on its own buttons, so the game's click handling is untouched.
+- **In the ledger:** the new module, plus the buttons added to the two HTML strings. That's 3 entries, 8 in total.
+- **`savefile.mjs`** tests it the way a player would, using real clicks, the real file picker and the real confirm box. 6 out of 6 pass:
+  1. Export gives the Day 10 game: 32 item types, 27 structures.
+  2. Import of a Day 12 save asks first, and Continue then loads Day 12.
+  3. Cancel in the confirm box changes nothing.
+  4. A copy with no save offers Continue after Load a save file.
+  5. A file that isn't a save is refused with a message.
+  6. Zero page errors.
+
 ### From here on
-`tools/split/` regenerates `src/` from the original, so it's only for the migration. Once modules are edited by hand (Phase 5 onwards, or any later feature), stop running `split.mjs`. The byte-for-byte part of `compare-build.mjs` then becomes the record of what the migration did: retire it, or grow the ledger, with a reason for each entry. The island, save, new-game, touch and screenshot checks keep their value after the migration.
+- **The migration is over.** `tools/split/split.mjs` now refuses to run, because `src/` holds code added after the migration and regenerating it from the original would delete that code.
+- **Edit modules directly.** For each change to original code, add a ledger entry with its reason, or a `module` entry for new files.
+- **When the ledger gets unwieldy,** retire the byte-for-byte part of `compare-build.mjs`; it remains the record of what the migration did.
+- **The other checks keep their value:** island, save, round trip, save files, new game, touch, smoke and screenshots.

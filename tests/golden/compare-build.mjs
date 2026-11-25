@@ -87,8 +87,12 @@ function expand(f, id, root) {
   }
   return outLines.join('\n') + (root ? '' : '\n');
 }
+// new modules added after the migration (ledger kind 'module'): no original code in them
+const NEW_MODULES = new Map(EDITS.filter(e => e.kind === 'module').map(e => [e.file, e]));
+for (const f of NEW_MODULES.keys()) if (srcFiles.includes(f)) notes.push(`module   ${f} (new code, not from the original)`); else problems.push(`ledger module ${f} does not exist`);
 // every file: the lines outside its blocks must be allowed
 for (const f of srcFiles) {
+  if (NEW_MODULES.has(f)) continue;
   const lines = fileLines(f); let inside = false; const outside = [];
   for (const l of lines) { if (FROM.test(l)) { inside = true; continue; } if (l === END) { inside = false; continue; } if (!inside) outside.push(l); }
   checkOutside(f, outside.filter(l => !TO.test(l)));
@@ -106,7 +110,7 @@ if (at < 0) {
 // every block of every file used exactly once; every file reached
 const blocksIn = f => fileLines(f).map(l => l.match(FROM)).filter(Boolean).map(m => f + '#' + (m[1] || ''));
 for (const f of srcFiles) {
-  if (f === 'src/main.js') continue;
+  if (f === 'src/main.js' || NEW_MODULES.has(f)) continue;
   const bs = blocksIn(f);
   if (f === 'src/debug-exports.js') { if (bs.length) problems.push(`${f} must not contain moved code`); continue; }
   if (!bs.length) problems.push(`${f} has no moved code and is not part of the map`);
@@ -138,7 +142,8 @@ if (todoCount) console.log(`      TODO(split) notes inside moved code: ${todoCou
   const unresolved = [];
   for (const f of srcFiles) {
     let sm; try { sm = scopeOf(readFileSync(join(ROOT, f), 'utf8'), 'module'); } catch (e) { unresolved.push(`${f}: does not parse: ${e.message}`); continue; }
-    const missing = [...new Set(sm.globalScope.through.map(r => r.identifier.name))].filter(n => !origGlobals.has(n));
+    const extra = new Set((NEW_MODULES.get(f) || {}).globals || []);
+    const missing = [...new Set(sm.globalScope.through.map(r => r.identifier.name))].filter(n => !origGlobals.has(n) && !extra.has(n));
     if (missing.length) unresolved.push(`${f}: ${missing.join(', ')}`);
   }
   check(`every name in ${srcFiles.length} modules is declared, imported or a browser global the original used`, !unresolved.length);

@@ -64,3 +64,4 @@ export * from './save.js';
 export * from './game/time.js';
 export * from './boot.js';
 export * from './input/touch.js';
+export * from './ui/savefile.js';

@@ -31,6 +31,7 @@ ok = run('save', 'savecheck.mjs', [target]) && ok;
 ok = run('new game', 'newgame.mjs', [target]) && ok;
 ok = run('touch', 'touchcheck.mjs', [target]) && ok;
 ok = run('round trip', 'roundtrip.mjs', [target]) && ok;
+ok = run('save files', 'savefile.mjs', [target]) && ok;
 ok = run('smoke', '../smoke.mjs', [target]) && ok;
 if (argv.includes('--shots')) ok = run('screenshots', 'screenshots.mjs', [target]) && ok;
 console.log(ok ? `\nALL PASS (${target})` : `\nSOME CHECKS FAILED (${target})`);

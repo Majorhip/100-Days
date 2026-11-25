@@ -11,6 +11,9 @@
 //   add      `line` is a new line of code in `file`, outside moved code (exactly once)
 //   remove   the original line `text` was dropped; a `// @removed: <text>` marker stands in
 //            its place (in whichever file that part of the code lives)
+//   module   `file` is a new module, added after the migration: no original code in it, so it
+//            is not part of the map. `globals` lists browser globals it may use that the
+//            original never did. Everything else in compare-build still applies to it.
 //
 // `when: <file>` means the entry applies only once that file exists (from the Phase 4 step
 // that creates it). Every entry says why. Keep this list short: a migration that needs many
@@ -35,5 +38,19 @@ export const EDITS = [
   {
     kind: 'add', file: 'src/main.js', line: 'window.__stranded = ALL;',
     why: 'Read-only view of every module for the parity checks in tests/golden (a module namespace cannot be assigned to from outside).'
+  },
+
+  // ---- after the migration: Export / Import save (MIGRATION.md §7, insurance before shipping) ----
+  {
+    kind: 'module', file: 'src/ui/savefile.js', globals: ['Blob', 'URL', 'FileReader', 'alert', 'Date'],
+    why: 'Export / Import save. New code, imported by src/main.js after the whole game has loaded (so it cannot change the original load order); it handles clicks on its own buttons, so the original click handling is untouched.'
+  },
+  {
+    kind: 'replace', was: '<button data-a="save">💾 Save game</button>', now: '<button data-a="save">💾 Save game</button><button data-a="export">📤 Export save</button><button data-a="import">📥 Import save</button>',
+    why: 'Pause menu: the Export save and Import save buttons (handled in src/ui/savefile.js).'
+  },
+  {
+    kind: 'replace', was: '<button id="tHelp">❓ How to play</button>', now: '<button id="tHelp">❓ How to play</button><button id="tLoad">📂 Load a save file</button>',
+    why: 'Title screen: load a save file, for a copy of the game that has no save yet (handled in src/ui/savefile.js).'
   }
 ];

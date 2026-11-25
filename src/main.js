@@ -5,6 +5,7 @@
 
 import './input/touch.js';   // the last part of the chain: loading it runs the whole game in original order
 import * as ALL from './debug-exports.js';
+import './ui/savefile.js';   // Export / Import save (added after the migration; runs after the game has loaded)
 
 // Read-only view for the parity checks in tests/golden. A module namespace cannot be
 // assigned to from outside, and its bindings are live (G after a save loads, for example).

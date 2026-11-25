@@ -127,7 +127,7 @@ function renderPanel() {
     h += '</div>';
   } else if (P === 'map') { box.innerHTML = closeBtn; const d = document.createElement('div'); box.appendChild(d); renderMap(d); bindPanel(box); box.onclick = null; return; }
   else if (P === 'pause') {
-    h += '<h2>⏸️ Paused</h2><div class="menu"><button class="big" data-a="close">▶ Keep playing</button></div>' + settingsHTML() + '<div class="menu">' + (R.touch && (document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen) ? '<button data-a="fs">⛶ Full screen</button>' : '') + '<button data-a="save">💾 Save game</button><button data-a="quit">🏠 Save and quit to title</button></div><p class="foot">Your game also saves automatically every time you sleep.</p>';
+    h += '<h2>⏸️ Paused</h2><div class="menu"><button class="big" data-a="close">▶ Keep playing</button></div>' + settingsHTML() + '<div class="menu">' + (R.touch && (document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen) ? '<button data-a="fs">⛶ Full screen</button>' : '') + '<button data-a="save">💾 Save game</button><button data-a="export">📤 Export save</button><button data-a="import">📥 Import save</button><button data-a="quit">🏠 Save and quit to title</button></div><p class="foot">Your game also saves automatically every time you sleep.</p>';
   } else if (P === 'msg') {
     const a = R.panelArg; h += '<h2>' + a.t + '</h2><div class="msg">' + a.html + '</div><div class="menu"><button class="big" data-a="next">' + (a.btn || 'OK') + '</button></div>'; R.panelNext = () => closePanel();
   } else if (P === 'note') {

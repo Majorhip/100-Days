@@ -19,6 +19,12 @@ it('the Phase 1 save loads with everything intact', () => {
   expect(r.code, r.out).toBe(0);
 });
 
+it('Export / Import save: export from the pause menu, import there and on the title screen, refuse non-saves, Cancel changes nothing', () => {
+  const r = runScript('savefile.mjs', [builtFile()]);
+  expect(r.out).toContain('PASS: Export / Import save work');
+  expect(r.code, r.out).toBe(0);
+});
+
 it('saving round-trips exactly', () => {
   const r = runScript('roundtrip.mjs', [builtFile()]);
   expect(r.out).toContain('differences from the fixture: 0');

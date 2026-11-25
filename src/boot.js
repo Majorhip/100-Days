@@ -90,7 +90,7 @@ function showTitle() {
   const s = readSave(), t = $('title');
   t.innerHTML = '<div class="logo"><div class="l1">STRANDED</div><div class="l2">100 DAYS ON KESTREL ISLAND</div></div>' +
     '<div class="menu">' + (s ? '<button class="big" id="tContinue">▶ Continue <small>— Day ' + s.day + ', Level ' + s.p.level + '</small></button>' : '') +
-    '<button class="' + (s ? '' : 'big') + '" id="tNew">🏝️ New Adventure</button><button id="tHelp">❓ How to play</button></div>' +
+    '<button class="' + (s ? '' : 'big') + '" id="tNew">🏝️ New Adventure</button><button id="tHelp">❓ How to play</button><button id="tLoad">📂 Load a save file</button></div>' +
     '<div id="tExtra"></div><div class="credit">Made for Caspar · Built with three.js · ' + (R.touch ? 'Touch controls on · play with your phone sideways' : 'Best with a mouse and keyboard') + '</div>';
   t.style.display = '';
   if (s) $('tContinue').onclick = () => { audioInit(); goFullscreen(); setG(mergeSave(s)); applyWorldState(); startGame(false); };
