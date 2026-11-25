@@ -1,0 +1,61 @@
+// Story text: notes, dialogue, the intro, landmark names, badges and tips.
+// Content only: no three.js, no page, no game code (see MIGRATION.md, standing rule).
+// Moved verbatim from the original game script in Phase 4.1.
+
+// @moved-from: legacy.js
+
+/* ---- story text ---- */
+const NOTES = {
+  skipper: { t: 'Note from Skipper Jo', body: 'Sam!\n\nIf you find this, I made it to the lifeboat. The radio is smashed, so I\'m rowing for the mainland to get help. No ship can cross the reef until storm season ends — 100 DAYS from now.\n\nFind your Uncle Ray. His camp is NORTH-WEST of this cove. Look for his ORANGE WEATHER BALLOON above the trees.\n\nStay warm. Stay fed. Don\'t give up.\n\n— Skipper Jo' },
+  camp: { t: 'Ray\'s Field Journal', body: 'The lights on Frostpeak are back. Blue. Glowing right through the snow.\n\nScout barks at the mountain every night. I tried to radio the mainland but the tower is dead — three parts are missing.\n\nI\'m going up there to find out what those lights are. Sam arrives soon... I\'ll be back in time.\n\nI carved ARROWS in the trees. They lead to the Radio Tower on the big hill, in case anyone needs it.\n\nP.S. Scout hates being left behind. He will do anything for cooked meat.' },
+  arrow: { t: 'Carved in the bark', body: 'R ➜ TOWER\n\nKeep the big hill in front of you. The tower is right on top.' },
+  tower: { t: 'Tower Repair Log', body: 'Still dead. Three parts missing:\n\n1. POWER COIL — Old Grizzle, the giant bear, dragged my whole pack into his den in the WEST woods.\n\n2. BATTERY — the spare is in my locker at the Dust Flats outpost, to the EAST.\n\n3. ANTENNA — the blizzard ripped it off. It landed somewhere on the SUMMIT of Frostpeak, NORTH.\n\nGet all three and this tower will sing again.\n\n— Ray' },
+  pack: { t: 'Torn page from Ray\'s pack', body: '...and if I forget the locker code again: it\'s my lucky number, same as always. The year Dad taught me to fish.\n\nNINETY-FOUR.' },
+  outpost: { t: 'Outpost Notes', body: 'DESERT RULES\n\n1. The sun steals your water twice as fast. Carry a canteen.\n2. Cactus fruit is food AND drink.\n3. Scorpions are slow. Never stand still.\n4. The old mine south of here still has iron in the walls.\n5. Cold at night. Bring a torch.' },
+  locker: { t: 'Note inside the locker', body: 'The battery is GONE.\n\nClaw marks on the door. Giant tracks lead north to the Bone Yard. That monster scorpion — I call it the DUNE KING — collects anything that hums or shines.\n\nWhoever goes after it: take my bow. And water. Lots of water.\n\n— R.' },
+  oasis: { t: 'Message in a bottle', body: '(The paper is very, very old.)\n\n"We came for the glowing stones under the white mountain. The guardians of wood, sand and ice would not let us leave with them.\n\nTEN GOLDEN IDOLS we hid across this island. Return them all to the STONE CIRCLE and the island will give you its storm."' },
+  mine: { t: 'Mine Survey', body: 'Iron ore: plenty. Smelt it in a furnace.\n\nAn IRON PICKAXE is the only thing hard enough to cut Frostpeak crystal — or to dig through a cave-in.\n\n— R.' },
+  cabin: { t: 'Ray\'s Journal — Frostpeak', body: 'I found it.\n\nThe lights come from a cavern full of glowing crystals, right under the peak. The entrance is on the WEST face.\n\nI\'m going inside tomorrow with rope and a lamp. If the roof looks weak I\'ll turn back. Promise.\n\nThe big white bear at the summit — FROSTCLAW — has made a nest out of my antenna. I\'ll deal with that later.\n\nSpare furs are in the chest. This mountain will freeze you solid without a fur coat.' },
+  lake: { t: 'Ice Fishing Log', body: 'The biggest fish on the island live under this ice.\n\nDrop a line in the hole. Bring a fire. Mind the snow wolves.' },
+  summit: { t: 'Scratched into the mast', body: 'KESTREL ISLAND RELAY\nProperty of Ranger R. Rivera.\n\nIf found, please return to the Radio Tower.\n\n(Mind the bear.)' }
+};
+const DIALOGS = {
+  radio: ['The radio crackles... hisses... and then, a voice.', 'RAY: "...anyone? This is Ranger Ray Rivera. I\'m trapped in the crystal cavern under Frostpeak. Cave-in. I can\'t shift the rocks..."', 'You grab the microphone. "UNCLE RAY! It\'s SAM!"', 'RAY: "SAM?! You\'re ALIVE? You fixed the TOWER?! Ha!"', 'RAY: "Listen. West face of Frostpeak. You need an IRON PICKAXE to break through. And Sam... I\'m so proud of you."'],
+  rescue: ['The last rock crumbles. Blue light pours out of the cavern.', 'A man with a wild beard and a ranger hat stumbles out, blinking at the snow.', 'RAY: "Sam! LOOK at you! You crossed the whole island and climbed Frostpeak to find me?"', 'RAY: "I had three weeks of tinned beans and a lot of time to feel silly. You are the best thing I have ever seen."', 'RAY: "Meet me at the Radio Tower. Let\'s call home."'],
+  rayTowerNoRadio: ['RAY: "The tower still needs its three parts, kiddo. Power coil, battery, antenna. Get those and we can call home."'],
+  rayStay: ['RAY: "Then we stay. I\'ll keep the camp fed — you keep being a legend. The ship comes on Day 100."'],
+  rayIdle: ['RAY: "Day 100, kiddo. Until then, this island is ours. Have you found all ten golden idols yet?"']
+};
+const INTRO = [
+  ['THE STORM', 'You were on the supply boat <b>Petrel</b>, heading to spend the holidays with your Uncle Ray — the ranger of wild, faraway <b>Kestrel Island</b>.'],
+  ['THE REEF', 'Then the storm hit. The Petrel struck the reef in the dark. Skipper Jo threw you a life ring and shouted something you couldn\'t hear over the waves.'],
+  ['DAY ONE', 'You wake up on the sand. The boat is wrecked. Uncle Ray is nowhere to be seen.<br><br>You are <b>Sam Rivera</b>. You are eleven years old. And you are going to survive.']
+];
+const LANDMARKS = [
+  { id: 'cove', n: 'Shipwreck Cove', e: '⚓' }, { id: 'rayCamp', n: 'Uncle Ray\'s Camp', e: '🎈' }, { id: 'tower', n: 'Radio Tower', e: '📡' },
+  { id: 'mirror', n: 'Mirror Lake', e: '🐟' }, { id: 'den', n: 'Old Grizzle\'s Den', e: '🐻' }, { id: 'grotto', n: 'Hidden Grotto', e: '🌿' },
+  { id: 'wolfDen', n: 'Wolf Rocks', e: '🐺' }, { id: 'circle', n: 'Stone Circle', e: '🗿' }, { id: 'outpost', n: 'Dust Flats Outpost', e: '🏚️' },
+  { id: 'oasis', n: 'The Oasis', e: '🌴' }, { id: 'mine', n: 'Old Iron Mine', e: '⛏️' }, { id: 'boneyard', n: 'The Bone Yard', e: '🦂' },
+  { id: 'cabin', n: 'Ray\'s Cabin', e: '🛖' }, { id: 'icelake', n: 'Frozen Lake', e: '🧊' }, { id: 'crystal', n: 'Crystal Cavern', e: '💎' },
+  { id: 'summit', n: 'Frostpeak Summit', e: '🏔️' }
+];
+const BADGES = {
+  fire: ['🔥', 'Firestarter', 'Light your first campfire'], night: ['🌙', 'First Night', 'Sleep through a night'],
+  builder: ['🔨', 'Builder', 'Place 12 building pieces'], home: ['🏠', 'Home Sweet Home', 'Stand under your own roof'],
+  hunter: ['🏹', 'Hunter', 'Defeat 10 creatures'], angler: ['🎣', 'Angler', 'Catch 5 fish'], friend: ['🐕', 'Best Friend', 'Befriend Scout'],
+  iron: ['⚒️', 'Iron Age', 'Smelt your first iron bar'], moon: ['🌕', 'Wolf Moon Survivor', 'Survive a Wolf Moon'],
+  grizzle: ['🐻', 'Bear Wrestler', 'Defeat Old Grizzle'], duneking: ['🦂', 'King of the Dunes', 'Defeat the Dune King'], frostclaw: ['❄️', 'Frostbreaker', 'Defeat Frostclaw'],
+  explorer: ['🧭', 'Explorer', 'Discover every landmark'], treasure: ['💰', 'Treasure Hunter', 'Open all 10 treasure chests'], storm: ['⚡', 'Stormcaller', 'Earn the Storm Spear'],
+  radio: ['📡', 'On the Air', 'Repair the Radio Tower'], ray: ['🧔', 'Found Him', 'Rescue Uncle Ray'],
+  d10: ['🔟', '10 Days', 'Survive to Day 10'], d25: ['🏕️', '25 Days', 'Survive to Day 25'], d50: ['⭐', '50 Days', 'Survive to Day 50'], d100: ['👑', '100 Days', 'Survive to Day 100']
+};
+const TIPS = [
+  'Wolves are scared of a lit torch. Hold one at night and they will run.', 'Only COOKED food fills you up properly.', 'Build walls around your bed. Creatures can\'t break them.',
+  'Every 10th night is a Wolf Moon. Get your base ready!', 'Scout can sniff out buried treasure. Pet him once a day.', 'Rain puts out fires that don\'t have a roof over them.',
+  'A stew is the best meal on the island — raw meat, a mushroom and two berries.', 'Sprint with SHIFT. Jump with SPACE.', 'The map (M) fills in as you explore.',
+  'Boss charging at you? Step sideways!', 'Fill your canteen before crossing the Dust Flats.', 'You need a Fur Coat before climbing Frostpeak.',
+  'Store spare items in a chest. You drop your pack if you black out.', 'A Rain Collector gives you fresh water right at your base.'
+];
+// @end-moved
+
+export { NOTES, DIALOGS, INTRO, LANDMARKS, BADGES, TIPS };

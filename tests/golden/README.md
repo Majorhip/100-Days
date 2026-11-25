@@ -6,7 +6,7 @@ The scripts drive the Chrome installed on this PC through `puppeteer-core`, with
 
 | Check | Command | Pass |
 |---|---|---|
-| Built file | `npm run build`, then `node tests/golden/compare-build.mjs` | prints `PASS` (game code = original, only the listed lines added; markup and CSS same) |
+| Built file | `npm run build`, then `node tests/golden/compare-build.mjs` | prints `PASS` (moved code puts back together into the original byte for byte; only imports, exports and comments added; markup and CSS same) |
 | Island | `node tests/golden/fingerprint.mjs [target]` | prints `PASS` (hash identical) |
 | Save | `node tests/golden/savecheck.mjs [target]` | prints `PASS` (fixture loads; day, inventory, structures match) |
 | New game | `node tests/golden/newgame.mjs [target]` | prints `PASS` (starts, walks, clock runs, zero page errors incl. shader errors) |
@@ -66,3 +66,24 @@ Each view loads the fixture save, sets the position, time and weather, freezes t
 - **The built file is 768,910 bytes**, against 959,102. The difference comes from minification and from dropping the parts of three.js the game doesn't use.
 - **The fingerprint, save check and new-game check pass** on `dist/index.html` opened from disk and on `npm run dev`.
 - **Screenshots of the build differ from golden by 0.8–3.2**, inside the original's own 0.7–3.4, and match by eye.
+
+## Moving code in Phase 4: the marker rule
+Every block of code that leaves `src/legacy.js` (or any later file) is moved **verbatim**:
+- **In the file it leaves**, one line stays behind in its place: `// @moved-to: src/data/items.js`.
+- **In the new file**, the code sits between `// @moved-from: legacy.js` and `// @end-moved`. Outside those markers, a file may only contain comments, blank lines, `import … from '…';` and `export { … };`.
+- **`compare-build.mjs`** expands every marker (recursively), and the result must contain the original game script byte for byte. It prints every added code line.
+
+It also enforces the standing rule: nothing in `src/data/` or `src/game/` may import three.js, mention `THREE`, or use `document.`, `window.`, `localStorage.`, `navigator.`, `R.` or `GFX.`.
+
+Tested by four deliberate bad edits, each caught with the exact line:
+1. wolf health 42→43
+2. an extra code line outside a moved block
+3. a deleted marker
+4. `document` inside data
+
+An edit that has to change code, not just move it (MIGRATION.md §7, e.g. `G = mergeSave(...)`), will fail this check on purpose. Such edits must be listed and explained when they come.
+
+## Phase 4.1 result: `03_data` → `src/data/`
+- `items.js` (`ITEMS`, `HOTBAR`, `HANDS`), `recipes.js`, `buildings.js` (`BUILDS`, `BUILD_BY_ID`), `creatures.js`, `story.js` (`NOTES`, `DIALOGS`, `INTRO`, `LANDMARKS`, `BADGES`, `TIPS`).
+- These constants depend on nothing else in the game and do nothing while loading, so loading them before the rest of the game (as imports) changes nothing.
+- `compare-build` passes. The fingerprint, save and new-game checks pass on `dist` and on the dev server. Screenshots differ from golden by 0.7–3.6, matching by eye; storm at 3.6 is rain-streak placement.

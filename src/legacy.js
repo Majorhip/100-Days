@@ -1,6 +1,12 @@
-// Phase 3 (lift and shift): the original game script, unchanged, apart from this import
-// and the read-only export at the end. It is split into modules in Phase 4.
+// The rest of the original game script, still being split into modules (Phase 4).
+// Every moved block left a "// @moved-to:" line behind; tests/golden/compare-build.mjs
+// puts them back and checks the result is the original script, byte for byte.
 import * as THREE from 'three';
+import { ITEMS, HOTBAR, HANDS } from './data/items.js';
+import { RECIPES } from './data/recipes.js';
+import { BUILDS, BUILD_BY_ID } from './data/buildings.js';
+import { CREATURES } from './data/creatures.js';
+import { NOTES, DIALOGS, INTRO, LANDMARKS, BADGES, TIPS } from './data/story.js';
 /* =========================================================================
    STRANDED: 100 DAYS  —  full HTML edition
    00_core: constants, maths, noise, geometry helpers, game state
@@ -1386,175 +1392,11 @@ function gfxUpdate(dt) {
 /* =========================================================================
    03_data: items, recipes, buildings, creatures, story text — content only
    ========================================================================= */
-const ITEMS = {
-  // resources
-  wood: { n: 'Wood', e: ['🪵', '🌳'], d: 'Logs from chopped trees. For building and fuel.' },
-  stick: { n: 'Stick', e: ['🥢'], d: 'Found on the ground and in chopped trees.' },
-  stone: { n: 'Stone', e: ['🪨', '🌑'], d: 'Loose stones, or mine boulders with a pickaxe.' },
-  flint: { n: 'Flint', e: ['🔺'], d: 'Sharp stone for spear tips and arrowheads.' },
-  fibre: { n: 'Fibre', e: ['🌾'], d: 'Tough plant fibre from reeds.' },
-  rope: { n: 'Rope', e: ['🪢', '➰'], d: 'Twisted fibre. Holds everything together.' },
-  hide: { n: 'Hide', e: ['🟫', '🔶'], d: 'Animal hide from deer and goats.' },
-  fur: { n: 'Fur', e: ['🧶'], d: 'Thick fur from wolves and bears. Very warm.' },
-  fang: { n: 'Fang', e: ['🦷'], d: 'A wolf fang. Looks fierce on a necklace.' },
-  chitin: { n: 'Scorpion Shell', e: ['🦂'], d: 'Hard plates from desert scorpions.' },
-  ore: { n: 'Iron Ore', e: ['🟤', '🧱'], d: 'Rusty rock. Smelt it in a furnace.' },
-  iron: { n: 'Iron Bar', e: ['🔩'], d: 'Smelted iron for the best tools.' },
-  crystal: { n: 'Glow Crystal', e: ['💎'], d: 'A glowing crystal from under Frostpeak.' },
-  // food
-  berries: { n: 'Berries', e: ['🫐', '🍇'], d: 'A small snack. Safe to eat raw.', food: { food: 6, water: 3 } },
-  mushroom: { n: 'Mushroom', e: ['🍄'], d: 'Edible raw, far better roasted.', food: { food: 5 }, cook: 'roastshroom' },
-  roastshroom: { n: 'Roast Mushroom', e: ['🍢'], d: 'Smoky and filling.', food: { food: 15 } },
-  rawmeat: { n: 'Raw Meat', e: ['🥩'], d: 'Cook it first! Raw meat makes you sick.', food: { food: 10, hp: -8 }, cook: 'meat' },
-  meat: { n: 'Cooked Meat', e: ['🍖'], d: 'Hot and delicious. Scout loves it too.', food: { food: 38 } },
-  rawfish: { n: 'Raw Fish', e: ['🐟'], d: 'Cook it on a fire.', food: { food: 8, hp: -5 }, cook: 'fish' },
-  fish: { n: 'Cooked Fish', e: ['🍤'], d: 'Flaky and tasty.', food: { food: 32, water: 4 } },
-  cactusfruit: { n: 'Cactus Fruit', e: ['🌵'], d: 'Juicy. Food and drink in one.', food: { food: 8, water: 18 } },
-  coconut: { n: 'Coconut', e: ['🥥'], d: 'Full of coconut water.', food: { food: 10, water: 26 } },
-  stew: { n: 'Hearty Stew', e: ['🍲'], d: 'The best meal on the island. Heals you too.', food: { food: 65, water: 20, hp: 25 } },
-  herb: { n: 'Healing Herb', e: ['🌺'], d: 'Chew it for a little health, or make a bandage.', food: { hp: 8 } },
-  bandage: { n: 'Bandage', e: ['🩹', '➕'], d: 'Restores a big chunk of health.', food: { hp: 40 } },
-  // tools and weapons
-  axe: { n: 'Stone Axe', e: ['🪓', '🔨'], d: 'Chops trees.', tool: { slot: 'axe', cls: 'axe', dmg: 12, reach: 2.9, power: 1, tier: 1 } },
-  ironaxe: { n: 'Iron Axe', e: ['🪓', '🔨'], d: 'Fells a tree in two swings.', bg: '#6d8aa8', tool: { slot: 'axe', cls: 'axe', dmg: 22, reach: 2.9, power: 3, tier: 2 } },
-  pick: { n: 'Stone Pickaxe', e: ['⛏️'], d: 'Breaks boulders and iron rock.', tool: { slot: 'pick', cls: 'pick', dmg: 10, reach: 2.9, power: 1, tier: 1 } },
-  ironpick: { n: 'Iron Pickaxe', e: ['⛏️'], d: 'Cuts crystal — and digs through cave-ins.', bg: '#6d8aa8', tool: { slot: 'pick', cls: 'pick', dmg: 16, reach: 2.9, power: 3, tier: 2 } },
-  spear: { n: 'Spear', e: ['🔱'], d: 'Long reach. Good for hunting.', tool: { slot: 'melee', cls: 'spear', dmg: 20, reach: 3.6, tier: 1 } },
-  sword: { n: 'Iron Sword', e: ['🗡️'], d: 'Fast and strong.', bg: '#6d8aa8', tool: { slot: 'melee', cls: 'sword', dmg: 34, reach: 3.1, tier: 2 } },
-  crystalspear: { n: 'Crystal Spear', e: ['🔱'], d: 'A glowing spear tipped with Frostpeak crystal.', bg: '#3fb6c9', tool: { slot: 'melee', cls: 'spear', dmg: 50, reach: 3.8, tier: 3, glow: 0x55e0ff } },
-  stormspear: { n: 'Storm Spear', e: ['⚡'], d: 'The island\'s gift. Every hit calls lightning.', bg: '#d9a520', tool: { slot: 'melee', cls: 'spear', dmg: 85, reach: 4, tier: 4, glow: 0xffe066, storm: true } },
-  bow: { n: 'Bow', e: ['🏹'], d: 'Shoots arrows. Left click to fire.', tool: { slot: 'bow', cls: 'bow', dmg: 28, tier: 1 } },
-  arrow: { n: 'Arrow', e: ['🪶', '🎯'], d: 'Ammo for the bow.' },
-  torch: { n: 'Torch', e: ['🔥'], d: 'Lights the dark and scares wolves away while you hold it.', tool: { slot: 'torch', cls: 'torch', dmg: 6, reach: 2.6, tier: 1 } },
-  rod: { n: 'Fishing Rod', e: ['🎣'], d: 'Aim at water and left click to cast.', tool: { slot: 'rod', cls: 'rod', dmg: 3, reach: 2.6, tier: 1 } },
-  canteen: { n: 'Canteen', e: ['🧴', '🍶'], d: 'Carries 5 drinks. Fill it at any water. Press G to drink.' },
-  // wearables (worn automatically)
-  vest: { n: 'Hide Vest', e: ['🦺'], d: 'Blocks a quarter of all damage.', wear: { armor: 0.25 } },
-  chitinarmor: { n: 'Shell Armour', e: ['🛡️'], d: 'Scorpion plates. Blocks 40% of damage.', bg: '#b0763a', wear: { armor: 0.4 } },
-  coat: { n: 'Fur Coat', e: ['🧥'], d: 'Keeps you warm on Frostpeak.', wear: { warm: 24 } },
-  necklace: { n: 'Fang Necklace', e: ['📿'], d: '+25% weapon damage. Wolves think twice.', wear: { dmg: 1.25 } },
-  // story
-  coil: { n: 'Power Coil', e: ['⚙️'], d: 'Radio part 1 of 3.', bg: '#b8860b', story: true },
-  battery: { n: 'Battery', e: ['🔋'], d: 'Radio part 2 of 3.', bg: '#b8860b', story: true },
-  antenna: { n: 'Antenna', e: ['📡'], d: 'Radio part 3 of 3.', bg: '#b8860b', story: true },
-  idol: { n: 'Golden Idol', e: ['🗿'], d: 'One of ten. They belong at the Stone Circle.', bg: '#d9a520', story: true }
-};
-const HOTBAR = ['hands', 'axe', 'pick', 'melee', 'bow', 'torch', 'rod'];
-const HANDS = { n: 'Hands', e: ['✋'], tool: { slot: 'hands', cls: 'hands', dmg: 4, reach: 2.5, power: 0, tier: 0 } };
-
-/* station: null = craft anywhere, 'bench' = near a Workbench, 'furnace', 'fire' = near a lit campfire */
-const RECIPES = [
-  { id: 'axe', cost: { stick: 2, stone: 2, fibre: 1 }, xp: 10 },
-  { id: 'pick', cost: { stick: 2, stone: 3, fibre: 1 }, xp: 10 },
-  { id: 'spear', cost: { stick: 3, flint: 1, fibre: 1 }, xp: 10 },
-  { id: 'torch', cost: { stick: 2, fibre: 2 }, xp: 8 },
-  { id: 'rope', cost: { fibre: 3 }, xp: 3 },
-  { id: 'bandage', cost: { fibre: 2, herb: 1 }, xp: 4 },
-  { id: 'arrow', n: 4, cost: { stick: 2, flint: 1 }, xp: 4 },
-  { id: 'rod', cost: { stick: 3, rope: 1, flint: 1 }, xp: 10 },
-  { id: 'canteen', cost: { hide: 2, rope: 1 }, xp: 10 },
-  { id: 'bow', cost: { stick: 4, rope: 2 }, station: 'bench', xp: 15 },
-  { id: 'vest', cost: { hide: 4, rope: 1 }, station: 'bench', xp: 15 },
-  { id: 'coat', cost: { fur: 4, hide: 2, rope: 1 }, station: 'bench', xp: 25 },
-  { id: 'necklace', cost: { fang: 3, rope: 1 }, station: 'bench', xp: 15 },
-  { id: 'chitinarmor', cost: { chitin: 6, rope: 2 }, station: 'bench', xp: 30 },
-  { id: 'ironaxe', cost: { iron: 2, stick: 2, rope: 1 }, station: 'bench', xp: 30 },
-  { id: 'ironpick', cost: { iron: 3, stick: 2, rope: 1 }, station: 'bench', xp: 30 },
-  { id: 'sword', cost: { iron: 4, stick: 1, hide: 1 }, station: 'bench', xp: 40 },
-  { id: 'crystalspear', cost: { crystal: 3, iron: 2, rope: 1 }, station: 'bench', xp: 60 },
-  { id: 'iron', cost: { ore: 2, wood: 1 }, station: 'furnace', xp: 6 },
-  { id: 'meat', cost: { rawmeat: 1 }, station: 'fire', xp: 3 },
-  { id: 'fish', cost: { rawfish: 1 }, station: 'fire', xp: 3 },
-  { id: 'roastshroom', cost: { mushroom: 1 }, station: 'fire', xp: 2 },
-  { id: 'stew', cost: { rawmeat: 1, mushroom: 1, berries: 2 }, station: 'fire', xp: 8 }
-];
-
-/* place: 'free' anywhere, 'cell' snaps to the 3m build grid, 'edge' snaps to a grid edge */
-const BUILDS = [
-  { id: 'campfire', n: 'Campfire', e: ['🔥'], cost: { stone: 3, stick: 4 }, place: 'free', d: 'Warmth, light, cooking. Wolves stay away from a lit fire.' },
-  { id: 'shelter', n: 'Lean-to Shelter', e: ['⛺'], cost: { stick: 6, fibre: 4 }, place: 'free', d: 'Sleep here to skip the night. Keeps the rain off.' },
-  { id: 'bench', n: 'Workbench', e: ['🛠️', '🔨'], cost: { wood: 6, stone: 2 }, place: 'free', d: 'Unlocks bows, armour and iron tools.' },
-  { id: 'chest', n: 'Storage Chest', e: ['📦'], cost: { wood: 6, rope: 1 }, place: 'free', d: 'Keeps your things safe if you black out.' },
-  { id: 'floor', n: 'Wood Floor', e: ['🟫', '⬛'], cost: { wood: 2 }, place: 'cell', d: 'A flat floor. Start your cabin here.' },
-  { id: 'wall', n: 'Wood Wall', e: ['🧱'], cost: { wood: 3 }, place: 'edge', d: 'Keeps creatures out.' },
-  { id: 'door', n: 'Doorway', e: ['🚪'], cost: { wood: 3 }, place: 'edge', d: 'A wall with a door-sized gap.' },
-  { id: 'roof', n: 'Thatch Roof', e: ['🏠'], cost: { wood: 2, fibre: 2 }, place: 'cell', d: 'Shelter from rain and cold. Fires stay lit under it.' },
-  { id: 'bed', n: 'Bed', e: ['🛏️'], cost: { wood: 4, fibre: 3, hide: 2 }, place: 'free', d: 'The best sleep. You wake up here if you black out.' },
-  { id: 'spikes', n: 'Spike Barricade', e: ['🗡️'], cost: { stick: 6, wood: 1 }, place: 'free', d: 'Hurts any creature that runs into it.' },
-  { id: 'torchpost', n: 'Torch Post', e: ['🕯️'], cost: { stick: 3, fibre: 2 }, place: 'free', d: 'A standing torch. Lights your base and scares wolves.' },
-  { id: 'furnace', n: 'Furnace', e: ['🏭', '🧱'], cost: { stone: 10, wood: 2 }, place: 'free', d: 'Smelts iron ore into iron bars.' },
-  { id: 'collector', n: 'Rain Collector', e: ['🪣', '💧'], cost: { wood: 4, hide: 1 }, place: 'free', d: 'Fills with rain and dew. Fresh water at home.' },
-  { id: 'garden', n: 'Berry Garden', e: ['🌱'], cost: { wood: 3, berries: 6 }, place: 'free', d: 'Grows berries every day.' },
-  { id: 'flag', n: 'Camp Flag', e: ['🚩'], cost: { stick: 2, hide: 1 }, place: 'free', d: 'Marks your base on the map.' }
-];
-const BUILD_BY_ID = {}; BUILDS.forEach(b => BUILD_BY_ID[b.id] = b);
-
-/* creatures: speeds in m/s, senses in metres */
-const CREATURES = {
-  rabbit: { n: 'Rabbit', hp: 8, spd: 6.2, flee: 7, loot: { rawmeat: 1 }, xp: 5, passive: true, r: 0.35 },
-  deer: { n: 'Deer', hp: 28, spd: 7.0, flee: 10, loot: { rawmeat: 3, hide: 2 }, xp: 12, passive: true, r: 0.6 },
-  goat: { n: 'Mountain Goat', hp: 32, spd: 6.6, flee: 9, loot: { rawmeat: 2, hide: 1, fur: 1 }, xp: 12, passive: true, r: 0.55 },
-  wolf: { n: 'Wolf', hp: 42, spd: 6.5, dmg: 9, sense: 28, atk: 2.0, loot: { fur: 1, fang: 1 }, xp: 22, fearsFire: true, r: 0.55 },
-  snowwolf: { n: 'Snow Wolf', hp: 66, spd: 6.9, dmg: 13, sense: 30, atk: 2.0, loot: { fur: 2, fang: 1 }, xp: 32, fearsFire: true, r: 0.6 },
-  scorpion: { n: 'Giant Scorpion', hp: 34, spd: 3.7, dmg: 8, sense: 14, atk: 1.9, loot: { chitin: 1 }, xp: 16, r: 0.6 },
-  bear: { n: 'Bear', hp: 150, spd: 5.4, dmg: 19, sense: 15, atk: 2.4, loot: { fur: 3, rawmeat: 4 }, xp: 70, r: 0.95, leash: 40 },
-  grizzle: { n: 'Old Grizzle', boss: true, hp: 340, spd: 5.6, dmg: 21, sense: 24, atk: 2.9, loot: { fur: 5, rawmeat: 5, coil: 1 }, xp: 300, r: 1.4, leash: 48 },
-  duneking: { n: 'The Dune King', boss: true, hp: 460, spd: 4.6, dmg: 19, sense: 26, atk: 3.1, loot: { chitin: 8, battery: 1 }, xp: 400, r: 1.6, leash: 50 },
-  frostclaw: { n: 'Frostclaw', boss: true, hp: 640, spd: 5.9, dmg: 25, sense: 26, atk: 3.1, loot: { fur: 8, crystal: 2, antenna: 1 }, xp: 600, r: 1.5, leash: 46 }
-};
-
-/* ---- story text ---- */
-const NOTES = {
-  skipper: { t: 'Note from Skipper Jo', body: 'Sam!\n\nIf you find this, I made it to the lifeboat. The radio is smashed, so I\'m rowing for the mainland to get help. No ship can cross the reef until storm season ends — 100 DAYS from now.\n\nFind your Uncle Ray. His camp is NORTH-WEST of this cove. Look for his ORANGE WEATHER BALLOON above the trees.\n\nStay warm. Stay fed. Don\'t give up.\n\n— Skipper Jo' },
-  camp: { t: 'Ray\'s Field Journal', body: 'The lights on Frostpeak are back. Blue. Glowing right through the snow.\n\nScout barks at the mountain every night. I tried to radio the mainland but the tower is dead — three parts are missing.\n\nI\'m going up there to find out what those lights are. Sam arrives soon... I\'ll be back in time.\n\nI carved ARROWS in the trees. They lead to the Radio Tower on the big hill, in case anyone needs it.\n\nP.S. Scout hates being left behind. He will do anything for cooked meat.' },
-  arrow: { t: 'Carved in the bark', body: 'R ➜ TOWER\n\nKeep the big hill in front of you. The tower is right on top.' },
-  tower: { t: 'Tower Repair Log', body: 'Still dead. Three parts missing:\n\n1. POWER COIL — Old Grizzle, the giant bear, dragged my whole pack into his den in the WEST woods.\n\n2. BATTERY — the spare is in my locker at the Dust Flats outpost, to the EAST.\n\n3. ANTENNA — the blizzard ripped it off. It landed somewhere on the SUMMIT of Frostpeak, NORTH.\n\nGet all three and this tower will sing again.\n\n— Ray' },
-  pack: { t: 'Torn page from Ray\'s pack', body: '...and if I forget the locker code again: it\'s my lucky number, same as always. The year Dad taught me to fish.\n\nNINETY-FOUR.' },
-  outpost: { t: 'Outpost Notes', body: 'DESERT RULES\n\n1. The sun steals your water twice as fast. Carry a canteen.\n2. Cactus fruit is food AND drink.\n3. Scorpions are slow. Never stand still.\n4. The old mine south of here still has iron in the walls.\n5. Cold at night. Bring a torch.' },
-  locker: { t: 'Note inside the locker', body: 'The battery is GONE.\n\nClaw marks on the door. Giant tracks lead north to the Bone Yard. That monster scorpion — I call it the DUNE KING — collects anything that hums or shines.\n\nWhoever goes after it: take my bow. And water. Lots of water.\n\n— R.' },
-  oasis: { t: 'Message in a bottle', body: '(The paper is very, very old.)\n\n"We came for the glowing stones under the white mountain. The guardians of wood, sand and ice would not let us leave with them.\n\nTEN GOLDEN IDOLS we hid across this island. Return them all to the STONE CIRCLE and the island will give you its storm."' },
-  mine: { t: 'Mine Survey', body: 'Iron ore: plenty. Smelt it in a furnace.\n\nAn IRON PICKAXE is the only thing hard enough to cut Frostpeak crystal — or to dig through a cave-in.\n\n— R.' },
-  cabin: { t: 'Ray\'s Journal — Frostpeak', body: 'I found it.\n\nThe lights come from a cavern full of glowing crystals, right under the peak. The entrance is on the WEST face.\n\nI\'m going inside tomorrow with rope and a lamp. If the roof looks weak I\'ll turn back. Promise.\n\nThe big white bear at the summit — FROSTCLAW — has made a nest out of my antenna. I\'ll deal with that later.\n\nSpare furs are in the chest. This mountain will freeze you solid without a fur coat.' },
-  lake: { t: 'Ice Fishing Log', body: 'The biggest fish on the island live under this ice.\n\nDrop a line in the hole. Bring a fire. Mind the snow wolves.' },
-  summit: { t: 'Scratched into the mast', body: 'KESTREL ISLAND RELAY\nProperty of Ranger R. Rivera.\n\nIf found, please return to the Radio Tower.\n\n(Mind the bear.)' }
-};
-const DIALOGS = {
-  radio: ['The radio crackles... hisses... and then, a voice.', 'RAY: "...anyone? This is Ranger Ray Rivera. I\'m trapped in the crystal cavern under Frostpeak. Cave-in. I can\'t shift the rocks..."', 'You grab the microphone. "UNCLE RAY! It\'s SAM!"', 'RAY: "SAM?! You\'re ALIVE? You fixed the TOWER?! Ha!"', 'RAY: "Listen. West face of Frostpeak. You need an IRON PICKAXE to break through. And Sam... I\'m so proud of you."'],
-  rescue: ['The last rock crumbles. Blue light pours out of the cavern.', 'A man with a wild beard and a ranger hat stumbles out, blinking at the snow.', 'RAY: "Sam! LOOK at you! You crossed the whole island and climbed Frostpeak to find me?"', 'RAY: "I had three weeks of tinned beans and a lot of time to feel silly. You are the best thing I have ever seen."', 'RAY: "Meet me at the Radio Tower. Let\'s call home."'],
-  rayTowerNoRadio: ['RAY: "The tower still needs its three parts, kiddo. Power coil, battery, antenna. Get those and we can call home."'],
-  rayStay: ['RAY: "Then we stay. I\'ll keep the camp fed — you keep being a legend. The ship comes on Day 100."'],
-  rayIdle: ['RAY: "Day 100, kiddo. Until then, this island is ours. Have you found all ten golden idols yet?"']
-};
-const INTRO = [
-  ['THE STORM', 'You were on the supply boat <b>Petrel</b>, heading to spend the holidays with your Uncle Ray — the ranger of wild, faraway <b>Kestrel Island</b>.'],
-  ['THE REEF', 'Then the storm hit. The Petrel struck the reef in the dark. Skipper Jo threw you a life ring and shouted something you couldn\'t hear over the waves.'],
-  ['DAY ONE', 'You wake up on the sand. The boat is wrecked. Uncle Ray is nowhere to be seen.<br><br>You are <b>Sam Rivera</b>. You are eleven years old. And you are going to survive.']
-];
-const LANDMARKS = [
-  { id: 'cove', n: 'Shipwreck Cove', e: '⚓' }, { id: 'rayCamp', n: 'Uncle Ray\'s Camp', e: '🎈' }, { id: 'tower', n: 'Radio Tower', e: '📡' },
-  { id: 'mirror', n: 'Mirror Lake', e: '🐟' }, { id: 'den', n: 'Old Grizzle\'s Den', e: '🐻' }, { id: 'grotto', n: 'Hidden Grotto', e: '🌿' },
-  { id: 'wolfDen', n: 'Wolf Rocks', e: '🐺' }, { id: 'circle', n: 'Stone Circle', e: '🗿' }, { id: 'outpost', n: 'Dust Flats Outpost', e: '🏚️' },
-  { id: 'oasis', n: 'The Oasis', e: '🌴' }, { id: 'mine', n: 'Old Iron Mine', e: '⛏️' }, { id: 'boneyard', n: 'The Bone Yard', e: '🦂' },
-  { id: 'cabin', n: 'Ray\'s Cabin', e: '🛖' }, { id: 'icelake', n: 'Frozen Lake', e: '🧊' }, { id: 'crystal', n: 'Crystal Cavern', e: '💎' },
-  { id: 'summit', n: 'Frostpeak Summit', e: '🏔️' }
-];
-const BADGES = {
-  fire: ['🔥', 'Firestarter', 'Light your first campfire'], night: ['🌙', 'First Night', 'Sleep through a night'],
-  builder: ['🔨', 'Builder', 'Place 12 building pieces'], home: ['🏠', 'Home Sweet Home', 'Stand under your own roof'],
-  hunter: ['🏹', 'Hunter', 'Defeat 10 creatures'], angler: ['🎣', 'Angler', 'Catch 5 fish'], friend: ['🐕', 'Best Friend', 'Befriend Scout'],
-  iron: ['⚒️', 'Iron Age', 'Smelt your first iron bar'], moon: ['🌕', 'Wolf Moon Survivor', 'Survive a Wolf Moon'],
-  grizzle: ['🐻', 'Bear Wrestler', 'Defeat Old Grizzle'], duneking: ['🦂', 'King of the Dunes', 'Defeat the Dune King'], frostclaw: ['❄️', 'Frostbreaker', 'Defeat Frostclaw'],
-  explorer: ['🧭', 'Explorer', 'Discover every landmark'], treasure: ['💰', 'Treasure Hunter', 'Open all 10 treasure chests'], storm: ['⚡', 'Stormcaller', 'Earn the Storm Spear'],
-  radio: ['📡', 'On the Air', 'Repair the Radio Tower'], ray: ['🧔', 'Found Him', 'Rescue Uncle Ray'],
-  d10: ['🔟', '10 Days', 'Survive to Day 10'], d25: ['🏕️', '25 Days', 'Survive to Day 25'], d50: ['⭐', '50 Days', 'Survive to Day 50'], d100: ['👑', '100 Days', 'Survive to Day 100']
-};
-const TIPS = [
-  'Wolves are scared of a lit torch. Hold one at night and they will run.', 'Only COOKED food fills you up properly.', 'Build walls around your bed. Creatures can\'t break them.',
-  'Every 10th night is a Wolf Moon. Get your base ready!', 'Scout can sniff out buried treasure. Pet him once a day.', 'Rain puts out fires that don\'t have a roof over them.',
-  'A stew is the best meal on the island — raw meat, a mushroom and two berries.', 'Sprint with SHIFT. Jump with SPACE.', 'The map (M) fills in as you explore.',
-  'Boss charging at you? Step sideways!', 'Fill your canteen before crossing the Dust Flats.', 'You need a Fur Coat before climbing Frostpeak.',
-  'Store spare items in a chest. You drop your pack if you black out.', 'A Rain Collector gives you fresh water right at your base.'
-];
+// @moved-to: src/data/items.js
+// @moved-to: src/data/recipes.js
+// @moved-to: src/data/buildings.js
+// @moved-to: src/data/creatures.js
+// @moved-to: src/data/story.js
 
 /* =========================================================================
    04_nodes: trees, rocks, plants and pickups — placement, instancing, gathering

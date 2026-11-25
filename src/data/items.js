@@ -1,0 +1,63 @@
+// Every item: resources, food, tools and weapons, wearables, story items. Plus the hotbar slots and bare hands.
+// Content only: no three.js, no page, no game code (see MIGRATION.md, standing rule).
+// Moved verbatim from the original game script in Phase 4.1.
+
+// @moved-from: legacy.js
+const ITEMS = {
+  // resources
+  wood: { n: 'Wood', e: ['🪵', '🌳'], d: 'Logs from chopped trees. For building and fuel.' },
+  stick: { n: 'Stick', e: ['🥢'], d: 'Found on the ground and in chopped trees.' },
+  stone: { n: 'Stone', e: ['🪨', '🌑'], d: 'Loose stones, or mine boulders with a pickaxe.' },
+  flint: { n: 'Flint', e: ['🔺'], d: 'Sharp stone for spear tips and arrowheads.' },
+  fibre: { n: 'Fibre', e: ['🌾'], d: 'Tough plant fibre from reeds.' },
+  rope: { n: 'Rope', e: ['🪢', '➰'], d: 'Twisted fibre. Holds everything together.' },
+  hide: { n: 'Hide', e: ['🟫', '🔶'], d: 'Animal hide from deer and goats.' },
+  fur: { n: 'Fur', e: ['🧶'], d: 'Thick fur from wolves and bears. Very warm.' },
+  fang: { n: 'Fang', e: ['🦷'], d: 'A wolf fang. Looks fierce on a necklace.' },
+  chitin: { n: 'Scorpion Shell', e: ['🦂'], d: 'Hard plates from desert scorpions.' },
+  ore: { n: 'Iron Ore', e: ['🟤', '🧱'], d: 'Rusty rock. Smelt it in a furnace.' },
+  iron: { n: 'Iron Bar', e: ['🔩'], d: 'Smelted iron for the best tools.' },
+  crystal: { n: 'Glow Crystal', e: ['💎'], d: 'A glowing crystal from under Frostpeak.' },
+  // food
+  berries: { n: 'Berries', e: ['🫐', '🍇'], d: 'A small snack. Safe to eat raw.', food: { food: 6, water: 3 } },
+  mushroom: { n: 'Mushroom', e: ['🍄'], d: 'Edible raw, far better roasted.', food: { food: 5 }, cook: 'roastshroom' },
+  roastshroom: { n: 'Roast Mushroom', e: ['🍢'], d: 'Smoky and filling.', food: { food: 15 } },
+  rawmeat: { n: 'Raw Meat', e: ['🥩'], d: 'Cook it first! Raw meat makes you sick.', food: { food: 10, hp: -8 }, cook: 'meat' },
+  meat: { n: 'Cooked Meat', e: ['🍖'], d: 'Hot and delicious. Scout loves it too.', food: { food: 38 } },
+  rawfish: { n: 'Raw Fish', e: ['🐟'], d: 'Cook it on a fire.', food: { food: 8, hp: -5 }, cook: 'fish' },
+  fish: { n: 'Cooked Fish', e: ['🍤'], d: 'Flaky and tasty.', food: { food: 32, water: 4 } },
+  cactusfruit: { n: 'Cactus Fruit', e: ['🌵'], d: 'Juicy. Food and drink in one.', food: { food: 8, water: 18 } },
+  coconut: { n: 'Coconut', e: ['🥥'], d: 'Full of coconut water.', food: { food: 10, water: 26 } },
+  stew: { n: 'Hearty Stew', e: ['🍲'], d: 'The best meal on the island. Heals you too.', food: { food: 65, water: 20, hp: 25 } },
+  herb: { n: 'Healing Herb', e: ['🌺'], d: 'Chew it for a little health, or make a bandage.', food: { hp: 8 } },
+  bandage: { n: 'Bandage', e: ['🩹', '➕'], d: 'Restores a big chunk of health.', food: { hp: 40 } },
+  // tools and weapons
+  axe: { n: 'Stone Axe', e: ['🪓', '🔨'], d: 'Chops trees.', tool: { slot: 'axe', cls: 'axe', dmg: 12, reach: 2.9, power: 1, tier: 1 } },
+  ironaxe: { n: 'Iron Axe', e: ['🪓', '🔨'], d: 'Fells a tree in two swings.', bg: '#6d8aa8', tool: { slot: 'axe', cls: 'axe', dmg: 22, reach: 2.9, power: 3, tier: 2 } },
+  pick: { n: 'Stone Pickaxe', e: ['⛏️'], d: 'Breaks boulders and iron rock.', tool: { slot: 'pick', cls: 'pick', dmg: 10, reach: 2.9, power: 1, tier: 1 } },
+  ironpick: { n: 'Iron Pickaxe', e: ['⛏️'], d: 'Cuts crystal — and digs through cave-ins.', bg: '#6d8aa8', tool: { slot: 'pick', cls: 'pick', dmg: 16, reach: 2.9, power: 3, tier: 2 } },
+  spear: { n: 'Spear', e: ['🔱'], d: 'Long reach. Good for hunting.', tool: { slot: 'melee', cls: 'spear', dmg: 20, reach: 3.6, tier: 1 } },
+  sword: { n: 'Iron Sword', e: ['🗡️'], d: 'Fast and strong.', bg: '#6d8aa8', tool: { slot: 'melee', cls: 'sword', dmg: 34, reach: 3.1, tier: 2 } },
+  crystalspear: { n: 'Crystal Spear', e: ['🔱'], d: 'A glowing spear tipped with Frostpeak crystal.', bg: '#3fb6c9', tool: { slot: 'melee', cls: 'spear', dmg: 50, reach: 3.8, tier: 3, glow: 0x55e0ff } },
+  stormspear: { n: 'Storm Spear', e: ['⚡'], d: 'The island\'s gift. Every hit calls lightning.', bg: '#d9a520', tool: { slot: 'melee', cls: 'spear', dmg: 85, reach: 4, tier: 4, glow: 0xffe066, storm: true } },
+  bow: { n: 'Bow', e: ['🏹'], d: 'Shoots arrows. Left click to fire.', tool: { slot: 'bow', cls: 'bow', dmg: 28, tier: 1 } },
+  arrow: { n: 'Arrow', e: ['🪶', '🎯'], d: 'Ammo for the bow.' },
+  torch: { n: 'Torch', e: ['🔥'], d: 'Lights the dark and scares wolves away while you hold it.', tool: { slot: 'torch', cls: 'torch', dmg: 6, reach: 2.6, tier: 1 } },
+  rod: { n: 'Fishing Rod', e: ['🎣'], d: 'Aim at water and left click to cast.', tool: { slot: 'rod', cls: 'rod', dmg: 3, reach: 2.6, tier: 1 } },
+  canteen: { n: 'Canteen', e: ['🧴', '🍶'], d: 'Carries 5 drinks. Fill it at any water. Press G to drink.' },
+  // wearables (worn automatically)
+  vest: { n: 'Hide Vest', e: ['🦺'], d: 'Blocks a quarter of all damage.', wear: { armor: 0.25 } },
+  chitinarmor: { n: 'Shell Armour', e: ['🛡️'], d: 'Scorpion plates. Blocks 40% of damage.', bg: '#b0763a', wear: { armor: 0.4 } },
+  coat: { n: 'Fur Coat', e: ['🧥'], d: 'Keeps you warm on Frostpeak.', wear: { warm: 24 } },
+  necklace: { n: 'Fang Necklace', e: ['📿'], d: '+25% weapon damage. Wolves think twice.', wear: { dmg: 1.25 } },
+  // story
+  coil: { n: 'Power Coil', e: ['⚙️'], d: 'Radio part 1 of 3.', bg: '#b8860b', story: true },
+  battery: { n: 'Battery', e: ['🔋'], d: 'Radio part 2 of 3.', bg: '#b8860b', story: true },
+  antenna: { n: 'Antenna', e: ['📡'], d: 'Radio part 3 of 3.', bg: '#b8860b', story: true },
+  idol: { n: 'Golden Idol', e: ['🗿'], d: 'One of ten. They belong at the Stone Circle.', bg: '#d9a520', story: true }
+};
+const HOTBAR = ['hands', 'axe', 'pick', 'melee', 'bow', 'torch', 'rod'];
+const HANDS = { n: 'Hands', e: ['✋'], tool: { slot: 'hands', cls: 'hands', dmg: 4, reach: 2.5, power: 0, tier: 0 } };
+// @end-moved
+
+export { ITEMS, HOTBAR, HANDS };

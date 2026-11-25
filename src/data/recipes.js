@@ -1,0 +1,35 @@
+// Crafting recipes: what each item costs and where it can be made.
+// Content only: no three.js, no page, no game code (see MIGRATION.md, standing rule).
+// Moved verbatim from the original game script in Phase 4.1.
+
+// @moved-from: legacy.js
+
+/* station: null = craft anywhere, 'bench' = near a Workbench, 'furnace', 'fire' = near a lit campfire */
+const RECIPES = [
+  { id: 'axe', cost: { stick: 2, stone: 2, fibre: 1 }, xp: 10 },
+  { id: 'pick', cost: { stick: 2, stone: 3, fibre: 1 }, xp: 10 },
+  { id: 'spear', cost: { stick: 3, flint: 1, fibre: 1 }, xp: 10 },
+  { id: 'torch', cost: { stick: 2, fibre: 2 }, xp: 8 },
+  { id: 'rope', cost: { fibre: 3 }, xp: 3 },
+  { id: 'bandage', cost: { fibre: 2, herb: 1 }, xp: 4 },
+  { id: 'arrow', n: 4, cost: { stick: 2, flint: 1 }, xp: 4 },
+  { id: 'rod', cost: { stick: 3, rope: 1, flint: 1 }, xp: 10 },
+  { id: 'canteen', cost: { hide: 2, rope: 1 }, xp: 10 },
+  { id: 'bow', cost: { stick: 4, rope: 2 }, station: 'bench', xp: 15 },
+  { id: 'vest', cost: { hide: 4, rope: 1 }, station: 'bench', xp: 15 },
+  { id: 'coat', cost: { fur: 4, hide: 2, rope: 1 }, station: 'bench', xp: 25 },
+  { id: 'necklace', cost: { fang: 3, rope: 1 }, station: 'bench', xp: 15 },
+  { id: 'chitinarmor', cost: { chitin: 6, rope: 2 }, station: 'bench', xp: 30 },
+  { id: 'ironaxe', cost: { iron: 2, stick: 2, rope: 1 }, station: 'bench', xp: 30 },
+  { id: 'ironpick', cost: { iron: 3, stick: 2, rope: 1 }, station: 'bench', xp: 30 },
+  { id: 'sword', cost: { iron: 4, stick: 1, hide: 1 }, station: 'bench', xp: 40 },
+  { id: 'crystalspear', cost: { crystal: 3, iron: 2, rope: 1 }, station: 'bench', xp: 60 },
+  { id: 'iron', cost: { ore: 2, wood: 1 }, station: 'furnace', xp: 6 },
+  { id: 'meat', cost: { rawmeat: 1 }, station: 'fire', xp: 3 },
+  { id: 'fish', cost: { rawfish: 1 }, station: 'fire', xp: 3 },
+  { id: 'roastshroom', cost: { mushroom: 1 }, station: 'fire', xp: 2 },
+  { id: 'stew', cost: { rawmeat: 1, mushroom: 1, berries: 2 }, station: 'fire', xp: 8 }
+];
+// @end-moved
+
+export { RECIPES };
