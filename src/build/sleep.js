@@ -14,7 +14,8 @@ import { startRaid } from '../creatures/spawner.js';
 import { badge } from '../story/quests.js';
 import { hint, uiFade } from '../ui/hud.js';
 import { showMorningReport } from '../ui/panels.js';
-import { advanceTime, saveGame } from '../legacy.js';
+import { saveGame } from '../save.js';
+import { advanceTime } from '../game/time.js';
 
 // @moved-from: original
 

@@ -8,7 +8,8 @@ import { R } from '../state.js';
 import { setVolume } from '../audio/audio.js';
 import { GFXQ } from '../gfx/quality.js';
 import { saveSettings } from '../save.js';
-import { setQuality, touchHelpHTML } from '../legacy.js';
+import { setQuality } from '../boot.js';
+import { touchHelpHTML } from '../input/touch.js';
 
 // @moved-from: original
 function helpHTML() {

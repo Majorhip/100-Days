@@ -4,12 +4,53 @@
 // (tests/golden/compare-build.mjs); changes go through tests/golden/approved-edits.mjs.
 
 import './ui/settings.js';   // load order: runs after the previous part of the original script
-import { SAVE_KEY } from './core/constants.js';
-import { R } from './state.js';
+import { SAVE_KEY, SAVE_VERSION } from './core/constants.js';
+import { newGameState, G, R } from './state.js';
+import { applyNodeState } from './world/gathering.js';
+import { groundAt } from './player/movement.js';
+import { rebuildStructures } from './build/structures.js';
+import { CHESTS } from './story/props.js';
+import { refreshPack, spawnPackNote, placeRay } from './story/ray.js';
+import { fogArr, fogSave } from './ui/map.js';
 
-// @moved-from: original
+// @moved-from: original #settings
 function saveSettings() { try { localStorage.setItem(SAVE_KEY + '_set', JSON.stringify({ sens: R.sens, vol: R.vol, music: R.music, quality: R.quality, drag: R.dragLook, gfxV: 2, gfxManual: !!R.gfxManual })); } catch (e) { } }
 function loadSettings() { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY + '_set') || 'null'); if (s) { R.sens = s.sens || 1; R.vol = s.vol === undefined ? 0.7 : s.vol; R.music = s.music !== false; R.quality = s.gfxV ? (s.quality || 3) : (s.quality === 1 ? 1 : 3); R.gfxManual = !!s.gfxManual; R.dragLook = !!s.drag; } } catch (e) { } }
 // @end-moved
 
-export { saveSettings, loadSettings };
+// @moved-from: original #save
+
+/* ---------- save / load ---------- */
+function saveGame() {
+  if (!R.started) return;
+  fogSave(); G.p.y = Math.max(G.p.y, groundAt(G.p.x, G.p.z));
+  const json = JSON.stringify(G, (k, v) => k[0] === '_' ? undefined : v);
+  R.memSave = json;
+  try { localStorage.setItem(SAVE_KEY, json); } catch (e) { }
+  R.lastSave = R.t;
+}
+function readSave() {
+  let raw = null; try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { }
+  raw = raw || R.memSave; if (!raw) return null;
+  try { const s = JSON.parse(raw); if (!s || s.v !== SAVE_VERSION) return null; return s; } catch (e) { return null; }
+}
+function mergeSave(s) {
+  const d = newGameState();
+  if (s.scout && s.scout.friend && s.scout.fed === undefined) s.scout.fed = s.day;   // older saves: don't punish
+  for (const k in d) if (s[k] === undefined) s[k] = d[k];
+  for (const k of ['p', 'stats', 'scout']) for (const q in d[k]) if (s[k][q] === undefined) s[k][q] = d[k][q];
+  return s;
+}
+/** bring the already-built world in line with a loaded save */
+function applyWorldState() {
+  applyNodeState(); rebuildStructures(); refreshPack();
+  R.towerDish.visible = !!G.flags.radio; R.idolMesh.forEach(m => m.visible = !!G.flags.storm);
+  R.rockfall.visible = !G.flags.rayFree; R.rockfallCol.off = !!G.flags.rayFree;
+  for (const c of CHESTS) c.lid.rotation.x = G.chests[c.id] ? -1.9 : 0;
+  if (G.bossDead.grizzle) spawnPackNote();
+  placeRay(); R.fog = null; fogArr();
+  if (G.scout.friend) { R.scout.x = G.p.x + 2; R.scout.z = G.p.z + 2; }
+}
+// @end-moved
+
+export { saveSettings, loadSettings, saveGame, readSave, mergeSave, applyWorldState };

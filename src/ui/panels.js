@@ -24,7 +24,8 @@ import { badge, tipOnce } from '../story/quests.js';
 import { uiDirty, icon, esc, hint, toast } from './hud.js';
 import { renderMap } from './map.js';
 import { helpHTML, settingsHTML, bindSetting } from './settings.js';
-import { saveGame, tx, goFullscreen } from '../legacy.js';
+import { saveGame } from '../save.js';
+import { tx, goFullscreen } from '../input/touch.js';
 
 // @moved-from: original
 /* ---------- panels ---------- */

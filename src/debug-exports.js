@@ -61,4 +61,6 @@ export * from './ui/map.js';
 export * from './ui/panels.js';
 export * from './ui/settings.js';
 export * from './save.js';
-export * from './legacy.js';
+export * from './game/time.js';
+export * from './boot.js';
+export * from './input/touch.js';

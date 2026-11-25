@@ -4,19 +4,23 @@ What "the same game" means, recorded from `original/Stranded-100-Days-PC.html` (
 
 The scripts drive the Chrome installed on this PC through `puppeteer-core`, with a throwaway browser profile, so real saves are never touched.
 
+**Everything at once:** `npm run parity` builds the game and runs every check below against `dist/index.html`, screenshots included (about 3–4 minutes). `node tests/golden/parity.mjs <target>` runs them against any build, for example the dev server.
+
 | Check | Command | Pass |
 |---|---|---|
-| Built file | `npm run build`, then `node tests/golden/compare-build.mjs` | prints `PASS` (moved code puts back together into the original byte for byte; only imports, exports and comments added; markup and CSS same) |
-| Island | `node tests/golden/fingerprint.mjs [target]` | prints `PASS` (hash identical) |
+| Built file | `npm run build`, then `node tests/golden/compare-build.mjs` | prints `PASS`: the modules put back together give the original script byte for byte, apart from the ledger's listed edits; every name resolves; standing rule kept; markup and CSS same |
+| Island | `node tests/golden/fingerprint.mjs [target]` | prints `PASS` (hash identical, models included) |
 | Save | `node tests/golden/savecheck.mjs [target]` | prints `PASS` (fixture loads; day, inventory, structures match) |
-| New game | `node tests/golden/newgame.mjs [target]` | prints `PASS` (starts, walks, clock runs, zero page errors incl. shader errors) |
+| New game | `node tests/golden/newgame.mjs [target]` | prints `PASS` (starts at the cove, walks, clock runs, zero page errors incl. shader errors) |
+| Touch | `node tests/golden/touchcheck.mjs [target]` | prints `PASS` (as a touch phone: same detection, quality, buttons and start-up as the original) |
 | Graphics | `node tests/golden/screenshots.mjs [target]` | shots in `shots-latest/` match `shots/` by eye, differences inside the noise baseline |
 
 `--write` on `fingerprint.mjs` or `screenshots.mjs` re-records the golden files. Only do that from the original file.
 
 ## How the checks read the game
 The checks read the game's state through `window.__stranded`:
-- **From Phase 3 on**, this is the game's own read-only export: `src/main.js` sets it to the module namespace of `src/legacy.js`.
+- **From Phase 4 on**, this is the game's own read-only view: `src/main.js` sets it to `src/debug-exports.js`, which re-exports every module.
+- **In Phase 3** it was the module namespace of `src/legacy.js`.
 - **For the original single file**, which has no such export, `browser.mjs` adds an equivalent shim. It uses indirect `eval` at global scope, which can read a classic script's top-level `const`, `let` and functions.
 
 The output says which one was used.
@@ -67,23 +71,66 @@ Each view loads the fixture save, sets the position, time and weather, freezes t
 - **The fingerprint, save check and new-game check pass** on `dist/index.html` opened from disk and on `npm run dev`.
 - **Screenshots of the build differ from golden by 0.8–3.2**, inside the original's own 0.7–3.4, and match by eye.
 
-## Moving code in Phase 4: the marker rule
-Every block of code that leaves `src/legacy.js` (or any later file) is moved **verbatim**:
-- **In the file it leaves**, one line stays behind in its place: `// @moved-to: src/data/items.js`.
-- **In the new file**, the code sits between `// @moved-from: legacy.js` and `// @end-moved`. Outside those markers, a file may only contain comments, blank lines, `import … from '…';` and `export { … };`.
-- **`compare-build.mjs`** expands every marker (recursively), and the result must contain the original game script byte for byte. It prints every added code line.
+## Phase 4 result: the game split into 63 modules
+`src/legacy.js` is gone. Every line of the original game script now lives in one of 63 modules:
 
-It also enforces the standing rule: nothing in `src/data/` or `src/game/` may import three.js, mention `THREE`, or use `document.`, `window.`, `localStorage.`, `navigator.`, `R.` or `GFX.`.
+| Folder | What's there (original section) |
+|---|---|
+| `core/` | maths, seeded RNG, noise, constants, model-building helpers (00_core) |
+| `state.js` | `G` (saved), `R` (runtime), `newGameState`, `setG` |
+| `gfx/` | graphics core (02a), quality tiers, textures, terrain, water, sky, weather, fx, grass, wildlife, post-processing, per-frame update (02b) |
+| `audio/` | WebAudio synthesis (01) |
+| `world/` | terrain, collision, sky keys (02); nodes and gathering (04) |
+| `data/` | items, recipes, buildings, creatures, story text (03) |
+| `models/` | animals, people, tools, structures (05) |
+| `player/`, `game/survival.js`, `input/keyboard.js` | the player; the survival rules; keyboard and mouse (06) |
+| `build/` | structures, placement, use and fire, update, sleep (07) |
+| `creatures/` | creatures and AI, spawner and raids, Scout (08) |
+| `story/` | props and chests, landmarks, Ray, quests (09) |
+| `ui/` | `$`, HUD with its feedback, map, panels, settings (10) |
+| `save.js`, `game/time.js`, `boot.js` | saving and settings; time and weather rules; boot, title, loop (11) |
+| `input/touch.js` | phone and tablet support (12) |
 
-Tested by four deliberate bad edits, each caught with the exact line:
-1. wolf health 42→43
-2. an extra code line outside a moved block
-3. a deleted marker
-4. `document` inside data
+### How the split is made and checked
+- **Generated, not hand-split.** `tools/split/split.mjs` builds `src/` from three things: the original script; `tools/split/spec.mjs`, which says where each block goes and in which step; and the ledger. It works out each module's imports with a real JavaScript parser (acorn + eslint-scope), and it refuses a split that would break: if code in one module assigns to a variable declared in another, it stops. That's how the HUD stayed one file, because `updateHUD` clears a flag that `uiDirty` sets.
+- **Load order is the original order.** Each module's first line is `import './<previous module>.js';`, and `src/main.js` imports only the last module. ES modules run depth-first, so all start-up code runs in the original top-to-bottom order, even though modules call each other in circles. That matters because some start-up code draws from shared counters (the world RNG, the model colour jitter). The fingerprint's **models** part (252 meshes, 69,048 vertices, vertex colours, the final jitter counter) would change if the order ever changed. It passes in the built file and on the dev server, where the browser's own module loader does the work.
+- **`src/main.js` is the map.** It holds one `// @moved-to: <file>[#block]` line per block, in original order. `compare-build.mjs`:
+  - expands them and requires the original script byte for byte;
+  - parses all 63 modules and fails if any name isn't declared, imported or a browser global the original already used;
+  - enforces the standing rule.
+- **The ledger** (`tests/golden/approved-edits.mjs`) lists every change that isn't a plain move. There are five:
+  1. `'use strict';` dropped, because modules are always strict.
+  2. The `setG()` function added in `state.js` (MIGRATION.md §7).
+  3. `G = mergeSave(s)` → `setG(mergeSave(s))` on Continue.
+  4. `G = newGameState()` → `setG(newGameState())` on New Adventure.
+  5. `window.__stranded = ALL;` in `main.js`, for the checks.
 
-An edit that has to change code, not just move it (MIGRATION.md §7, e.g. `G = mergeSave(...)`), will fail this check on purpose. Such edits must be listed and explained when they come.
+  ES module imports are live bindings, so after `setG` every module sees the new `G`. The save check proves this for Continue, and the new-game check, which requires a start at the cove, proves it for New Adventure.
+- **Standing rule.** `src/game/` (survival, time) and `src/data/` must not use three.js or the page. In the two rules files, **11 lines** still read or write `R`, and their imports reach into `R`, the HUD, sound, saving, world and player code. Each one has a `// TODO(split)` note above it, as MIGRATION.md §4 asks, ready to untangle after the migration.
+- **Proof the checks bite:**
+  - changing a number (wolf health 42→43): caught
+  - an extra code line: caught
+  - a deleted marker: caught
+  - `document` inside data: caught
+  - a missing import (`setG`): caught by the name check, before it could become a runtime error on Continue
 
-## Phase 4.1 result: `03_data` → `src/data/`
-- `items.js` (`ITEMS`, `HOTBAR`, `HANDS`), `recipes.js`, `buildings.js` (`BUILDS`, `BUILD_BY_ID`), `creatures.js`, `story.js` (`NOTES`, `DIALOGS`, `INTRO`, `LANDMARKS`, `BADGES`, `TIPS`).
-- These constants depend on nothing else in the game and do nothing while loading, so loading them before the rest of the game (as imports) changes nothing.
-- `compare-build` passes. The fingerprint, save and new-game checks pass on `dist` and on the dev server. Screenshots differ from golden by 0.7–3.6, matching by eye; storm at 3.6 is rain-streak placement.
+### Departures from MIGRATION.md, and why
+- **`src/main.js` is the entry point and the map. Boot, title screen and game loop are in `src/boot.js`.** The plan put them in `main.js`, but the entry has to import only the last module for the load order to hold, and 12_touch runs after 11_main.
+- **Shaders are still JavaScript strings, not `.glsl` files.** Most are built with interpolation, such as `${GLSL_HGT}` or `${HALF.toFixed(1)}`, so moving them into raw `.glsl` files changes code; it isn't a move, and the byte-for-byte check can't prove it. Best done after Phase 5, with the screenshots as the guard.
+- **Saving and loading settings is in `save.js`**, as the plan's layout lists, although it sat in 10_ui in the original.
+- **The phone and tablet code stays** (MIGRATION.md §11 leaves that open). `touchcheck.mjs` covers it.
+
+### Changes to the checks during Phase 4
+- **Screenshots** hold `R.sleeping` during each capture. Lightning only strikes while `!R.sleeping`, and one capture on a slow run caught the white strike overlay. The camera and rendering carry on.
+- **The golden fingerprint was re-recorded from the original** to add the models part. All earlier parts kept their exact hashes.
+
+### Phase 4 results (each step committed and pushed)
+- Every step passed `compare-build`, island, save and new game on `dist/index.html`. Screenshots were taken at the visual steps (4.2, 4.3, 4.5, 4.6, 4.8, 4.9, 4.10, 4.12, 4.13, 4.14). The dev server was checked at 4.3, 4.6 and 4.14.
+- **One stall at 4.3.** On the dev server, the new-game check lost its browser page when Chrome's graphics process stalled on an overloaded PC (11 fps at the time). The same check had just passed on the built file, and it passed again on an immediate rerun.
+- **Final (4.14):**
+  - Every check passes on `dist` and on the dev server.
+  - Screenshots differ from golden by 1.3–4.7 on `dist` and 1.5–3.7 on dev. Storm is highest, at 4.7, the same as the original scored against itself under the same slow conditions (4.69).
+  - Built file: 775,097 bytes.
+
+### From here on
+`tools/split/` regenerates `src/` from the original, so it's only for the migration. Once modules are edited by hand (Phase 5 onwards, or any later feature), stop running `split.mjs`. The byte-for-byte part of `compare-build.mjs` then becomes the record of what the migration did: retire it, or grow the ledger, with a reason for each entry. The island, save, new-game, touch and screenshot checks keep their value after the migration.

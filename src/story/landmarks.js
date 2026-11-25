@@ -25,7 +25,7 @@ import { refreshPack, placeRay, talkToRay } from './ray.js';
 import { badge, tipOnce } from './quests.js';
 import { hint, toast, banner, uiFlash } from '../ui/hud.js';
 import { openPanel, showDialog } from '../ui/panels.js';
-import { saveGame } from '../legacy.js';
+import { saveGame } from '../save.js';
 
 // @moved-from: original
 

@@ -17,7 +17,7 @@ import { targetPrompt, key } from '../player/targeting.js';
 import { selectSlot } from '../input/keyboard.js';
 import { drawMinimap } from './map.js';
 import { openPanel, renderPanel } from './panels.js';
-import { tx } from '../legacy.js';
+import { tx } from '../input/touch.js';
 
 // @moved-from: original
 

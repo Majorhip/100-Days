@@ -15,7 +15,7 @@ import { updateLife } from './life.js';
 import { PP, gradeUpdate } from './post.js';
 import { toast } from '../ui/hud.js';
 import { saveSettings } from '../save.js';
-import { setQuality } from '../legacy.js';
+import { setQuality } from '../boot.js';
 
 // @moved-from: original
 

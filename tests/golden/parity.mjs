@@ -29,6 +29,7 @@ if (/dist[\\/]index\.html$/.test(target)) ok = run('build', 'compare-build.mjs')
 ok = run('island', 'fingerprint.mjs', [target]) && ok;
 ok = run('save', 'savecheck.mjs', [target]) && ok;
 ok = run('new game', 'newgame.mjs', [target]) && ok;
+ok = run('touch', 'touchcheck.mjs', [target]) && ok;
 if (argv.includes('--shots')) ok = run('screenshots', 'screenshots.mjs', [target]) && ok;
 console.log(ok ? `\nALL PASS (${target})` : `\nSOME CHECKS FAILED (${target})`);
 process.exit(ok ? 0 : 1);

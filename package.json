@@ -12,6 +12,7 @@
     "golden:save": "node tests/golden/savecheck.mjs",
     "golden:shots": "node tests/golden/screenshots.mjs",
     "golden:newgame": "node tests/golden/newgame.mjs",
+    "golden:touch": "node tests/golden/touchcheck.mjs",
     "golden:build": "node tests/golden/compare-build.mjs",
     "parity": "vite build && node tests/golden/parity.mjs dist/index.html --shots",
     "split": "node tools/split/split.mjs"

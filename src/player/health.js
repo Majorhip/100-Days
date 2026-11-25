@@ -15,7 +15,8 @@ import { endRaid } from '../creatures/spawner.js';
 import { refreshPack } from '../story/ray.js';
 import { uiDirty, hint, toast, uiDamage, uiFade } from '../ui/hud.js';
 import { showMessage } from '../ui/panels.js';
-import { onNewDay, saveGame } from '../legacy.js';
+import { saveGame } from '../save.js';
+import { onNewDay } from '../game/time.js';
 
 // @moved-from: original
 function hurtPlayer(dmg, src) {

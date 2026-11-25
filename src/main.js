@@ -3,7 +3,7 @@
 // in its original order; tests/golden/compare-build.mjs expands these markers and checks
 // the result is the original script, byte for byte.
 
-import './legacy.js';   // the last part of the chain: loading it runs the whole game in original order
+import './input/touch.js';   // the last part of the chain: loading it runs the whole game in original order
 import * as ALL from './debug-exports.js';
 
 // Read-only view for the parity checks in tests/golden. A module namespace cannot be
@@ -70,5 +70,8 @@ window.__stranded = ALL;
 // @moved-to: src/ui/map.js
 // @moved-to: src/ui/panels.js
 // @moved-to: src/ui/settings.js
-// @moved-to: src/save.js
-// @moved-to: src/legacy.js
+// @moved-to: src/save.js#settings
+// @moved-to: src/game/time.js
+// @moved-to: src/save.js#save
+// @moved-to: src/boot.js
+// @moved-to: src/input/touch.js
