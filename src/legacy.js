@@ -15,6 +15,9 @@ import { box, cyl, cone, ico, sph, part, merge } from './core/geometry.js';
 import { GU, GLSL_HGT, GLSL_CLOUDSH, gfxInject, litMat, windShadow, MAT_VC, MAT_VC_TOOL, MAT_VC_DS, MAT_GLOW, vcMesh } from './gfx/core.js';
 import { newGameState, G, R, setG } from './state.js';
 import { AU, audioInit, sfx, audioAmbient, setVolume } from './audio/audio.js';
+import { LAKES, SITES, biomeW, biomeAt, siteH, finalH, HGT, heightAt, slopeAt, shorePoint, inSite, terrainColor } from './world/terrain.js';
+import { SH_CELL, SH, shKey, shCell, addCollider, removeCollider, collide } from './world/collision.js';
+import { SKY_KEYS, _c1, _c2, nightAmount, puff } from './world/sky.js';
 import { ITEMS, HOTBAR, HANDS } from './data/items.js';
 import { RECIPES } from './data/recipes.js';
 import { BUILD_BY_ID } from './data/buildings.js';
@@ -22,179 +25,6 @@ import { CREATURES } from './data/creatures.js';
 import { NOTES, DIALOGS, INTRO, LANDMARKS, BADGES, TIPS } from './data/story.js';
 
 // @moved-from: original #1
-
-/* =========================================================================
-   02_world: Kestrel Island — terrain, three biomes, water, sky, weather FX
-   ========================================================================= */
-const PEAK = { x: -20, z: -190 };
-const LAKES = [
-  { id: 'mirror', x: 45, z: 125, r: 30, d: 3.2 },
-  { id: 'pond', x: -42, z: 168, r: 11, d: 2.2 },
-  { id: 'oasis', x: 175, z: -25, r: 16, d: 2.6 }
-];
-/* flattened building sites for landmarks: h = forced height (optional) */
-const SITES = {
-  rayCamp: { x: -72, z: 150, r: 12 },
-  tower: { x: 0, z: 25, r: 9 },
-  den: { x: -175, z: 45, r: 15 },
-  grotto: { x: -205, z: 148, r: 7 },
-  wolfDen: { x: -122, z: 205, r: 9 },
-  circle: { x: 148, z: 168, r: 11 },
-  outpost: { x: 195, z: 60, r: 10 },
-  mine: { x: 214, z: 96, r: 10 },
-  boneyard: { x: 222, z: -72, r: 18 },
-  cabin: { x: -95, z: -118, r: 10 },
-  icelake: { x: 72, z: -135, r: 25, ice: true },
-  crystal: { x: -100, z: -186, r: 9 },
-  summit: { x: PEAK.x, z: PEAK.z, r: 16 },
-  stump: { x: 78, z: 206, r: 5 },
-  cave2: { x: 95, z: 40, r: 8 }
-};
-function biomeW(x, z) {
-  const n1 = fbm(x * 0.006 + 31, z * 0.006 + 7, 3), n2 = fbm(x * 0.006 + 5, z * 0.006 + 91, 3);
-  const snow = sstep(-62, -112, z + (n1 - 0.5) * 50);
-  const desert = sstep(92, 142, x + (n2 - 0.5) * 60) * (1 - snow);
-  return { snow, desert, forest: Math.max(0, 1 - snow - desert) };
-}
-function biomeAt(x, z) { const w = biomeW(x, z); return w.snow > 0.5 ? 'snow' : w.desert > 0.5 ? 'desert' : 'forest'; }
-function shoreR(x, z) {
-  const a = Math.atan2(z, x);
-  return 292 + (fbm(Math.cos(a) * 1.6 + 3, Math.sin(a) * 1.6 + 3, 3) - 0.5) * 64;
-}
-function rawH(x, z) {
-  const d = Math.hypot(x, z), edge = shoreR(x, z) - d;
-  if (edge < 0) return Math.max(-7, edge * 0.14);
-  const w = biomeW(x, z);
-  const hill = 13 * Math.exp(-(((x - 0) ** 2 + (z - 25) ** 2) / (42 * 42)));
-  const m = fbm(x * 0.017 + 200, z * 0.017 + 100, 2);
-  const mesa = sstep(0.60, 0.66, m) * 9;
-  const dp = Math.hypot(x - PEAK.x, z - PEAK.z);
-  const peak = dp < 150 ? 62 * Math.pow(1 - dp / 150, 1.55) : 0;
-  const base = 2.0
-    + w.forest * (fbm(x * 0.012, z * 0.012, 4) * 13 + hill)
-    + w.desert * (1.5 + fbm(x * 0.022 + 50, z * 0.022, 2) * 3.2 + mesa)
-    + w.snow * (5 + fbm(x * 0.014, z * 0.014 + 40, 4) * 12 + peak);
-  return base * sstep(6, 52, edge) + Math.min(edge, 9) * 0.19;
-}
-function siteH(s) { if (s.h === undefined) s.h = Math.max(2.8, rawH(s.x, s.z)); return s.h; }
-function finalH(x, z) {
-  let h = rawH(x, z);
-  for (const L of LAKES) {
-    const d = Math.hypot(x - L.x, z - L.z);
-    if (d < L.r * 2.6) { const t = sstep(L.r * 2.6, L.r * 0.55, d); h = lerp(h, lerp(1.6, -L.d, sstep(L.r * 1.05, L.r * 0.55, d)), t); }
-  }
-  for (const k in SITES) {
-    const s = SITES[k], d = Math.hypot(x - s.x, z - s.z);
-    if (d < s.r * 1.9) h = lerp(h, siteH(s), sstep(s.r * 1.9, s.r, d));
-  }
-  return h;
-}
-const HGT = new Float32Array((GRID + 1) * (GRID + 1));
-function heightAt(x, z) {
-  let fx = clamp((x + HALF) / CELL, 0, GRID - 0.001), fz = clamp((z + HALF) / CELL, 0, GRID - 0.001);
-  const ix = fx | 0, iz = fz | 0; fx -= ix; fz -= iz;
-  const i = iz * (GRID + 1) + ix, h00 = HGT[i], h10 = HGT[i + 1], h01 = HGT[i + GRID + 1], h11 = HGT[i + GRID + 2];
-  return fx + fz <= 1 ? h00 + (h10 - h00) * fx + (h01 - h00) * fz : h11 + (h01 - h11) * (1 - fx) + (h10 - h11) * (1 - fz);
-}
-function slopeAt(x, z) { return Math.hypot(heightAt(x + 1, z) - heightAt(x - 1, z), heightAt(x, z + 1) - heightAt(x, z - 1)) / 2; }
-/** walk from the sea toward the island centre along an angle and return the first dry spot */
-function shorePoint(ang, inland) {
-  for (let d = 340; d > 40; d -= 1.5) {
-    const x = Math.cos(ang) * d, z = Math.sin(ang) * d;
-    if (heightAt(x, z) > 0.9) { const dd = d - (inland || 0); return { x: Math.cos(ang) * dd, z: Math.sin(ang) * dd }; }
-  }
-  return { x: 0, z: 0 };
-}
-function inSite(x, z, pad) {
-  for (const k in SITES) { const s = SITES[k]; if (Math.hypot(x - s.x, z - s.z) < s.r + (pad || 0)) return k; }
-  return null;
-}
-
-/* ---------- terrain mesh ---------- */
-function terrainColor(x, z, h, ny, out) {
-  const w = biomeW(x, z), n = fbm(x * 0.05 + 9, z * 0.05 + 9, 2);
-  let r, g, b;
-  const fr = 0.30 + n * 0.10, fg = 0.52 + n * 0.12, fb = 0.22 + n * 0.05;      // forest grass
-  const dr = 0.86 - n * 0.08, dg = 0.66 - n * 0.08, db = 0.40 - n * 0.06;      // desert sand
-  const sr = 0.90 + n * 0.06, sg = 0.93 + n * 0.05, sb = 0.98;                 // snow
-  r = fr * w.forest + dr * w.desert + sr * w.snow; g = fg * w.forest + dg * w.desert + sg * w.snow; b = fb * w.forest + db * w.desert + sb * w.snow;
-  if (w.desert > 0.5 && h > 9.5 && ny > 0.85) { r = 0.74; g = 0.44; b = 0.27; }                 // mesa tops
-  if (ny < 0.80) {                                                                              // cliffs
-    const t = sstep(0.80, 0.62, ny);
-    const cr = 0.46 * w.forest + 0.62 * w.desert + 0.47 * w.snow, cg = 0.43 * w.forest + 0.37 * w.desert + 0.51 * w.snow, cb = 0.38 * w.forest + 0.25 * w.desert + 0.58 * w.snow;
-    r = lerp(r, cr, t); g = lerp(g, cg, t); b = lerp(b, cb, t);
-  }
-  if (h < 1.9 && w.snow < 0.6) { const t = sstep(1.9, 1.1, h); r = lerp(r, 0.88, t); g = lerp(g, 0.80, t); b = lerp(b, 0.58, t); }   // beach
-  if (h < 0.0) { const t = sstep(0, -1.5, h); r = lerp(r, 0.30, t); g = lerp(g, 0.34, t); b = lerp(b, 0.30, t); }
-  const ic = SITES.icelake; if (Math.hypot(x - ic.x, z - ic.z) < ic.r * 0.97) { r = 0.66 + n * 0.1; g = 0.86; b = 0.95; }
-  out[0] = r; out[1] = g; out[2] = b;
-}
-/* ---------- spatial hash for colliders and nodes ---------- */
-const SH_CELL = 8, SH = new Map();
-const shKey = (x, z) => (Math.floor(x / SH_CELL) + 512) * 1024 + (Math.floor(z / SH_CELL) + 512);
-function shCell(x, z) { const k = shKey(x, z); let c = SH.get(k); if (!c) { c = { cols: [], nodes: [] }; SH.set(k, c); } return c; }
-/** collider: circle {x,z,r} or box {x,z,hw,hd}; top = optional height (jump-over) */
-function addCollider(c) {
-  const ext = c.r !== undefined ? c.r : Math.max(c.hw, c.hd); c.cells = [];
-  for (let x = c.x - ext; x <= c.x + ext + SH_CELL; x += SH_CELL) for (let z = c.z - ext; z <= c.z + ext + SH_CELL; z += SH_CELL) {
-    const cell = shCell(Math.min(x, c.x + ext), Math.min(z, c.z + ext));
-    if (!cell.cols.includes(c)) { cell.cols.push(c); c.cells.push(cell); }
-  }
-  return c;
-}
-function removeCollider(c) { if (!c || !c.cells) return; for (const cell of c.cells) { const i = cell.cols.indexOf(c); if (i >= 0) cell.cols.splice(i, 1); } c.cells = null; }
-/** push a circle (x,z,rad) out of all nearby colliders; returns [x,z] */
-const _col = [0, 0];
-function collide(x, z, rad) {
-  for (let pass = 0; pass < 2; pass++) {
-    for (let gx = -1; gx <= 1; gx++) for (let gz = -1; gz <= 1; gz++) {
-      const cell = SH.get(shKey(x + gx * SH_CELL, z + gz * SH_CELL)); if (!cell) continue;
-      for (const c of cell.cols) {
-        if (c.off) continue;
-        if (c.r !== undefined) {
-          const dx = x - c.x, dz = z - c.z, d = Math.hypot(dx, dz), m = c.r + rad;
-          if (d < m) { if (d < 0.0001) { x += m; } else { x = c.x + dx / d * m; z = c.z + dz / d * m; } }
-        } else {
-          const nx = clamp(x, c.x - c.hw, c.x + c.hw), nz = clamp(z, c.z - c.hd, c.z + c.hd);
-          let dx = x - nx, dz = z - nz; const d = Math.hypot(dx, dz);
-          if (d < rad) {
-            if (d < 0.0001) {                       // centre is inside the box: push out the nearest side
-              const px = c.hw - Math.abs(x - c.x), pz = c.hd - Math.abs(z - c.z);
-              if (px < pz) x = c.x + Math.sign(x - c.x || 1) * (c.hw + rad); else z = c.z + Math.sign(z - c.z || 1) * (c.hd + rad);
-            } else { x = nx + dx / d * rad; z = nz + dz / d * rad; }
-          }
-        }
-      }
-    }
-  }
-  _col[0] = x; _col[1] = z; return _col;
-}
-
-/* ---------- sky, sun, moon, stars, lights ---------- */
-const SKY_KEYS = [  // hour, top, horizon, sun colour, sun intensity, ambient intensity
-  [0, 0x060b22, 0x16233f, 0x8fa8ff, 0.34, 0.42],
-  [4.5, 0x0a1230, 0x1c2c4f, 0x8fa8ff, 0.34, 0.42],
-  [5.8, 0x35519a, 0xff9d66, 0xffb070, 0.55, 0.50],
-  [7.2, 0x4d9be6, 0xffe1b0, 0xfff0d0, 0.95, 0.66],
-  [12, 0x3b8ee6, 0xc6e6ff, 0xffffff, 1.08, 0.74],
-  [17, 0x3f8fe0, 0xd6e3f0, 0xfff2d8, 1.0, 0.70],
-  [18.8, 0x4a4f9c, 0xff8448, 0xff9a55, 0.7, 0.56],
-  [20.2, 0x141c48, 0x4a3560, 0x9aa8ff, 0.36, 0.44],
-  [21.5, 0x060b22, 0x16233f, 0x8fa8ff, 0.34, 0.42],
-  [24, 0x060b22, 0x16233f, 0x8fa8ff, 0.34, 0.42]
-];
-const _c1 = new THREE.Color(), _c2 = new THREE.Color();
-function nightAmount() { const h = G.hour; return h < 5 ? 1 : h < 7 ? 1 - (h - 5) / 2 : h < 18.5 ? 0 : h < 20.5 ? (h - 18.5) / 2 : 1; }
-function puff(x, y, z, color, n = 8, o = {}) {
-  for (let i = 0; i < n; i++) {
-    const p = R.fxPool.find(q => q.life <= 0); if (!p) return;
-    const sp = o.speed === undefined ? 2.2 : o.speed;
-    p.m.position.set(x + rnd(-0.3, 0.3), y + rnd(-0.2, 0.3), z + rnd(-0.3, 0.3)); p.m.material.color.set(color); p.m.material.opacity = 1;
-    p.vx = rnd(-1, 1) * sp; p.vz = rnd(-1, 1) * sp; p.vy = rnd(0.4, 1.6) * (o.up === undefined ? 1.6 : o.up); p.g = o.g === undefined ? 3 : o.g;
-    p.max = p.life = rnd(0.45, 0.9) * (o.life || 1); p.s0 = (o.size || 0.3) * rnd(0.7, 1.3); p.s1 = p.s0 * (o.grow === undefined ? 2.2 : o.grow);
-    p.m.scale.setScalar(p.s0); p.m.visible = true;
-  }
-}
 /* =========================================================================
    02b_gfx: the graphics engine — textures, terrain, water, sky, grass,
    flames, particles, wildlife flourishes, post-processing, quality tiers.
@@ -3433,4 +3263,4 @@ function touchHelpHTML() {
 }
 // @end-moved
 
-export { PEAK, LAKES, SITES, biomeW, biomeAt, shoreR, rawH, siteH, finalH, HGT, heightAt, slopeAt, shorePoint, inSite, terrainColor, SH_CELL, SH, shKey, shCell, addCollider, removeCollider, _col, collide, SKY_KEYS, _c1, _c2, nightAmount, puff, GFXQ, makeNoiseTex, makeSoftTex, GFX, terrainMaterial, buildTerrain, gfxBakeTerrain, H2, gfxStampGrass, waterMaterial, buildSky, _sunDir, _shR, _shU, _shC, _UP, updateSky, rainField, pointField, buildPrecip, makeBolt, updatePrecip, buildFx, updateFx, FLAME_GEO, FLAME_MAT, flameMat, flameGroup, gfxBuildGrass, NODE_WIND, gfxNodeMat, buildLife, _lm, _lq, _le, _lp, _ls, updateLife, PP, PP_VS, ppMat, ppInit, ppResize, ppPass, _sp, _cf, gfxRender, _gt, _gl, _gv, gradeUpdate, gfxLightPool, gfxUpdate, NT, NODES, NODE_MESH, _white, nodeGeos, placeNodes, _nm, _nq, _np, _ns, _ne, setNodeMatrix, buildGrass, nodeNear, dropsOf, depleteNode, restoreNode, respawnNodes, applyNodeState, pickNode, hitNode, nodeNeeds, UNIT_BOX, lam, bx, quadruped, scorpionModel, ANIMALS, humanModel, toolModel, WOODC, planks, structureModel, inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP, ambientTemp, SURV, survivalStep, hurtPlayer, blackout, eat, quickEat, drinkCanteen, drinkHere, FLOORS, groundAt, _fwd, updatePlayer, refreshViewModel, swingNow, updateViewModel, POIS, findTarget, targetPrompt, TKEY, key, primaryAction, interact, resolveSwing, shootBow, updateArrows, startFishing, tryCast, stopFishing, fishClick, updateFishing, setupInput, lockPointer, selectSlot, STRUCT, ROOFS, WALLS, cellKey, structColliders, spawnStructure, removeStructure, rebuildStructures, startBuild, cancelBuild, aimPoint, updateBuildGhost, placeBuild, tryDismantle, isRoofed, structPrompt, useStructure, lightFire, douse, addFuel, structuresStep, structuresNewDay, nearestFlame, updateStructures, trySleep, spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };
+export { GFXQ, makeNoiseTex, makeSoftTex, GFX, terrainMaterial, buildTerrain, gfxBakeTerrain, H2, gfxStampGrass, waterMaterial, buildSky, _sunDir, _shR, _shU, _shC, _UP, updateSky, rainField, pointField, buildPrecip, makeBolt, updatePrecip, buildFx, updateFx, FLAME_GEO, FLAME_MAT, flameMat, flameGroup, gfxBuildGrass, NODE_WIND, gfxNodeMat, buildLife, _lm, _lq, _le, _lp, _ls, updateLife, PP, PP_VS, ppMat, ppInit, ppResize, ppPass, _sp, _cf, gfxRender, _gt, _gl, _gv, gradeUpdate, gfxLightPool, gfxUpdate, NT, NODES, NODE_MESH, _white, nodeGeos, placeNodes, _nm, _nq, _np, _ns, _ne, setNodeMatrix, buildGrass, nodeNear, dropsOf, depleteNode, restoreNode, respawnNodes, applyNodeState, pickNode, hitNode, nodeNeeds, UNIT_BOX, lam, bx, quadruped, scorpionModel, ANIMALS, humanModel, toolModel, WOODC, planks, structureModel, inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP, ambientTemp, SURV, survivalStep, hurtPlayer, blackout, eat, quickEat, drinkCanteen, drinkHere, FLOORS, groundAt, _fwd, updatePlayer, refreshViewModel, swingNow, updateViewModel, POIS, findTarget, targetPrompt, TKEY, key, primaryAction, interact, resolveSwing, shootBow, updateArrows, startFishing, tryCast, stopFishing, fishClick, updateFishing, setupInput, lockPointer, selectSlot, STRUCT, ROOFS, WALLS, cellKey, structColliders, spawnStructure, removeStructure, rebuildStructures, startBuild, cancelBuild, aimPoint, updateBuildGhost, placeBuild, tryDismantle, isRoofed, structPrompt, useStructure, lightFire, douse, addFuel, structuresStep, structuresNewDay, nearestFlame, updateStructures, trySleep, spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };

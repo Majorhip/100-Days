@@ -6,7 +6,7 @@
 import '../state.js';   // load order: runs after the previous part of the original script
 import { rnd, pick } from '../core/math.js';
 import { G, R } from '../state.js';
-import { nightAmount } from '../legacy.js';
+import { nightAmount } from '../world/sky.js';
 
 // @moved-from: original
 

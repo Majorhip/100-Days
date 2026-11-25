@@ -20,6 +20,9 @@ window.__stranded = ALL;
 // @moved-to: src/gfx/core.js
 // @moved-to: src/state.js
 // @moved-to: src/audio/audio.js
+// @moved-to: src/world/terrain.js
+// @moved-to: src/world/collision.js
+// @moved-to: src/world/sky.js
 // @moved-to: src/legacy.js#1
 // @moved-to: src/data/items.js
 // @moved-to: src/data/recipes.js
