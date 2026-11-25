@@ -4,14 +4,14 @@
 // The code between @moved-from and @end-moved must stay byte-identical to the original
 // (tests/golden/compare-build.mjs); changes go through tests/golden/approved-edits.mjs.
 
-import './world/gathering.js';   // load order: runs after the previous part of the original script
+import './models/structures.js';   // load order: runs after the previous part of the original script
 import * as THREE from 'three';
 import { TAU, clamp, lerp, dist2, rnd, pick, angDiff } from './core/math.js';
 import { $ } from './ui/dom.js';
 import { hash2 } from './core/noise.js';
 import { HOUR_SECONDS, TICK, SAVE_KEY, SAVE_VERSION, WORLD, HALF, BUILD_CELL } from './core/constants.js';
 import { box, cyl, cone, ico, sph, part, merge } from './core/geometry.js';
-import { GU, litMat, MAT_VC, MAT_VC_TOOL, MAT_VC_DS, MAT_GLOW, vcMesh } from './gfx/core.js';
+import { GU, MAT_VC, MAT_VC_TOOL, MAT_GLOW, vcMesh } from './gfx/core.js';
 import { newGameState, G, R, setG } from './state.js';
 import { AU, audioInit, sfx, audioAmbient, setVolume } from './audio/audio.js';
 import { LAKES, SITES, biomeW, biomeAt, siteH, heightAt, slopeAt, shorePoint, inSite, terrainColor } from './world/terrain.js';
@@ -22,7 +22,7 @@ import { GFX } from './gfx/textures.js';
 import { buildTerrain, gfxBakeTerrain } from './gfx/terrain.js';
 import { buildSky, updateSky } from './gfx/sky.js';
 import { buildPrecip, updatePrecip } from './gfx/weather.js';
-import { buildFx, updateFx, flameGroup } from './gfx/fx.js';
+import { buildFx, updateFx } from './gfx/fx.js';
 import { gfxBuildGrass } from './gfx/grass.js';
 import { buildLife } from './gfx/life.js';
 import { PP, ppInit, ppResize, gfxRender } from './gfx/post.js';
@@ -34,158 +34,12 @@ import { CREATURES } from './data/creatures.js';
 import { NOTES, DIALOGS, INTRO, LANDMARKS, BADGES, TIPS } from './data/story.js';
 import { NT, NODES, placeNodes } from './world/nodes.js';
 import { nodeNear, respawnNodes, applyNodeState, pickNode, hitNode, nodeNeeds } from './world/gathering.js';
+import { UNIT_BOX, ANIMALS } from './models/animals.js';
+import { humanModel } from './models/people.js';
+import { toolModel } from './models/tools.js';
+import { planks, structureModel } from './models/structures.js';
 
 // @moved-from: original
-
-/* =========================================================================
-   05_models: procedural low-poly models — animals, people, tools, structures
-   ========================================================================= */
-const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
-const lam = c => litMat({ color: c });
-function bx(parent, mat, w, h, d, x, y, z, rx, ry, rz) {
-  const m = new THREE.Mesh(UNIT_BOX, mat); m.scale.set(w, h, d); m.position.set(x, y, z);
-  if (rx || ry || rz) m.rotation.set(rx || 0, ry || 0, rz || 0);
-  m.castShadow = true; parent.add(m); return m;
-}
-/** four-legged animal. forward is +Z, origin on the ground. */
-function quadruped(o) {
-  const g = new THREE.Group(), M = { main: lam(o.c), dark: lam(o.c2 || o.c), light: lam(o.c3 || o.c), eye: new THREE.MeshBasicMaterial({ color: o.eye || 0x111111 }) };
-  const [bw, bh, bl] = o.body, L = o.leg, T = o.legT, by = L + bh / 2;
-  const body = bx(g, M.main, bw, bh, bl, 0, by, 0);
-  if (o.back) bx(g, M.dark, bw * 0.7, bh * 0.25, bl * 0.9, 0, by + bh * 0.45, -bl * 0.03);
-  if (o.belly) bx(g, M.light, bw * 0.8, bh * 0.3, bl * 0.8, 0, by - bh * 0.4, 0);
-  if (o.hump) bx(g, M.dark, bw * 0.8, bh * 0.4, bl * 0.4, 0, by + bh * 0.55, bl * 0.2);
-  const legs = [];
-  for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
-    const p = new THREE.Group(); p.position.set(sx * (bw / 2 - T / 2), L, sz * (bl / 2 - T * 0.7)); g.add(p);
-    bx(p, M.dark, T, L, T, 0, -L / 2, 0); legs.push(p);
-  }
-  const head = new THREE.Group(); head.position.set(0, by + bh * (o.headUp === undefined ? 0.3 : o.headUp), bl / 2 + (o.neck || 0)); g.add(head);
-  if (o.neck) bx(g, M.main, bw * 0.5, o.neck * 1.6, bw * 0.5, 0, by + bh * 0.3, bl / 2, 0.6, 0, 0);
-  const [hw, hh, hl] = o.head; bx(head, M.main, hw, hh, hl, 0, 0, hl / 2);
-  if (o.snout) bx(head, M.light, o.snout[0], o.snout[1], o.snout[2], 0, -hh * 0.18, hl + o.snout[2] / 2 - 0.02);
-  bx(head, M.eye, 0.05, 0.05, 0.03, hw * 0.3, hh * 0.15, hl + 0.005); bx(head, M.eye, 0.05, 0.05, 0.03, -hw * 0.3, hh * 0.15, hl + 0.005);
-  if (o.snout) bx(head, lam(0x1a1a1a), o.snout[0] * 0.45, o.snout[1] * 0.4, 0.04, 0, -hh * 0.1, hl + o.snout[2]);
-  const e = o.ears || 'point';
-  if (e === 'point') { bx(head, M.dark, 0.09, 0.16, 0.06, hw * 0.32, hh / 2 + 0.06, hl * 0.3); bx(head, M.dark, 0.09, 0.16, 0.06, -hw * 0.32, hh / 2 + 0.06, hl * 0.3); }
-  if (e === 'round') { bx(head, M.dark, 0.16, 0.14, 0.08, hw * 0.4, hh / 2 + 0.04, hl * 0.25); bx(head, M.dark, 0.16, 0.14, 0.08, -hw * 0.4, hh / 2 + 0.04, hl * 0.25); }
-  if (e === 'long') { bx(head, M.main, 0.07, 0.34, 0.09, hw * 0.25, hh / 2 + 0.15, hl * 0.2, -0.2); bx(head, M.main, 0.07, 0.34, 0.09, -hw * 0.25, hh / 2 + 0.15, hl * 0.2, -0.2); }
-  if (e === 'flop') { bx(head, M.dark, 0.08, 0.22, 0.14, hw / 2 + 0.03, hh * 0.15, hl * 0.3, 0, 0, -0.25); bx(head, M.dark, 0.08, 0.22, 0.14, -hw / 2 - 0.03, hh * 0.15, hl * 0.3, 0, 0, 0.25); }
-  if (o.antlers) { const am = lam(0xd8c9a3); for (const s of [1, -1]) { bx(head, am, 0.04, 0.4, 0.04, s * hw * 0.3, hh / 2 + 0.2, hl * 0.2, 0, 0, -s * 0.35); bx(head, am, 0.04, 0.22, 0.04, s * (hw * 0.3 + 0.12), hh / 2 + 0.36, hl * 0.2 + 0.06, 0.6, 0, -s * 0.8); bx(head, am, 0.04, 0.2, 0.04, s * (hw * 0.3 + 0.05), hh / 2 + 0.3, hl * 0.2 - 0.08, -0.7, 0, -s * 0.2); } }
-  if (o.horns) { const am = lam(0x8a8478); for (const s of [1, -1]) bx(head, am, 0.06, 0.3, 0.06, s * hw * 0.28, hh / 2 + 0.1, hl * 0.15, -0.7, 0, -s * 0.2); bx(head, M.light, 0.08, 0.16, 0.06, 0, -hh * 0.6, hl * 0.8); }
-  let tail = null;
-  if (o.tail) { tail = new THREE.Group(); tail.position.set(0, by + bh * 0.25, -bl / 2); g.add(tail); bx(tail, o.tailC ? lam(o.tailC) : M.dark, o.tail[0], o.tail[1], o.tail[2], 0, 0, -o.tail[2] / 2); tail.rotation.x = o.tailA || 0; }
-  if (o.spikes) { const sm = new THREE.MeshLambertMaterial({ color: 0x8fe6ff, emissive: 0x2a8fb0 }); for (let i = 0; i < 4; i++) { const s = new THREE.Mesh(cone(0.14, 0.5, 4), sm); s.position.set(0, by + bh / 2 + 0.2, bl * (0.3 - i * 0.22)); s.rotation.x = -0.3; g.add(s); } }
-  if (o.collar) bx(g, lam(o.collar), bw * 0.62, 0.09, bw * 0.62, 0, by + bh * 0.28, bl / 2 + 0.03, 0.5);
-  if (o.scar) bx(head, lam(0xd9d2c4), 0.04, hh * 0.7, 0.03, hw * 0.3, hh * 0.1, hl + 0.01, 0, 0, 0.3);
-  g.scale.setScalar(o.scale || 1);
-  return { g, legs, head, tail, body, mats: [M.main, M.dark, M.light], eye: o.eye ? M.eye : null, stride: o.stride || 9, h: (by + bh) * (o.scale || 1) };
-}
-function scorpionModel(scale, king) {
-  const g = new THREE.Group(), main = lam(king ? 0x7a2f1a : 0xb8763a), dark = lam(king ? 0x4a1a10 : 0x8a5226), glow = new THREE.MeshLambertMaterial({ color: king ? 0xffd24a : 0x3a2414, emissive: king ? 0xb07a00 : 0 });
-  bx(g, main, 0.7, 0.26, 0.9, 0, 0.36, 0); bx(g, dark, 0.56, 0.22, 0.4, 0, 0.36, 0.6); bx(g, main, 0.5, 0.22, 0.36, 0, 0.38, -0.58);
-  const legs = [];
-  for (let i = 0; i < 3; i++) for (const s of [1, -1]) { const p = new THREE.Group(); p.position.set(s * 0.35, 0.36, 0.3 - i * 0.32); g.add(p); bx(p, dark, 0.5, 0.07, 0.07, s * 0.27, -0.08, 0, 0, 0, -s * 0.5); bx(p, dark, 0.07, 0.3, 0.07, s * 0.5, -0.22, 0); legs.push(p); }
-  for (const s of [1, -1]) { bx(g, main, 0.14, 0.14, 0.6, s * 0.42, 0.36, 0.95, 0, s * 0.35); bx(g, dark, 0.26, 0.16, 0.34, s * 0.56, 0.36, 1.33); bx(g, glow, 0.08, 0.1, 0.22, s * 0.66, 0.36, 1.56, 0, -s * 0.3); bx(g, glow, 0.08, 0.1, 0.22, s * 0.46, 0.36, 1.56, 0, s * 0.3); }
-  const tail = new THREE.Group(); tail.position.set(0, 0.42, -0.72); g.add(tail);
-  bx(tail, main, 0.22, 0.2, 0.36, 0, 0.08, -0.14, 0.5); bx(tail, main, 0.2, 0.36, 0.2, 0, 0.42, -0.3, 0.2); bx(tail, main, 0.18, 0.34, 0.18, 0, 0.74, -0.24, -0.3); bx(tail, dark, 0.16, 0.16, 0.34, 0, 0.94, -0.04, -0.2);
-  const st = new THREE.Mesh(cone(0.09, 0.3, 4), glow); st.position.set(0, 0.9, 0.22); st.rotation.x = 2.0; tail.add(st);
-  bx(g, new THREE.MeshBasicMaterial({ color: king ? 0xffe066 : 0x111111 }), 0.3, 0.05, 0.03, 0, 0.44, 0.8);
-  if (king) { const cm = new THREE.MeshLambertMaterial({ color: 0xffd24a, emissive: 0x7a5200 }); for (let i = 0; i < 5; i++) { const c = new THREE.Mesh(cone(0.07, 0.24, 4), cm); c.position.set(-0.2 + i * 0.1, 0.62, 0.62); g.add(c); } }
-  g.scale.setScalar(scale);
-  return { g, legs, head: null, tail, mats: [main, dark], stride: 14, scorp: true, h: 1.3 * scale };
-}
-const ANIMALS = {
-  rabbit: () => quadruped({ c: 0xb49a7c, c3: 0xe9dcc8, body: [0.3, 0.3, 0.48], leg: 0.16, legT: 0.09, head: [0.24, 0.24, 0.24], ears: 'long', tail: [0.12, 0.12, 0.1], tailC: 0xffffff, stride: 16, headUp: 0.45 }),
-  hare: () => quadruped({ c: 0xf4f4f0, c3: 0xffffff, body: [0.3, 0.3, 0.48], leg: 0.16, legT: 0.09, head: [0.24, 0.24, 0.24], ears: 'long', tail: [0.12, 0.12, 0.1], stride: 16, headUp: 0.45 }),
-  deer: () => quadruped({ c: 0xa8703f, c2: 0x7d5230, c3: 0xe6cfa6, body: [0.48, 0.55, 1.2], leg: 0.78, legT: 0.11, belly: true, neck: 0.28, head: [0.24, 0.28, 0.42], ears: 'point', antlers: true, tail: [0.1, 0.16, 0.1], tailC: 0xffffff, headUp: 0.85, stride: 8 }),
-  goat: () => quadruped({ c: 0xe8e4da, c2: 0xcfc9bb, c3: 0xf6f3ec, body: [0.5, 0.56, 1.0], leg: 0.52, legT: 0.12, head: [0.26, 0.3, 0.4], horns: true, ears: 'none', tail: [0.1, 0.12, 0.12], headUp: 0.6, stride: 10 }),
-  wolf: () => quadruped({ c: 0x70757a, c2: 0x4b4f55, c3: 0xb1b5b9, eye: 0xffd640, body: [0.44, 0.5, 1.15], leg: 0.55, legT: 0.12, back: true, belly: true, head: [0.36, 0.34, 0.36], snout: [0.2, 0.17, 0.28], ears: 'point', tail: [0.14, 0.14, 0.6], tailA: -0.7, headUp: 0.35, stride: 10 }),
-  redwolf: () => quadruped({ c: 0x3a3338, c2: 0x241f24, c3: 0x5a4f55, eye: 0xff3020, body: [0.46, 0.52, 1.2], leg: 0.56, legT: 0.12, back: true, head: [0.38, 0.35, 0.37], snout: [0.2, 0.17, 0.3], ears: 'point', tail: [0.14, 0.14, 0.6], tailA: -0.7, headUp: 0.35, stride: 10, scale: 1.08 }),
-  snowwolf: () => quadruped({ c: 0xe9eef2, c2: 0xc2ccd6, c3: 0xffffff, eye: 0x4fd0ff, body: [0.46, 0.52, 1.2], leg: 0.56, legT: 0.13, back: true, head: [0.38, 0.35, 0.37], snout: [0.2, 0.17, 0.29], ears: 'point', tail: [0.16, 0.16, 0.62], tailA: -0.7, headUp: 0.35, stride: 10, scale: 1.1 }),
-  bear: () => quadruped({ c: 0x5d3f26, c2: 0x47301c, c3: 0x8a6a48, body: [0.95, 0.9, 1.7], leg: 0.6, legT: 0.3, hump: true, head: [0.6, 0.55, 0.5], snout: [0.3, 0.26, 0.3], ears: 'round', tail: [0.14, 0.14, 0.1], headUp: 0.2, stride: 6 }),
-  grizzle: () => quadruped({ c: 0x46301f, c2: 0x2f2015, c3: 0x77604a, eye: 0xff9a2a, body: [0.95, 0.9, 1.7], leg: 0.6, legT: 0.3, hump: true, head: [0.6, 0.55, 0.5], snout: [0.3, 0.26, 0.3], ears: 'round', scar: true, tail: [0.14, 0.14, 0.1], headUp: 0.2, stride: 5, scale: 1.55 }),
-  frostclaw: () => quadruped({ c: 0xf2f6fa, c2: 0xcfdce8, c3: 0xffffff, eye: 0x39d0ff, body: [0.95, 0.9, 1.7], leg: 0.62, legT: 0.3, hump: true, spikes: true, head: [0.6, 0.55, 0.5], snout: [0.3, 0.26, 0.3], ears: 'round', tail: [0.14, 0.14, 0.1], headUp: 0.2, stride: 5, scale: 1.7 }),
-  scorpion: () => scorpionModel(1, false),
-  duneking: () => scorpionModel(2.6, true),
-  scout: () => quadruped({ c: 0xc98a3c, c2: 0x9a6428, c3: 0xfff3e0, body: [0.36, 0.4, 0.85], leg: 0.38, legT: 0.1, belly: true, head: [0.32, 0.3, 0.3], snout: [0.17, 0.15, 0.22], ears: 'flop', collar: 0xd9342b, tail: [0.09, 0.09, 0.42], tailA: 0.9, headUp: 0.45, stride: 13 })
-};
-function humanModel(ray) {
-  const g = new THREE.Group(), skin = lam(0xe2b48c), shirt = lam(ray ? 0x4d6e3c : 0xd9482b), trousers = lam(0x5a4632), hat = lam(0x8c6c3c), hair = lam(ray ? 0x6b5a4a : 0x3a2a1c);
-  bx(g, trousers, 0.2, 0.8, 0.22, 0.13, 0.4, 0); bx(g, trousers, 0.2, 0.8, 0.22, -0.13, 0.4, 0);
-  bx(g, shirt, 0.52, 0.62, 0.3, 0, 1.11, 0);
-  const armL = new THREE.Group(), armR = new THREE.Group(); armL.position.set(0.34, 1.38, 0); armR.position.set(-0.34, 1.38, 0); g.add(armL); g.add(armR);
-  bx(armL, shirt, 0.15, 0.6, 0.18, 0, -0.3, 0); bx(armR, shirt, 0.15, 0.6, 0.18, 0, -0.3, 0); bx(armL, skin, 0.13, 0.13, 0.15, 0, -0.66, 0); bx(armR, skin, 0.13, 0.13, 0.15, 0, -0.66, 0);
-  const head = new THREE.Group(); head.position.set(0, 1.6, 0); g.add(head);
-  bx(head, skin, 0.34, 0.34, 0.32, 0, 0, 0); bx(head, new THREE.MeshBasicMaterial({ color: 0x1a1a1a }), 0.05, 0.05, 0.03, 0.08, 0.04, 0.165); bx(head, new THREE.MeshBasicMaterial({ color: 0x1a1a1a }), 0.05, 0.05, 0.03, -0.08, 0.04, 0.165);
-  if (ray) { bx(head, hair, 0.36, 0.2, 0.2, 0, -0.16, 0.1); bx(head, hat, 0.62, 0.05, 0.6, 0, 0.19, 0); bx(head, hat, 0.36, 0.16, 0.34, 0, 0.29, 0); }
-  else bx(head, hair, 0.36, 0.1, 0.34, 0, 0.2, 0);
-  return { g, armL, armR, head };
-}
-
-/* ---------- first-person tools ---------- */
-function toolModel(id) {
-  const def = id === 'hands' ? HANDS : ITEMS[id], cls = def.tool.cls, t = def.tool.tier, g = new THREE.Group();
-  const WOOD = 0x7a5632, STONE = 0x8d8d89, IRON = 0xcfd6dd, SKIN = 0xe2b48c, head = t >= 2 ? IRON : STONE;
-  const hand = part(box(0.1, 0.12, 0.13), SKIN, [0, -0.05, 0.01]), arm = part(box(0.1, 0.5, 0.11), 0xd9482b, [0.02, -0.36, 0.08], [0.25, 0, 0]);
-  let m;
-  if (cls === 'hands') m = vcMesh([part(box(0.11, 0.07, 0.15), SKIN, [0, 0.13, -0.01]), part(box(0.1, 0.06, 0.05), SKIN, [0, 0.19, 0.04], [0.5, 0, 0]), part(box(0.04, 0.09, 0.04), SKIN, [0.065, 0.13, 0.04]), part(box(0.105, 0.42, 0.11), 0xd9482b, [0, -0.13, 0.02]), part(box(0.115, 0.06, 0.12), 0xf2efe6, [0, 0.07, 0.015])]);
-  if (cls === 'axe') m = vcMesh([part(box(0.045, 0.72, 0.045), WOOD, [0, 0.26, 0]), part(box(0.05, 0.19, 0.24), head, [0, 0.55, -0.1]), part(box(0.03, 0.24, 0.07), head, [0, 0.55, -0.24]), hand, arm]);
-  if (cls === 'pick') m = vcMesh([part(box(0.045, 0.72, 0.045), WOOD, [0, 0.26, 0]), part(box(0.055, 0.08, 0.56), head, [0, 0.6, 0]), part(cone(0.04, 0.14, 4), head, [0, 0.58, -0.33], [-1.9, 0, 0]), part(cone(0.04, 0.14, 4), head, [0, 0.58, 0.33], [1.9, 0, 0]), hand, arm]);
-  if (cls === 'sword') m = vcMesh([part(box(0.04, 0.18, 0.04), 0x4a3421, [0, 0.03, 0]), part(box(0.04, 0.04, 0.22), 0xb8860b, [0, 0.13, 0]), part(box(0.022, 0.72, 0.075), IRON, [0, 0.5, 0]), part(cone(0.04, 0.12, 4), IRON, [0, 0.92, 0], null, [0.55, 1, 1]), hand, arm]);
-  if (cls === 'spear') { const tip = def.tool.glow || (t >= 2 ? IRON : 0x3b4046); m = vcMesh([part(box(0.04, 1.7, 0.04), WOOD, [0, 0.55, 0]), part(cone(0.055, 0.3, 4), tip, [0, 1.52, 0]), part(box(0.06, 0.07, 0.06), 0xc9b98a, [0, 1.36, 0]), hand, arm], def.tool.glow ? new THREE.MeshLambertMaterial({ vertexColors: true, emissive: def.tool.glow, emissiveIntensity: 0.25 }) : null); }
-  if (cls === 'torch') { m = vcMesh([part(box(0.05, 0.6, 0.05), WOOD, [0, 0.2, 0]), part(box(0.08, 0.14, 0.08), 0x3a2a1c, [0, 0.52, 0]), hand, arm]); const f = flameGroup(0.55); f.position.y = 0.56; m.add(f); g.userData.flame = f; }
-  if (cls === 'rod') m = vcMesh([part(box(0.03, 1.9, 0.03), 0x9a7a4a, [0, 0.75, 0]), part(box(0.07, 0.07, 0.05), 0x444444, [0, 0.12, -0.04]), hand, arm]);
-  if (cls === 'bow') {
-    const ps = [hand, arm]; for (let i = -3; i <= 3; i++) { const a = i * 0.22; ps.push(part(box(0.035, 0.2, 0.04), WOOD, [0, Math.sin(a) * 0.72, -0.22 + Math.cos(a) * 0.3], [-a, 0, 0])); }
-    m = vcMesh(ps); const s = new THREE.Mesh(UNIT_BOX, new THREE.MeshBasicMaterial({ color: 0xeeeeee })); s.scale.set(0.008, 1.1, 0.008); s.position.set(0, 0, 0.0); m.add(s);
-    const ar = vcMesh([part(box(0.014, 0.014, 0.75), 0xc9b98a, [0, 0, -0.3]), part(cone(0.025, 0.08, 4), 0x3b4046, [0, 0, -0.7], [-Math.PI / 2, 0, 0])]); ar.position.set(0.02, 0, 0.1); m.add(ar); g.userData.arrow = ar;
-  }
-  m.castShadow = false; m.receiveShadow = false; g.add(m); g.userData.cls = cls;
-  return g;
-}
-
-/* ---------- structures ---------- */
-const WOODC = [0x8a623a, 0x7d5833, 0x946b40, 0x86603a];
-function planks(w, h, d, n, vertical, x, y, z) {
-  const ps = []; for (let i = 0; i < n; i++) { const c = WOODC[i % 4]; ps.push(vertical ? part(box(w / n - 0.02, h, d), c, [x - w / 2 + (i + 0.5) * w / n, y, z]) : part(box(w, h, d / n - 0.02), c, [x, y, z - d / 2 + (i + 0.5) * d / n])); }
-  return ps;
-}
-function structureModel(id) {
-  const THATCH = 0xb9a55a, g = new THREE.Group(); let m;
-  switch (id) {
-    case 'campfire': {
-      const ps = []; for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; ps.push(part(ico(0.2, 0), 0x8a8a86, [Math.cos(a) * 0.62, 0.1, Math.sin(a) * 0.62], [a, a * 2, 0], [1.1, 0.8, 1], 0.12)); }
-      ps.push(part(box(0.9, 0.12, 0.13), 0x4a3421, [0, 0.12, 0], [0, 0.4, 0.12]), part(box(0.9, 0.12, 0.13), 0x3a2a1c, [0, 0.16, 0], [0, 1.6, -0.1]), part(box(0.85, 0.11, 0.12), 0x4a3421, [0, 0.2, 0], [0, 2.7, 0.1]), part(cyl(0.5, 0.5, 0.04, 10), 0x2a2420, [0, 0.03, 0]));
-      m = vcMesh(ps); const f = flameGroup(1.9); f.position.y = 0.15; f.visible = false; g.add(f); g.userData.flame = f; break;
-    }
-    case 'shelter': {
-      const ps = [part(box(0.1, 1.9, 0.1), 0x6b4a2b, [-1.3, 0.95, 0.9]), part(box(0.1, 1.9, 0.1), 0x6b4a2b, [1.3, 0.95, 0.9]), part(box(2.9, 0.1, 0.1), 0x6b4a2b, [0, 1.88, 0.9])];
-      for (let i = 0; i < 7; i++) ps.push(part(box(0.4, 0.09, 2.85), i % 2 ? THATCH : 0xa8954e, [-1.23 + i * 0.41, 0.98, -0.25], [0.72, 0, 0]));
-      ps.push(part(box(2.4, 0.12, 1.5), 0x5a8a45, [0, 0.07, -0.1]), part(box(0.1, 1.0, 0.1), 0x6b4a2b, [-1.3, 0.5, -0.3], [0.72, 0, 0]), part(box(0.1, 1.0, 0.1), 0x6b4a2b, [1.3, 0.5, -0.3], [0.72, 0, 0]));
-      m = vcMesh(ps, MAT_VC_DS); break;
-    }
-    case 'bench': m = vcMesh([...planks(1.7, 0.1, 0.85, 4, false, 0, 0.85, 0), part(box(0.1, 0.82, 0.1), 0x5e4126, [-0.75, 0.41, -0.34]), part(box(0.1, 0.82, 0.1), 0x5e4126, [0.75, 0.41, -0.34]), part(box(0.1, 0.82, 0.1), 0x5e4126, [-0.75, 0.41, 0.34]), part(box(0.1, 0.82, 0.1), 0x5e4126, [0.75, 0.41, 0.34]), part(box(1.5, 0.06, 0.06), 0x5e4126, [0, 0.3, -0.34]), part(box(0.05, 0.05, 0.34), 0x7a5632, [-0.4, 0.93, 0], [0, 0.5, 0]), part(box(0.14, 0.09, 0.09), 0x8d8d89, [-0.47, 0.94, 0.14], [0, 0.5, 0]), part(box(0.4, 0.03, 0.12), 0xcfd6dd, [0.35, 0.92, 0.1], [0, -0.3, 0])]); break;
-    case 'chest': m = vcMesh([...planks(0.95, 0.42, 0.6, 3, true, 0, 0.24, 0), part(box(0.99, 0.2, 0.64), 0x9c7446, [0, 0.54, 0]), part(box(1.0, 0.64, 0.06), 0x3b4046, [-0.3, 0.33, 0], [0, Math.PI / 2, 0], [1, 1, 1]), part(box(0.07, 0.66, 0.66), 0x3b4046, [-0.3, 0.33, 0]), part(box(0.07, 0.66, 0.66), 0x3b4046, [0.3, 0.33, 0]), part(box(0.12, 0.14, 0.04), 0xd9a520, [0, 0.46, 0.32])].filter((p, i) => i !== 4)); break;
-    case 'floor': m = vcMesh([...planks(3, 0.14, 3, 6, false, 0, 0.13, 0), part(box(2.9, 1.4, 2.9), 0x5e4126, [0, -0.62, 0])]); break;
-    case 'wall': m = vcMesh([...planks(3, 3, 0.18, 7, true, 0, 1.5, 0), part(box(3.04, 0.14, 0.24), 0x5e4126, [0, 0.9, 0]), part(box(3.04, 0.14, 0.24), 0x5e4126, [0, 2.3, 0]), part(box(3, 1.5, 0.16), 0x4a3421, [0, -0.75, 0])]); break;
-    case 'door': m = vcMesh([...planks(0.8, 3, 0.18, 2, true, -1.1, 1.5, 0), ...planks(0.8, 3, 0.18, 2, true, 1.1, 1.5, 0), ...planks(1.4, 0.75, 0.18, 3, true, 0, 2.63, 0), part(box(3.04, 0.14, 0.24), 0x5e4126, [0, 2.3, 0]), part(box(0.8, 1.5, 0.16), 0x4a3421, [-1.1, -0.75, 0]), part(box(0.8, 1.5, 0.16), 0x4a3421, [1.1, -0.75, 0])]); break;
-    case 'roof': { const ps = []; for (let i = 0; i < 6; i++) ps.push(part(box(3.3, 0.16, 0.58), i % 2 ? THATCH : 0xa8954e, [0, 3.08 + (i % 2) * 0.05, -1.38 + i * 0.55])); ps.push(part(box(0.12, 0.12, 3.2), 0x5e4126, [-1.4, 2.98, 0]), part(box(0.12, 0.12, 3.2), 0x5e4126, [1.4, 2.98, 0])); m = vcMesh(ps); break; }
-    case 'bed': m = vcMesh([part(box(1.1, 0.28, 2.1), 0x7a5632, [0, 0.22, 0]), part(box(1.0, 0.14, 1.95), 0xd8c9a3, [0, 0.42, 0]), part(box(1.02, 0.1, 1.2), 0x8a5a3a, [0, 0.5, 0.3]), part(box(0.7, 0.12, 0.36), 0xf2efe6, [0, 0.54, -0.72]), part(box(1.14, 0.7, 0.1), 0x5e4126, [0, 0.45, -1.06]), part(box(0.1, 0.36, 0.1), 0x5e4126, [-0.5, 0.18, 1.0]), part(box(0.1, 0.36, 0.1), 0x5e4126, [0.5, 0.18, 1.0])]); break;
-    case 'spikes': { const ps = [part(cyl(0.12, 0.12, 2.6, 6), 0x5e4126, [0, 0.3, 0], [0, 0, Math.PI / 2])]; for (let i = 0; i < 6; i++) { const s = i % 2 ? 1 : -1; ps.push(part(cone(0.07, 1.5, 5), 0x9c7446, [-1.1 + i * 0.44, 0.75, s * 0.32], [s * 0.6, 0, 0])); } m = vcMesh(ps); break; }
-    case 'torchpost': { m = vcMesh([part(box(0.09, 1.9, 0.09), 0x6b4a2b, [0, 0.95, 0]), part(box(0.16, 0.2, 0.16), 0x3a2a1c, [0, 1.95, 0]), part(ico(0.16, 0), 0x8a8a86, [0.1, 0.08, 0.05])]); const f = flameGroup(0.9); f.position.y = 2.02; g.add(f); g.userData.flame = f; break; }
-    case 'furnace': { m = vcMesh([part(box(1.3, 1.3, 1.2), 0x7f7f7b, [0, 0.65, 0], null, null, 0.1), part(box(1.0, 0.4, 0.95), 0x8b8b87, [0, 1.5, 0], null, null, 0.1), part(box(0.44, 0.9, 0.44), 0x6f6f6c, [0, 2.15, -0.15], null, null, 0.1), part(box(0.55, 0.5, 0.08), 0x1c1512, [0, 0.5, 0.6])]); const gl = new THREE.Mesh(UNIT_BOX, new THREE.MeshBasicMaterial({ color: 0xff7a1e })); gl.scale.set(0.42, 0.3, 0.05); gl.position.set(0, 0.42, 0.62); g.add(gl); break; }
-    case 'collector': m = vcMesh([part(cyl(0.42, 0.36, 0.8, 9), 0x8a623a, [0, 0.4, 0]), part(cyl(0.44, 0.44, 0.06, 9), 0x3b4046, [0, 0.62, 0]), part(cyl(0.37, 0.37, 0.03, 9), 0x3f8fd0, [0, 0.76, 0]), part(box(0.06, 1.7, 0.06), 0x6b4a2b, [-0.7, 0.85, -0.7]), part(box(0.06, 1.7, 0.06), 0x6b4a2b, [0.7, 0.85, -0.7]), part(box(0.06, 1.7, 0.06), 0x6b4a2b, [-0.7, 0.85, 0.7]), part(box(0.06, 1.7, 0.06), 0x6b4a2b, [0.7, 0.85, 0.7]), part(cone(0.95, 0.5, 4), 0xa0764e, [0, 1.45, 0], [Math.PI, Math.PI / 4, 0])], MAT_VC_DS); break;
-    case 'garden': {
-      const ps = [part(box(2.2, 0.3, 1.4), 0x7a5632, [0, 0.15, 0]), part(box(2.0, 0.08, 1.2), 0x3d2c1e, [0, 0.3, 0])];
-      for (let i = 0; i < 4; i++) ps.push(part(ico(0.3, 0), 0x3f8a3c, [-0.75 + i * 0.5, 0.52, (i % 2 ? 0.2 : -0.2)], [i, i * 2, 0], null, 0.1));
-      m = vcMesh(ps); const bs = []; for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) bs.push(part(sph(0.07, 5, 4), 0xe2334c, [-0.75 + i * 0.5 + Math.cos(j * 2.1) * 0.24, 0.6 + j * 0.07, (i % 2 ? 0.2 : -0.2) + Math.sin(j * 2.1) * 0.24]));
-      const b = vcMesh(bs); b.visible = false; g.add(b); g.userData.berries = b; break;
-    }
-    case 'flag': { m = vcMesh([part(box(0.08, 3.4, 0.08), 0x6b4a2b, [0, 1.7, 0]), part(ico(0.1, 0), 0xd9a520, [0, 3.45, 0])]); const c = new THREE.Mesh(UNIT_BOX, new THREE.MeshLambertMaterial({ color: 0xd9342b, side: THREE.DoubleSide })); c.scale.set(1.1, 0.7, 0.03); c.position.set(0.6, 2.95, 0); g.add(c); g.userData.cloth = c; break; }
-  }
-  g.add(m); g.userData.main = m; return g;
-}
 
 /* =========================================================================
    06_player: inventory, survival meters, movement, tools, targeting, fishing
@@ -2252,4 +2106,4 @@ function touchHelpHTML() {
 }
 // @end-moved
 
-export { UNIT_BOX, lam, bx, quadruped, scorpionModel, ANIMALS, humanModel, toolModel, WOODC, planks, structureModel, inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP, ambientTemp, SURV, survivalStep, hurtPlayer, blackout, eat, quickEat, drinkCanteen, drinkHere, FLOORS, groundAt, _fwd, updatePlayer, refreshViewModel, swingNow, updateViewModel, POIS, findTarget, targetPrompt, TKEY, key, primaryAction, interact, resolveSwing, shootBow, updateArrows, startFishing, tryCast, stopFishing, fishClick, updateFishing, setupInput, lockPointer, selectSlot, STRUCT, ROOFS, WALLS, cellKey, structColliders, spawnStructure, removeStructure, rebuildStructures, startBuild, cancelBuild, aimPoint, updateBuildGhost, placeBuild, tryDismantle, isRoofed, structPrompt, useStructure, lightFire, douse, addFuel, structuresStep, structuresNewDay, nearestFlame, updateStructures, trySleep, spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };
+export { inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP, ambientTemp, SURV, survivalStep, hurtPlayer, blackout, eat, quickEat, drinkCanteen, drinkHere, FLOORS, groundAt, _fwd, updatePlayer, refreshViewModel, swingNow, updateViewModel, POIS, findTarget, targetPrompt, TKEY, key, primaryAction, interact, resolveSwing, shootBow, updateArrows, startFishing, tryCast, stopFishing, fishClick, updateFishing, setupInput, lockPointer, selectSlot, STRUCT, ROOFS, WALLS, cellKey, structColliders, spawnStructure, removeStructure, rebuildStructures, startBuild, cancelBuild, aimPoint, updateBuildGhost, placeBuild, tryDismantle, isRoofed, structPrompt, useStructure, lightFire, douse, addFuel, structuresStep, structuresNewDay, nearestFlame, updateStructures, trySleep, spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };

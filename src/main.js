@@ -41,4 +41,8 @@ window.__stranded = ALL;
 // @moved-to: src/data/story.js
 // @moved-to: src/world/nodes.js
 // @moved-to: src/world/gathering.js
+// @moved-to: src/models/animals.js
+// @moved-to: src/models/people.js
+// @moved-to: src/models/tools.js
+// @moved-to: src/models/structures.js
 // @moved-to: src/legacy.js

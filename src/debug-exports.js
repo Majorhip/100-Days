@@ -31,4 +31,8 @@ export * from './data/creatures.js';
 export * from './data/story.js';
 export * from './world/nodes.js';
 export * from './world/gathering.js';
+export * from './models/animals.js';
+export * from './models/people.js';
+export * from './models/tools.js';
+export * from './models/structures.js';
 export * from './legacy.js';
