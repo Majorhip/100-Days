@@ -132,5 +132,23 @@ Each view loads the fixture save, sets the position, time and weather, freezes t
   - Screenshots differ from golden by 1.3–4.7 on `dist` and 1.5–3.7 on dev. Storm is highest, at 4.7, the same as the original scored against itself under the same slow conditions (4.69).
   - Built file: 775,097 bytes.
 
+## Phase 5: tests worth having
+**`npm test`** builds the game, then runs Vitest. **`npm run parity`** builds, then runs every browser check below, screenshots included.
+
+| Test | What it proves |
+|---|---|
+| `tests/survival.test.js` | **27 tests**, Node, under a second. Runs the real survival rules (`src/game/survival.js`) with small stand-ins for what they still reach into (the TODO(split) list). It pins:<br>• hunger 3.0/h and thirst 3.8/h; sprinting ×1.6/×1.5; asleep ×0.5; desert heat doubles thirst<br>• warmth: comfort at 14°, +11/h, +34/h by a fire, cold loss 0.85 per degree<br>• health: +2.5/h awake, +4 sheltered or +7 in bed asleep; −5 starving, −7 thirsty, −9 frozen<br>• blackouts (cold, then thirst, then hunger); a floor of 5 health while asleep<br>• every ambient-temperature rule<br>• the 30 Hz tick adds up to the same result as one big step<br>• cooked against raw food values<br>Changing one rate (hunger 3.0 → 3.1) made 6 tests fail. |
+| `tests/world.test.js` | The island fingerprint, models included, matches the original. |
+| `tests/save.test.js` | • The Phase 1 save loads.<br>• It **round-trips exactly**: loading it and saving straight away gives back the fixture with no differences, and doing it again gives the identical text (`roundtrip.mjs`).<br>• The save key is unchanged (`stranded100_v3`). |
+| `tests/smoke.mjs` | Headless Chrome on the real graphics card, using the game's own functions, with zero page errors allowed. The original passes the same 14 steps with the same results:<br>• a new game<br>• chop a tree (pine, 5 swings, 4 wood)<br>• build and light a campfire<br>• a night with two wolves<br>• a storm<br>• sleep until 06:05 the next day<br>• swim in Mirror Lake<br>• all three biomes<br>• all four graphics levels |
+
+**Balance targets.** "Energy" in MIGRATION.md is the food meter.
+- **What the tests prove:**
+  - A standard day (15 h awake, 9 h asleep) costs **58.5 energy**.
+  - Breaking even takes 9.8 berries, or 3.9 roast mushrooms, or 1.8 cooked fish, or 1.5 cooked meat.
+  - Cooking triples mushrooms, quadruples fish and nearly quadruples meat (×3.8).
+- **What they can't prove yet:** the four targets themselves (forage only ≈ −36, fire + cooked forage ≈ −2, fire + fishing ≈ −9, hunting + fire ≈ 0). They depend on what a typical forage, fishing or hunting day gathers, and that model isn't in the repository. Inventing one that lands on these numbers would prove nothing, so this is marked `todo` in `survival.test.js` until the original day model turns up.
+- **Observation, not changed:** in water deeper than you are tall, the player walks along the lakebed (Mirror Lake: 3.2 m down). The original does the same.
+
 ### From here on
 `tools/split/` regenerates `src/` from the original, so it's only for the migration. Once modules are edited by hand (Phase 5 onwards, or any later feature), stop running `split.mjs`. The byte-for-byte part of `compare-build.mjs` then becomes the record of what the migration did: retire it, or grow the ledger, with a reason for each entry. The island, save, new-game, touch and screenshot checks keep their value after the migration.

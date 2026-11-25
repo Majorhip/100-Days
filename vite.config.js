@@ -10,5 +10,14 @@ export default defineConfig({
     cssMinify: false,
     // The game file is ~1 MB by design (three.js is embedded until Phase 3).
     chunkSizeWarningLimit: 2000
+  },
+  // Vitest (npm test). Browser-based tests drive dist/index.html in headless Chrome, so give
+  // them time; they run one file at a time so the PC's graphics card isn't shared.
+  test: {
+    include: ['tests/**/*.test.js'],
+    environment: 'node',
+    testTimeout: 300000,
+    hookTimeout: 300000,
+    fileParallelism: false
   }
 });

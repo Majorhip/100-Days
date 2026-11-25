@@ -16,12 +16,12 @@ const target = argv.find(a => !a.startsWith('--')) || 'dist/index.html';
 const NOISE = /could not be terminated|no running instance|operation attempted is not supported/;
 const run = (label, script, args = []) => {
   const t0 = Date.now();
-  const r = spawnSync(process.execPath, [join(ROOT, 'tests', 'golden', script), ...args], { cwd: ROOT, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [join(ROOT, 'tests', 'golden', script), ...args], { cwd: ROOT, encoding: 'utf8' });   // script is relative to tests/golden
   const out = (r.stdout + r.stderr).split('\n').filter(l => l.trim() && !NOISE.test(l));
   const pass = r.status === 0;
-  const key = out.filter(l => /^(PASS|FAIL)|^\s+\d-|DIFF|first mismatch|original:|rebuilt:|not resolved|page errors|HTTP \d|^after /.test(l));
+  const key = out.filter(l => /^(PASS|FAIL)|^\s+\d-|DIFF|first mismatch|original:|rebuilt:|not resolved|page errors|HTTP \d|^after |steps passed|\d+\/\d+ passed/.test(l));
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${label.padEnd(12)} ${((Date.now() - t0) / 1000).toFixed(0)}s`);
-  for (const l of (pass ? key.filter(l => /^\s+\d-|^after /.test(l)) : key.length ? key : out.slice(-15))) console.log('      ' + l.trim());
+  for (const l of (pass ? key.filter(l => /^\s+\d-|^after |steps passed|\d+\/\d+ passed/.test(l)) : key.length ? key : out.slice(-15))) console.log('      ' + l.trim());
   return pass;
 };
 let ok = true;
@@ -30,6 +30,8 @@ ok = run('island', 'fingerprint.mjs', [target]) && ok;
 ok = run('save', 'savecheck.mjs', [target]) && ok;
 ok = run('new game', 'newgame.mjs', [target]) && ok;
 ok = run('touch', 'touchcheck.mjs', [target]) && ok;
+ok = run('round trip', 'roundtrip.mjs', [target]) && ok;
+ok = run('smoke', '../smoke.mjs', [target]) && ok;
 if (argv.includes('--shots')) ok = run('screenshots', 'screenshots.mjs', [target]) && ok;
 console.log(ok ? `\nALL PASS (${target})` : `\nSOME CHECKS FAILED (${target})`);
 process.exit(ok ? 0 : 1);
