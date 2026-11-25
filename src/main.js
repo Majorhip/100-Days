@@ -45,4 +45,13 @@ window.__stranded = ALL;
 // @moved-to: src/models/people.js
 // @moved-to: src/models/tools.js
 // @moved-to: src/models/structures.js
+// @moved-to: src/player/inventory.js
+// @moved-to: src/game/survival.js
+// @moved-to: src/player/health.js
+// @moved-to: src/player/movement.js
+// @moved-to: src/player/viewmodel.js
+// @moved-to: src/player/targeting.js
+// @moved-to: src/player/bow.js
+// @moved-to: src/player/fishing.js
+// @moved-to: src/input/keyboard.js
 // @moved-to: src/legacy.js

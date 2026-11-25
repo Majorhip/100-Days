@@ -12,7 +12,8 @@ import { sfx } from '../audio/audio.js';
 import { SH_CELL, SH, shKey } from './collision.js';
 import { puff } from './sky.js';
 import { NT, NODES, NODE_MESH, setNodeMatrix } from './nodes.js';
-import { give, addXP, swingNow } from '../legacy.js';
+import { give, addXP } from '../player/inventory.js';
+import { swingNow } from '../player/viewmodel.js';
 
 // @moved-from: original
 

@@ -4,17 +4,17 @@
 // The code between @moved-from and @end-moved must stay byte-identical to the original
 // (tests/golden/compare-build.mjs); changes go through tests/golden/approved-edits.mjs.
 
-import './models/structures.js';   // load order: runs after the previous part of the original script
+import './input/keyboard.js';   // load order: runs after the previous part of the original script
 import * as THREE from 'three';
 import { TAU, clamp, lerp, dist2, rnd, pick, angDiff } from './core/math.js';
 import { $ } from './ui/dom.js';
 import { hash2 } from './core/noise.js';
 import { HOUR_SECONDS, TICK, SAVE_KEY, SAVE_VERSION, WORLD, HALF, BUILD_CELL } from './core/constants.js';
 import { box, cyl, cone, ico, sph, part, merge } from './core/geometry.js';
-import { GU, MAT_VC, MAT_VC_TOOL, MAT_GLOW, vcMesh } from './gfx/core.js';
+import { GU, MAT_GLOW, vcMesh } from './gfx/core.js';
 import { newGameState, G, R, setG } from './state.js';
 import { AU, audioInit, sfx, audioAmbient, setVolume } from './audio/audio.js';
-import { LAKES, SITES, biomeW, biomeAt, siteH, heightAt, slopeAt, shorePoint, inSite, terrainColor } from './world/terrain.js';
+import { LAKES, SITES, biomeAt, siteH, heightAt, slopeAt, shorePoint, inSite, terrainColor } from './world/terrain.js';
 import { addCollider, removeCollider, collide } from './world/collision.js';
 import { nightAmount, puff } from './world/sky.js';
 import { GFXQ } from './gfx/quality.js';
@@ -27,424 +27,27 @@ import { gfxBuildGrass } from './gfx/grass.js';
 import { buildLife } from './gfx/life.js';
 import { PP, ppInit, ppResize, gfxRender } from './gfx/post.js';
 import { gfxLightPool, gfxUpdate } from './gfx/update.js';
-import { ITEMS, HOTBAR, HANDS } from './data/items.js';
+import { ITEMS, HOTBAR } from './data/items.js';
 import { RECIPES } from './data/recipes.js';
 import { BUILD_BY_ID } from './data/buildings.js';
 import { CREATURES } from './data/creatures.js';
 import { NOTES, DIALOGS, INTRO, LANDMARKS, BADGES, TIPS } from './data/story.js';
 import { NT, NODES, placeNodes } from './world/nodes.js';
-import { nodeNear, respawnNodes, applyNodeState, pickNode, hitNode, nodeNeeds } from './world/gathering.js';
+import { respawnNodes, applyNodeState, nodeNeeds } from './world/gathering.js';
 import { UNIT_BOX, ANIMALS } from './models/animals.js';
 import { humanModel } from './models/people.js';
-import { toolModel } from './models/tools.js';
 import { planks, structureModel } from './models/structures.js';
+import { inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP } from './player/inventory.js';
+import { ambientTemp, SURV, survivalStep } from './game/survival.js';
+import { hurtPlayer, eat, quickEat, drinkCanteen, drinkHere } from './player/health.js';
+import { FLOORS, groundAt, _fwd, updatePlayer } from './player/movement.js';
+import { refreshViewModel, swingNow, updateViewModel } from './player/viewmodel.js';
+import { POIS, findTarget, targetPrompt, key, primaryAction, interact } from './player/targeting.js';
+import { updateArrows } from './player/bow.js';
+import { startFishing, stopFishing, updateFishing } from './player/fishing.js';
+import { setupInput, lockPointer, selectSlot } from './input/keyboard.js';
 
 // @moved-from: original
-
-/* =========================================================================
-   06_player: inventory, survival meters, movement, tools, targeting, fishing
-   ========================================================================= */
-const inv = id => G.inv[id] || 0;
-function give(id, n = 1, quiet) { G.inv[id] = inv(id) + n; if (!quiet) lootToast(id, n); uiDirty(); }
-function take(id, n = 1) { G.inv[id] = Math.max(0, inv(id) - n); if (!G.inv[id]) delete G.inv[id]; uiDirty(); }
-function canAfford(cost) { for (const k in cost) if (inv(k) < cost[k]) return false; return true; }
-function pay(cost) { for (const k in cost) take(k, cost[k]); }
-function bestTool(slot) {
-  if (slot === 'hands') return 'hands';
-  let best = null, tier = -1;
-  for (const id in G.inv) { const t = ITEMS[id] && ITEMS[id].tool; if (t && t.slot === slot && t.tier > tier) { best = id; tier = t.tier; } }
-  return best;
-}
-function heldId() { return bestTool(G.p.held) || 'hands'; }
-function heldDef() { const id = heldId(); return id === 'hands' ? HANDS : ITEMS[id]; }
-function wearStat(key, base, better) { let v = base; for (const id in G.inv) { const w = ITEMS[id] && ITEMS[id].wear; if (w && w[key] !== undefined) v = better(v, w[key]); } return v; }
-const armorValue = () => wearStat('armor', 0, Math.max);
-const dmgMult = () => wearStat('dmg', 1, Math.max) * (1 + (G.p.level - 1) * 0.03);
-const xpNeed = l => Math.round(60 + 32 * l * l);
-function addXP(n) {
-  const p = G.p; p.xp += n;
-  while (p.xp >= xpNeed(p.level) && p.level < 30) {
-    p.xp -= xpNeed(p.level); p.level++; p.maxHp += 8; p.hp = p.maxHp;
-    banner('LEVEL ' + p.level + '!', 'Max health up. Weapons hit harder.'); sfx('levelup'); uiFlash('#ffe066', 0.25);
-    if (p.level >= 10) badge('level');
-  }
-  uiDirty();
-}
-
-/* ---------- temperature + the one survival step (used for play AND sleep) ---------- */
-function ambientTemp() {
-  const p = G.p, w = biomeW(p.x, p.z), n = nightAmount();
-  let T = w.forest * lerp(21, 9, n) + w.desert * lerp(35, 7, n) + w.snow * lerp(-5, -15, n);
-  R.heat = w.desert > 0.5 && n < 0.3 && !R.sheltered;
-  const wet = G.weather === 'rain' || G.weather === 'storm';
-  if (wet && !R.sheltered) T -= G.weather === 'storm' ? 9 : 7;
-  if (R.sheltered) T += 7;
-  if (R.nearFire) T += R.nearFireDist < 6 ? 26 : 26 * (1 - (R.nearFireDist - 6) / 4);
-  if (heldDef().tool.cls === 'torch') T += 6;
-  T += wearStat('warm', 0, Math.max) + (armorValue() > 0 ? 4 : 0);
-  if (p.y < -0.5) T -= 6;
-  R.temp = T; return T;
-}
-const SURV = { food: 3.0, water: 3.8, comfort: 14 };
-/** advance the survival meters by gh game-hours. ctx: {sleeping, sprint, rest} */
-function survivalStep(gh, ctx) {
-  const p = G.p, T = R.temp, sl = ctx.sleeping ? 0.5 : 1;
-  p.food = Math.max(0, p.food - SURV.food * gh * sl * (ctx.sprint ? 1.6 : 1));
-  p.water = Math.max(0, p.water - SURV.water * gh * sl * (ctx.sprint ? 1.5 : 1) * (R.heat ? 2 : 1));
-  if (T >= SURV.comfort) p.warm = Math.min(100, p.warm + (R.nearFire ? 34 : 11) * gh);
-  else p.warm = Math.max(0, p.warm - (SURV.comfort - T) * 0.85 * gh);
-  let dh = 0;
-  if (p.food <= 0) dh -= 5; if (p.water <= 0) dh -= 7; if (p.warm <= 0) dh -= 9;
-  if (dh === 0 && p.food > 25 && p.water > 25 && p.warm > 25) dh = ctx.sleeping ? (ctx.rest || 4) : 2.5;
-  p.hp = clamp(p.hp + dh * gh, 0, p.maxHp);
-  if (p.hp <= 0 && !ctx.sleeping) blackout(p.warm <= 0 ? 'cold' : p.water <= 0 ? 'thirst' : 'hunger');
-  if (ctx.sleeping && p.hp < 5) p.hp = 5;
-}
-function hurtPlayer(dmg, src) {
-  if (R.cinematic || R.sleeping || R.invuln > 0) return;
-  const p = G.p; dmg = Math.max(1, Math.round(dmg * (1 - armorValue())));
-  p.hp -= dmg; R.shake = 0.4; uiDamage(); sfx('hurt');
-  if (p.hp <= 0) { p.hp = 0; blackout(src || 'hurt'); }
-}
-function blackout(why) {
-  if (R.cinematic) return;
-  const p = G.p; R.cinematic = true; sfx('blackout'); G.stats.blackouts++;
-  // drop loose materials as a backpack at this spot (tools, clothes and story items stay with you)
-  const items = {}; let any = false;
-  for (const id in G.inv) { const d = ITEMS[id]; if (!d.tool && !d.wear && !d.story && id !== 'canteen') { items[id] = G.inv[id]; any = true; } }
-  if (any) { for (const id in items) delete G.inv[id]; G.pack = { x: p.x, z: p.z, items }; }
-  const msg = { cold: 'You got too cold and blacked out.', thirst: 'You ran out of water and blacked out.', hunger: 'You got too hungry and blacked out.' }[why] || 'You were knocked out!';
-  uiFade(true, 900, () => {
-    clearCreatures(); endRaid(true);
-    const s = G.spawn || R.start; p.x = s.x; p.z = s.z; p.y = groundAt(p.x, p.z); p.vy = 0;
-    if (G.hour > 7) G.day++; G.hour = 7; onNewDay(true);
-    p.hp = Math.round(p.maxHp * 0.5); p.food = Math.max(p.food, 45); p.water = Math.max(p.water, 45); p.warm = 90;
-    refreshPack(); uiDirty(); saveGame();
-    showMessage('💫 Everything went dark...', msg + '<br><br>You wake up ' + (G.spawn ? 'in your bed' : 'back at the cove') + ' the next morning.' + (any ? '<br><br><b>Your backpack fell where you blacked out.</b> It\'s marked on your map — go and get it!' : ''), () => { uiFade(false, 700); R.cinematic = false; R.invuln = 4; });
-  });
-}
-
-/* ---------- eating and drinking ---------- */
-function eat(id) {
-  const d = ITEMS[id]; if (!d || !d.food || inv(id) < 1) return false;
-  const p = G.p, f = d.food;
-  if (f.food && !f.hp && p.food >= 99) { hint('You\'re full!'); return false; }
-  if (!f.food && f.hp > 0 && p.hp >= p.maxHp) { hint('You\'re already at full health.'); return false; }
-  take(id, 1);
-  if (f.food) p.food = Math.min(100, p.food + f.food);
-  if (f.water) p.water = Math.min(100, p.water + f.water);
-  if (f.hp) p.hp = clamp(p.hp + f.hp, 1, p.maxHp);
-  sfx('eat');
-  if (f.hp < 0) { toast('🤢 Yuck! Raw ' + (id === 'rawfish' ? 'fish' : 'meat') + ' makes you feel sick. Cook it on a fire!', 'warn'); uiDamage(); }
-  else toast('😋 Ate ' + d.n, 'ok');
-  uiDirty(); return true;
-}
-function quickEat() {
-  const order = ['stew', 'meat', 'fish', 'roastshroom', 'coconut', 'cactusfruit', 'berries', 'mushroom'].filter(i => inv(i) > 0);
-  if (!order.length) { hint('No food! Cook meat or fish, or pick berries.'); sfx('deny'); return; }
-  const need = 100 - G.p.food;
-  const fit = order.filter(i => ITEMS[i].food.food <= need + 8);
-  eat(fit.length ? fit[0] : order[order.length - 1]);
-}
-function drinkCanteen() {
-  if (!inv('canteen')) { hint('You need a Canteen (2 hide + 1 rope). Or drink at a lake.'); sfx('deny'); return; }
-  if (!(G.flags.canteen > 0)) { hint('Your canteen is empty. Fill it at any water.'); sfx('deny'); return; }
-  if (G.p.water >= 99) { hint('You\'re not thirsty.'); return; }
-  G.flags.canteen--; G.p.water = Math.min(100, G.p.water + 34); sfx('drink'); toast('💧 Drank from canteen (' + G.flags.canteen + '/5 left)', 'ok'); uiDirty();
-}
-function drinkHere(amount) {
-  G.p.water = Math.min(100, G.p.water + (amount || 40)); sfx('drink');
-  if (inv('canteen') && (G.flags.canteen || 0) < 5) { G.flags.canteen = 5; toast('💧 Drank, and filled your canteen', 'ok'); } else toast('💧 Ahh. Fresh water.', 'ok');
-  uiDirty();
-}
-
-/* ---------- ground + movement ---------- */
-const FLOORS = new Map();   // "cx,cz" -> top height of a built floor
-function groundAt(x, z) {
-  let h = heightAt(x, z);
-  if (FLOORS.size) { const f = FLOORS.get(Math.floor(x / BUILD_CELL) + ',' + Math.floor(z / BUILD_CELL)); if (f !== undefined && f > h && f < h + 2.2) h = f; }
-  return h;
-}
-const _fwd = new THREE.Vector3();
-function updatePlayer(dt) {
-  const p = G.p, k = R.keys, free = !R.panel && !R.cinematic && !R.sleeping;
-  if (free) {   // arrow keys also turn the camera (handy on a trackpad)
-    if (k.ArrowLeft) p.yaw += dt * 2.2; if (k.ArrowRight) p.yaw -= dt * 2.2;
-    if (k.ArrowUp) p.pitch = Math.min(1.45, p.pitch + dt * 1.6); if (k.ArrowDown) p.pitch = Math.max(-1.45, p.pitch - dt * 1.6);
-  }
-  let mx = 0, mz = 0;
-  if (free) { if (k.KeyW) mz += 1; if (k.KeyS) mz -= 1; if (k.KeyD) mx += 1; if (k.KeyA) mx -= 1; if (R.joy) { mx += R.joy.x; mz += R.joy.y; } }
-  const moving = mx !== 0 || mz !== 0, grounded = p.y <= R.ground + 0.02;
-  const wading = p.y < -0.25, sprint = moving && (k.ShiftLeft || k.ShiftRight || (R.joy && R.joy.mag > 0.93 && free)) && p.stam > 1 && !wading && !R.fish;
-  R.sprinting = sprint;
-  if (sprint) p.stam = Math.max(0, p.stam - 13 * dt); else p.stam = Math.min(100, p.stam + (moving ? 9 : 16) * dt);
-  let speed = sprint ? 8.4 : 5.0; if (wading) speed *= 0.55; if (p.warm < 15) speed *= 0.8;
-  if (moving) {
-    const l = Math.hypot(mx, mz); if (l > 1) { mx /= l; mz /= l; }
-    const sn = Math.sin(p.yaw), cs = Math.cos(p.yaw);
-    const dx = (-sn * mz + cs * mx) * speed * dt, dz = (-cs * mz - sn * mx) * speed * dt;
-    const tryMove = (ax, az) => {
-      let nx = clamp(p.x + ax, -HALF + 4, HALF - 4), nz = clamp(p.z + az, -HALF + 4, HALF - 4);
-      const c = collide(nx, nz, 0.42); nx = c[0]; nz = c[1];
-      const gh = groundAt(nx, nz), run = Math.hypot(nx - p.x, nz - p.z);
-      if (gh < -1.25) { if (!R.tips.deep) { R.tips.deep = 1; hint('The water is too deep to cross.'); setTimeout(() => R.tips.deep = 0, 6000); } return false; }
-      if (run > 0.0001 && (gh - (grounded ? R.ground : p.y)) / run > 1.45) return false;   // too steep (a jump gets you up a ledge)
-      G.stats.dist += run; R.stepAcc += run; p.x = nx; p.z = nz; return true;
-    };
-    if (!tryMove(dx, dz)) { if (!tryMove(dx, 0)) tryMove(0, dz); }
-  } else { const c = collide(p.x, p.z, 0.42); p.x = c[0]; p.z = c[1]; }
-  R.ground = groundAt(p.x, p.z);
-  if (free && k.Space && grounded && !wading) { p.vy = 6.6; sfx('step', R.stepKind); }
-  p.vy -= 19 * dt; p.y += p.vy * dt;
-  if (p.y <= R.ground) { if (p.vy < -9) { R.shake = Math.max(R.shake, 0.2); sfx('thunk'); } p.y = R.ground; p.vy = 0; }
-  else if (p.vy <= 0 && p.y - R.ground < 0.45) { p.y = R.ground; p.vy = 0; }   // stick to slopes when walking downhill
-  // footsteps + head bob
-  if (R.stepAcc > (sprint ? 3.0 : 2.3) && grounded) { R.stepAcc = 0; sfx('step', R.stepKind); }
-  R.bob = moving && grounded ? R.bob + dt * (sprint ? 13 : 9) : R.bob * 0.9;
-  const cam = R.camera, bobY = Math.sin(R.bob) * (moving && grounded ? 0.055 : 0), eye = wading ? 1.25 : 1.62;
-  R.eye = lerp(R.eye || 1.62, eye, Math.min(1, dt * 6));
-  cam.position.set(p.x, p.y + R.eye + bobY, p.z);
-  if (R.shake > 0) { R.shake = Math.max(0, R.shake - dt * 1.6); cam.position.x += rnd(-1, 1) * R.shake * 0.25; cam.position.y += rnd(-1, 1) * R.shake * 0.25; }
-  cam.rotation.set(p.pitch, p.yaw, 0);
-  cam.getWorldDirection(_fwd);
-  if (R.invuln > 0) R.invuln -= dt;
-}
-
-/* ---------- held tool view model ---------- */
-function refreshViewModel() {
-  const id = heldId(); if (R.vmId === id) return;
-  if (R.vm) R.camera.remove(R.vm);
-  R.vm = toolModel(id); R.vmId = id; R.vm.traverse(o => { if (o.material === MAT_VC) o.material = MAT_VC_TOOL; }); R.camera.add(R.vm); uiDirty();
-  if (R.torchLight) R.torchLight.userData.on = R.vm.userData.cls === 'torch';
-}
-function swingNow(dur) { if (R.swing <= 0) { R.swing = R.swingDur = dur; R.swingHit = true; } }
-function updateViewModel(dt) {
-  refreshViewModel();
-  const vm = R.vm, cls = vm.userData.cls, sway = Math.sin(R.bob) * 0.012, s2 = Math.cos(R.bob * 0.5) * 0.01;
-  let px = 0.36, py = -0.4, pz = -0.62, rx = -0.5, ry = -0.15, rz = 0.08;
-  if (cls === 'spear') { px = 0.3; py = -0.34; pz = -0.35; rx = -1.42; ry = 0.06; rz = 0; }
-  if (cls === 'bow') { px = 0.16; py = -0.2; pz = -0.6; rx = 0; ry = 0.12; rz = -0.25; }
-  if (cls === 'rod') { px = 0.34; py = -0.42; pz = -0.5; rx = -0.95; }
-  if (cls === 'hands') { px = 0.3; py = -0.34; pz = -0.62; rx = -0.35; ry = 0.25; rz = 0.15; }
-  if (cls === 'torch') { px = 0.42; py = -0.55; pz = -0.85; rx = -0.15; ry = -0.1; rz = 0.12; }
-  if (R.swing > 0) {
-    R.swing -= dt; const t = 1 - Math.max(0, R.swing) / R.swingDur, a = Math.sin(t * Math.PI);
-    if (cls === 'spear') { pz -= a * 0.75; py += a * 0.05; }
-    else if (cls === 'bow') { pz += a * 0.08; }
-    else if (cls === 'hands') { pz -= a * 0.45; py += a * 0.16; rx -= a * 0.4; }
-    else { rx -= a * 1.35; rz -= a * 0.35; px -= a * 0.12; py += a * 0.1; }
-    if (!R.swingHit && t >= 0.45) { R.swingHit = true; resolveSwing(); }
-  }
-  if (R.fish) { rx += 0.25 + (R.fish.phase === 'bite' ? Math.sin(R.t * 40) * 0.05 : 0); }
-  vm.position.set(px + sway, py + Math.abs(s2) - (G.p.vy !== 0 ? 0.02 : 0), pz); vm.rotation.set(rx, ry, rz);
-  if (vm.userData.flame) { const f = vm.userData.flame; f.scale.set(0.55 + Math.sin(R.t * 23) * 0.05, 0.55 + Math.sin(R.t * 17) * 0.1, 0.55); }
-  if (vm.userData.arrow) vm.userData.arrow.visible = inv('arrow') > 0 && R.bowCd <= 0;
-  if (R.bowCd > 0) R.bowCd -= dt;
-}
-
-/* ---------- targeting (dot-product, forgiving) ---------- */
-const POIS = [];   // { id, x, y, z, reach, tall, label(), act(), on() }
-function findTarget() {
-  const p = G.p, cx = p.x, cy = R.camera.position.y, cz = p.z, f = _fwd;
-  let best = null, bestScore = -1e9;
-  const consider = (kind, ref, x, y0, z, reach, tall, bias) => {
-    const dxh = x - cx, dzh = z - cz, dh = Math.hypot(dxh, dzh); if (dh > reach + 0.5) return;
-    const y = tall ? clamp(cy + f.y * dh, y0, y0 + tall) : y0, dy = y - cy, d = Math.hypot(dh, dy); if (d > reach) return;
-    const dot = (dxh * f.x + dy * f.y + dzh * f.z) / (d || 1);
-    if (dot < (d < 1.4 ? 0.35 : 0.84)) return;
-    const score = dot * 3 - d * 0.22 + (bias || 0);
-    if (score > bestScore) { bestScore = score; best = { kind, ref, d }; }
-  };
-  nodeNear(cx, cz, 5.5, n => { const def = NT[n.t]; if (def.cls === 'stay' && n.gone) return; const big = def.cls === 'tree' || n.t === 'palm' || n.t === 'cactus'; consider('node', n, n.x, n.y + (big ? 0.3 : def.aim * n.s), n.z, big ? 4.3 : def.cls === 'pick' ? 3.4 : 4.0, big ? 3 : 0, def.cls === 'pick' ? 0.15 : 0); });
-  for (const s of G.structures) { if (Math.abs(s.x - cx) > 6 || Math.abs(s.z - cz) > 6) continue; const b = STRUCT[s.k]; consider('struct', s, s.x, s.y + (b.aim || 0.5), s.z, 4.4, b.tall || 0, b.use ? 0.25 : -0.4); }
-  for (const q of POIS) { if (Math.abs(q.x - cx) > 9 || Math.abs(q.z - cz) > 9 || (q.on && !q.on())) continue; consider('poi', q, q.x, q.y, q.z, q.reach || 4, q.tall || 0, 0.3); }
-  if (!best && f.y < -0.25) {   // looking down at open water?
-    for (const d of [1.6, 2.6, 3.6]) { const wx = cx + f.x * d, wz = cz + f.z * d; if (heightAt(wx, wz) < -0.12 && cy + f.y * d < 0.5) { best = { kind: 'water', ref: null, d }; break; } }
-  }
-  return best;
-}
-function targetPrompt(t) {
-  if (!t) return '';
-  if (t.kind === 'water') return key('E') + ' Drink' + (inv('canteen') ? ' and fill canteen' : '');
-  if (t.kind === 'poi') { const l = typeof t.ref.label === 'function' ? t.ref.label() : t.ref.label; return l ? key('E') + ' ' + l : ''; }
-  if (t.kind === 'struct') return structPrompt(t.ref);
-  const n = t.ref, def = NT[n.t], need = nodeNeeds(n);
-  if (def.cls === 'stay' && n.gone) return '';
-  if (!need) return key('E') + ' ' + def.verb;
-  if (need === 'axe') return bestTool('axe') ? key('Click') + ' Chop ' + def.n : '🪓 ' + def.n + ' — you need an Axe';
-  if (def.cls === 'crystal' && bestTool('pick') !== 'ironpick') return '💎 ' + def.n + ' — you need an Iron Pickaxe';
-  return bestTool('pick') ? key('Click') + ' Mine ' + def.n : '⛏️ ' + def.n + ' — you need a Pickaxe';
-}
-const TKEY = { E: '✋', Click: '⚔️', R: '↻', X: '✕', G: '💧' };
-const key = k => R.touch && TKEY[k] ? '<kbd class="tk">' + TKEY[k] + '</kbd>' : '<kbd>' + k + '</kbd>';
-
-/* ---------- actions ---------- */
-function primaryAction() {
-  if (R.panel || R.cinematic || R.sleeping || !R.started) return;
-  if (R.build) { placeBuild(); return; }
-  const t = R.target, cls = heldDef().tool.cls;
-  if (R.fish) { fishClick(); return; }
-  if (cls === 'bow' && !(t && (t.kind === 'poi' || t.kind === 'struct'))) { shootBow(); return; }
-  if (cls === 'rod' && tryCast()) return;
-  if (t && t.kind === 'node') {
-    const need = nodeNeeds(t.ref);
-    if (!need) { if (!(NT[t.ref.t].cls === 'stay' && t.ref.gone)) pickNode(t.ref); return; }
-    if (bestTool(need) && G.p.held !== need) { G.p.held = need; refreshViewModel(); }
-  } else if (t && (t.kind === 'poi' || t.kind === 'struct' || t.kind === 'water') && !nearestHostile(4.5)) { interact(); return; }
-  if (R.swing > 0) return;
-  const c = heldDef().tool.cls;
-  R.swing = R.swingDur = c === 'spear' ? 0.34 : c === 'sword' ? 0.3 : c === 'hands' ? 0.3 : 0.42; R.swingHit = false; sfx('swish');
-}
-function interact() {
-  if (R.panel || R.cinematic || R.sleeping || !R.started || R.t - (R.closedAt || -9) < 0.25) return;
-  if (R.build) return;
-  const t = R.target; if (!t) return;
-  if (t.kind === 'water') { drinkHere(); return; }
-  if (t.kind === 'poi') { t.ref.act(); return; }
-  if (t.kind === 'struct') { useStructure(t.ref); return; }
-  if (t.kind === 'node') { if (nodeNeeds(t.ref)) primaryAction(); else if (!(NT[t.ref.t].cls === 'stay' && t.ref.gone)) pickNode(t.ref); }
-}
-function resolveSwing() {
-  const tool = heldDef().tool, p = G.p;
-  // creatures first
-  let hitC = null, bd = 99;
-  for (const c of R.creatures) {
-    if (c.dead) continue;
-    const dx = c.x - p.x, dz = c.z - p.z, d = Math.hypot(dx, dz) - c.def.r * c.scale; if (d > tool.reach) continue;
-    const dot = (dx * _fwd.x + dz * _fwd.z) / (Math.hypot(dx, dz) || 1); if (dot < 0.5 && d > 0.6) continue;
-    if (d < bd) { bd = d; hitC = c; }
-  }
-  if (hitC) { damageCreature(hitC, tool.dmg * dmgMult(), tool); return; }
-  const t = findTarget();
-  if (t && t.kind === 'node') {
-    const n = t.ref, need = nodeNeeds(n), def = NT[n.t];
-    if (!need) return;
-    if (tool.cls !== need) { hint(need === 'axe' ? 'You need an Axe to chop trees. Make one in the Craft menu (press <b>C</b>).' : 'You need a Pickaxe to break rocks. Make one in the Craft menu (press <b>C</b>).'); sfx('deny'); return; }
-    if (def.cls === 'crystal' && tool.tier < 2) { hint('The crystal is too hard! You need an Iron Pickaxe.'); sfx('deny'); return; }
-    hitNode(n, tool);
-  }
-}
-
-/* ---------- bow ---------- */
-function shootBow() {
-  if (R.bowCd > 0) return;
-  if (inv('arrow') < 1) { hint('No arrows! Craft some: 2 sticks + 1 flint = 4 arrows.'); sfx('deny'); return; }
-  take('arrow', 1); R.bowCd = 0.55; sfx('bow'); R.swing = R.swingDur = 0.25; R.swingHit = true;
-  const m = vcMesh([part(box(0.03, 0.03, 0.8), 0xc9b98a, [0, 0, 0]), part(cone(0.05, 0.14, 4), 0x3b4046, [0, 0, -0.45], [-Math.PI / 2, 0, 0]), part(box(0.1, 0.01, 0.14), 0xffffff, [0, 0, 0.36])]);
-  const c = R.camera.position; m.position.set(c.x + _fwd.x * 0.6, c.y - 0.1 + _fwd.y * 0.6, c.z + _fwd.z * 0.6); R.scene.add(m);
-  R.arrows.push({ m, vx: _fwd.x * 46, vy: _fwd.y * 46 + 1.2, vz: _fwd.z * 46, life: 3 });
-}
-function updateArrows(dt) {
-  for (let i = R.arrows.length - 1; i >= 0; i--) {
-    const a = R.arrows[i], m = a.m; a.life -= dt; a.vy -= 11 * dt;
-    const steps = 3; let done = a.life <= 0;
-    for (let s = 0; s < steps && !done; s++) {
-      m.position.x += a.vx * dt / steps; m.position.y += a.vy * dt / steps; m.position.z += a.vz * dt / steps;
-      for (const c of R.creatures) {
-        if (c.dead) continue; const r = c.def.r * c.scale + 0.45;
-        if (Math.hypot(c.x - m.position.x, c.z - m.position.z) < r && m.position.y > c.y - 0.2 && m.position.y < c.y + c.model.h + 0.5) {
-          damageCreature(c, ITEMS.bow.tool.dmg * dmgMult(), ITEMS.bow.tool); if (Math.random() < 0.5) give('arrow', 1, true); done = true; break;
-        }
-      }
-      if (!done && m.position.y < heightAt(m.position.x, m.position.z)) { puff(m.position.x, m.position.y + 0.1, m.position.z, 0xc9b98a, 3, { size: 0.1 }); sfx('thunk'); done = true; }
-    }
-    m.lookAt(m.position.x - a.vx, m.position.y - a.vy, m.position.z - a.vz);
-    if (done) { R.scene.remove(m); m.geometry.dispose(); R.arrows.splice(i, 1); }
-  }
-}
-
-/* ---------- fishing ---------- */
-function startFishing(x, z, rich) {
-  if (!R.bobber) { R.bobber = vcMesh([part(sph(0.12, 8, 6), 0xe2334c, [0, 0.05, 0]), part(sph(0.1, 8, 6), 0xffffff, [0, -0.03, 0])]); R.bobber.castShadow = false; R.scene.add(R.bobber); }
-  R.bobber.visible = true; R.bobber.position.set(x, rich ? heightAt(x, z) + 0.1 : 0.05, z);
-  R.fish = { phase: 'wait', t: rnd(2.2, 6), x, z, rich, px: G.p.x, pz: G.p.z, y0: R.bobber.position.y };
-  if (G.p.held !== 'rod') { G.p.held = 'rod'; refreshViewModel(); }
-  sfx('splash'); R.swing = R.swingDur = 0.4; R.swingHit = true; hint('Wait for a bite... then click!', 3);
-}
-function tryCast() {
-  const c = R.camera.position;
-  for (let d = 3; d <= 17; d += 0.7) {
-    const x = c.x + _fwd.x * d, y = c.y + _fwd.y * d + 0.3 - d * d * 0.012, z = c.z + _fwd.z * d;
-    const h = heightAt(x, z);
-    if (y <= 0.05 && h < -0.3) { startFishing(x, z, false); return true; }
-    if (y < h) break;
-  }
-  return false;
-}
-function stopFishing() { R.fish = null; if (R.bobber) R.bobber.visible = false; }
-function fishClick() {
-  const f = R.fish;
-  if (f.phase === 'bite') {
-    if (Math.random() < 0.85) { const n = f.rich ? 2 : 1; give('rawfish', n); G.stats.fish += n; addXP(6); sfx('splash'); puff(f.x, f.y0 + 0.2, f.z, 0xbfe6ff, 8, { size: 0.15 }); if (G.stats.fish >= 5) badge('angler'); }
-    else { hint('It wriggled off the hook!'); sfx('deny'); }
-  } else hint('You reeled in too early.');
-  stopFishing();
-}
-function updateFishing(dt) {
-  const f = R.fish; if (!f) return;
-  if (dist2(G.p.x, G.p.z, f.px, f.pz) > 3 || G.p.held !== 'rod') { stopFishing(); return; }
-  f.t -= dt;
-  if (f.phase === 'wait') { R.bobber.position.y = f.y0 + Math.sin(R.t * 2.5) * 0.03; if (f.t <= 0) { f.phase = 'bite'; f.t = 1.3; sfx('bite'); hint('🐟 BITE! Click now!', 1.3); puff(f.x, f.y0 + 0.1, f.z, 0xffffff, 5, { size: 0.1 }); } }
-  else { R.bobber.position.y = f.y0 - 0.12 + Math.sin(R.t * 30) * 0.04; if (f.t <= 0) { hint('Too slow — the fish got away.'); stopFishing(); } }
-}
-
-/* ---------- input ---------- */
-function setupInput(canvas) {
-  window.addEventListener('keydown', e => {
-    if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
-    if (e.repeat) return; R.keys[e.code] = true; audioInit();
-    if (!R.started) return;
-    if (e.code === 'Escape') { if (R.build) { cancelBuild(); return; } if (R.panel) { if (R.panel !== 'pause' || !document.pointerLockElement) closePanel(); } else if (!R.cinematic && !R.sleeping) openPanel('pause'); return; }
-    if (R.panel) {
-      const invP = R.panel === 'inv' || R.panel === 'craft' || R.panel === 'build';
-      if (invP && (e.code === 'Tab' || e.code === 'KeyI')) switchInvTab('inv');
-      else if (invP && e.code === 'KeyC') switchInvTab('craft');
-      else if (invP && e.code === 'KeyB') switchInvTab('build');
-      else if (e.code === 'KeyE' && invP) closePanel();
-      else if ((e.code === 'Tab' || e.code === 'KeyI' || e.code === 'KeyE') && (R.panel === 'fire' || R.panel === 'chest')) closePanel(); else if (e.code === 'KeyJ' && R.panel === 'journal') closePanel(); else if (e.code === 'KeyM' && R.panel === 'map') closePanel();
-      else if ((e.code === 'Enter' || e.code === 'Space' || e.code === 'KeyE') && R.panelNext) R.panelNext();
-      return;
-    }
-    if (R.cinematic || R.sleeping) return;
-    switch (e.code) {
-      case 'KeyE': interact(); break;
-      case 'Tab': case 'KeyI': openPanel('inv'); break;
-      case 'KeyC': if (R.build) cancelBuild(); openPanel('craft'); break;
-      case 'KeyB': if (R.build) cancelBuild(); else openPanel('build'); break;
-      case 'KeyJ': openPanel('journal'); break;
-      case 'KeyM': openPanel('map'); break;
-      case 'KeyF': quickEat(); break;
-      case 'KeyG': drinkCanteen(); break;
-      case 'KeyR': if (R.build) R.build.rot = (R.build.rot + 1) % 4; break;
-      case 'KeyX': if (R.build) cancelBuild(); else tryDismantle(); break;
-      case 'KeyT': G.p.held = G.p.held === 'torch' ? 'hands' : (bestTool('torch') ? 'torch' : G.p.held); refreshViewModel(); break;
-      default: if (e.code.startsWith('Digit')) { const i = +e.code.slice(5) - 1; if (i >= 0 && i < HOTBAR.length) selectSlot(HOTBAR[i]); }
-    }
-  });
-  window.addEventListener('keyup', e => { R.keys[e.code] = false; });
-  window.addEventListener('blur', () => { R.keys = {}; });
-  canvas.addEventListener('mousedown', e => {
-    audioInit(); if (!R.started || R.panel) return;
-    if (!document.pointerLockElement && !R.dragLook) { lockPointer(); return; }
-    if (e.button === 0) { R.mouseDown = true; R.dragMoved = 0; if (!R.dragLook) primaryAction(); }
-    if (e.button === 2 && R.build) cancelBuild();
-  });
-  window.addEventListener('mouseup', e => { if (e.button === 0) { if (R.dragLook && R.mouseDown && R.dragMoved < 6 && !R.panel) primaryAction(); R.mouseDown = false; } });
-  canvas.addEventListener('contextmenu', e => e.preventDefault());
-  window.addEventListener('mousemove', e => {
-    if (!R.started || R.panel || R.cinematic) return;
-    const locked = document.pointerLockElement === canvas;
-    if (locked || (R.dragLook && R.mouseDown)) {
-      const s = 0.0023 * R.sens; R.dragMoved += Math.abs(e.movementX) + Math.abs(e.movementY);
-      G.p.yaw -= clamp(e.movementX, -120, 120) * s; G.p.pitch = clamp(G.p.pitch - clamp(e.movementY, -120, 120) * s, -1.45, 1.45);
-    }
-  });
-  window.addEventListener('wheel', e => { if (!R.started || R.panel) return; const own = HOTBAR.filter(s => bestTool(s)); let i = own.indexOf(G.p.held); i = (i + (e.deltaY > 0 ? 1 : own.length - 1)) % own.length; selectSlot(own[i]); }, { passive: true });
-  document.addEventListener('pointerlockchange', () => { R.locked = document.pointerLockElement === canvas; if (R.locked) R.lockOk = true; if (!R.locked && R.started && !R.panel && !R.cinematic && !R.dragLook && !R.suppressPause) openPanel('pause'); });
-  document.addEventListener('pointerlockerror', () => { R.lockErr = (R.lockErr || 0) + 1; if (!R.lockOk && R.lockErr >= 3) { R.dragLook = true; hint('Mouse-look is blocked here: hold the left mouse button and drag to look around, or use the arrow keys.', 6); } else if (R.started && !R.panel) hint('Click the game to look around with the mouse.', 3); });
-}
-function lockPointer() { if (R.dragLook || R.touch) return; try { const pr = R.renderer.domElement.requestPointerLock(); if (pr && pr.catch) pr.catch(() => { }); } catch (e) { R.dragLook = true; } }
-function selectSlot(s) { if (!bestTool(s)) { hint('You don\'t have that tool yet.'); return; } if (R.fish) stopFishing(); G.p.held = s; refreshViewModel(); sfx('click'); }
 
 /* =========================================================================
    07_build: base building — placement, structures, fire, sleep, storage
@@ -2106,4 +1709,4 @@ function touchHelpHTML() {
 }
 // @end-moved
 
-export { inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP, ambientTemp, SURV, survivalStep, hurtPlayer, blackout, eat, quickEat, drinkCanteen, drinkHere, FLOORS, groundAt, _fwd, updatePlayer, refreshViewModel, swingNow, updateViewModel, POIS, findTarget, targetPrompt, TKEY, key, primaryAction, interact, resolveSwing, shootBow, updateArrows, startFishing, tryCast, stopFishing, fishClick, updateFishing, setupInput, lockPointer, selectSlot, STRUCT, ROOFS, WALLS, cellKey, structColliders, spawnStructure, removeStructure, rebuildStructures, startBuild, cancelBuild, aimPoint, updateBuildGhost, placeBuild, tryDismantle, isRoofed, structPrompt, useStructure, lightFire, douse, addFuel, structuresStep, structuresNewDay, nearestFlame, updateStructures, trySleep, spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };
+export { STRUCT, ROOFS, WALLS, cellKey, structColliders, spawnStructure, removeStructure, rebuildStructures, startBuild, cancelBuild, aimPoint, updateBuildGhost, placeBuild, tryDismantle, isRoofed, structPrompt, useStructure, lightFire, douse, addFuel, structuresStep, structuresNewDay, nearestFlame, updateStructures, trySleep, spawnCreature, removeCreature, clearCreatures, nearestHostile, damageCreature, killCreature, moveCreature, updateCreatures, wander, spawnPoint, updateSpawner, startRaid, endRaid, initScout, scoutMeat, scoutLeaves, scoutHungerCheck, hearts, scoutAlert, compassWord, updateScout, CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };
