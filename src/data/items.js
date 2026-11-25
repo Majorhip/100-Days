@@ -4,7 +4,7 @@
 // (tests/golden/compare-build.mjs); changes go through tests/golden/approved-edits.mjs.
 // Standing rule: no three.js, no page. TODO(split) marks where this still reaches out.
 
-import '../state.js';   // load order: runs after the previous part of the original script
+import '../audio/audio.js';   // load order: runs after the previous part of the original script
 
 // @moved-from: original
 

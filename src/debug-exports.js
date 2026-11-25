@@ -9,6 +9,7 @@ export * from './core/constants.js';
 export * from './core/geometry.js';
 export * from './gfx/core.js';
 export * from './state.js';
+export * from './audio/audio.js';
 export * from './data/items.js';
 export * from './data/recipes.js';
 export * from './data/buildings.js';
