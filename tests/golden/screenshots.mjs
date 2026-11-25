@@ -61,7 +61,15 @@ try {
     await new Promise(r => setTimeout(r, SETTLE_MS));
     const info = await page.evaluate(() => { const { G, R } = window.__stranded; return { fps: Math.round(R.fps || 0), biome: R.biome, hour: G.hour, weather: G.weather }; });
     const file = join(OUT, v.name + '.png');
-    await page.screenshot({ path: file });
+    // Storms throw lightning at random moments (R.flashT, R.boltT and the white #flash
+    // overlay). Capture between strikes, and retake if a strike started during the capture.
+    const calm = () => page.evaluate(() => { const { R } = window.__stranded; const f = document.getElementById('flash'); return !(R.flashT > 0) && !(R.boltT > 0) && !(f && parseFloat(getComputedStyle(f).opacity) > 0.01); });
+    for (let tries = 0; tries < 8; tries++) {
+      await page.waitForFunction(() => { const { R } = window.__stranded; const f = document.getElementById('flash'); return !(R.flashT > 0) && !(R.boltT > 0) && !(f && parseFloat(getComputedStyle(f).opacity) > 0.01); }, { polling: 50, timeout: 20000 });
+      await page.screenshot({ path: file });
+      if (await calm()) break;
+      info.retakes = (info.retakes || 0) + 1;
+    }
     meta.views.push({ ...v, ...info });
     console.log(`${v.name.padEnd(18)} ${info.biome.padEnd(7)} hour ${info.hour.toFixed(1)}  ${info.weather.padEnd(6)} ${info.fps} fps`);
   }

@@ -18,7 +18,7 @@ try {
   await o.page.waitForSelector('#iSkip', { timeout: 10000 });
   await o.page.click('#iSkip');
   await o.page.waitForFunction(() => window.__stranded.R.started === true, { timeout: 60000 });
-  const start = await o.page.evaluate(() => { const { G } = window.__stranded; return { day: G.day, hour: G.hour, x: G.p.x, z: G.p.z }; });
+  const start = await o.page.evaluate(() => { const { G, R } = window.__stranded; return { day: G.day, hour: G.hour, x: G.p.x, z: G.p.z, atCove: G.p.x === R.start.x && G.p.z === R.start.z }; });
   await o.page.keyboard.down('KeyW');
   await new Promise(res => setTimeout(res, 3000));
   await o.page.keyboard.up('KeyW');
@@ -34,6 +34,7 @@ console.log(`after ${RUN_MS / 1000}s: ${hours.toFixed(2)} game hours passed (exp
 if (warnings.length) console.log('three.js warnings:\n  ' + warnings.join('\n  '));
 const fails = [];
 if (errors.length) fails.push('page errors:\n  ' + errors.join('\n  '));
+if (!r.start.atCove) fails.push('a new game did not start the player at the cove (R.start): the new game state did not reach the game');
 if (r.moved < 1) fails.push('player did not move when W was held');
 if (hours < 0.5) fails.push('game clock did not advance');
 if (fails.length) { console.error('FAIL: ' + fails.join('\n')); process.exit(1); }

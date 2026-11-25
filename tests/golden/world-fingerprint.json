@@ -1,8 +1,9 @@
 {
   "source": "original/Stranded-100-Days-PC.html",
   "recorded": "2026-11-25",
-  "world": "aaed1bf6d36ed40a41196d3573344e3fc6ffd13e22577d4602fd3edf905bf552",
+  "world": "996e841e9493db87c78060f28dd045a5bf8474cd796327597ff0b5f8f70a359f",
   "parts": {
+    "models": "65340bec653ff1f51c42ff52a8b234537dd230450144647535736b5f940a5b51",
     "terrain": "40f8711b286cc12d58feccc5ec72627bf1b7f768a6f407bc70e030d69df71726",
     "nodes": "959502fb8c3a61d7e75fc022453803e49880db8609d2791dc5c89f9da20670ad",
     "nodeTints": "99f31fa2505fd3257b206dc0e47b47d72a518af7581fd746f15b29ab595fedd5",
@@ -32,7 +33,12 @@
       "stones": 195
     },
     "lakes": 3,
-    "sites": 15
+    "sites": 15,
+    "models": {
+      "meshes": 252,
+      "vertices": 69048,
+      "jitSeed": 1757018628
+    }
   },
   "spawn": {
     "x": 16.100335739730905,

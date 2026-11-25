@@ -29,7 +29,19 @@ function collect() {
   const prim = o => { const r = {}; for (const k of Object.keys(o).sort()) { const v = o[k]; if (v === null || typeof v !== 'object' && typeof v !== 'function') r[k] = v; } return r; };
   const tints = {};
   for (const t of Object.keys(NODE_MESH).sort()) { const ic = NODE_MESH[t].m.instanceColor; tints[t] = ic ? Array.from(ic.array) : null; }
+  // models: every mesh's shape and vertex colours in scene order, hashed in the page (FNV-1a).
+  // Vertex colours carry a per-triangle jitter from one shared counter (_jitSeed), so if code
+  // that builds models ever ran in a different order, these colours would change.
+  const fnv = (h, arr) => { const b = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength); for (let i = 0; i < b.length; i++) { h ^= b[i]; h = Math.imul(h, 16777619); } return h >>> 0; };
+  let mh = 2166136261, meshes = 0, verts = 0;
+  window.__stranded.R.scene.traverse(o => {
+    if (!o.isMesh || !o.geometry || !o.geometry.attributes) return;
+    const a = o.geometry.attributes; if (!a.position) return;
+    meshes++; verts += a.position.count;
+    mh = fnv(mh, a.position.array); if (a.color) mh = fnv(mh, a.color.array);
+  });
   return {
+    models: { meshes, verts, hash: mh, jitSeed: window.__stranded._jitSeed },
     terrain: { grid: GRID, cell: CELL, heights: Array.from(HGT) },
     nodes: NODES.map(n => [n.t, n.x, n.y, n.z, n.s, n.ry, n.hp]),
     nodeTints: tints,
@@ -57,7 +69,8 @@ try {
       nodes: data.nodes.length,
       byType: Object.fromEntries(Object.entries(counts).sort()),
       lakes: data.lakes.length,
-      sites: data.sites.length
+      sites: data.sites.length,
+      models: { meshes: data.models.meshes, vertices: data.models.verts, jitSeed: data.models.jitSeed }
     },
     spawn: data.spawn
   };
