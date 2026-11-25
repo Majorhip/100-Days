@@ -1,0 +1,15 @@
+{
+  "name": "stranded",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Stranded: 100 Days on Kestrel Island",
+  "type": "module",
+  "scripts": {
+    "golden:fingerprint": "node tests/golden/fingerprint.mjs",
+    "golden:save": "node tests/golden/savecheck.mjs",
+    "golden:shots": "node tests/golden/screenshots.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.18.1"
+  }
+}

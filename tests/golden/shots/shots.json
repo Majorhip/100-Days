@@ -1,0 +1,76 @@
+{
+  "target": "C:\\Users\\USER\\Desktop\\Caspars Folder\\100 Days Game\\original\\Stranded-100-Days-PC.html",
+  "date": "2026-11-25",
+  "views": [
+    {
+      "name": "1-meadow-noon",
+      "x": 20,
+      "z": 70,
+      "yaw": 0,
+      "pitch": -0.02,
+      "hour": 12,
+      "weather": "clear",
+      "fps": 14,
+      "biome": "forest"
+    },
+    {
+      "name": "2-dusk",
+      "x": 20,
+      "z": 70,
+      "yaw": 1.5707963267948966,
+      "pitch": 0.02,
+      "hour": 18.9,
+      "weather": "clear",
+      "fps": 12,
+      "biome": "forest"
+    },
+    {
+      "name": "3-campfire-night",
+      "x": -57.5,
+      "z": 155,
+      "yaw": 0.8940795906493952,
+      "pitch": -0.28,
+      "hour": 23,
+      "weather": "clear",
+      "fire": 2,
+      "fps": 12,
+      "biome": "forest"
+    },
+    {
+      "name": "4-frostpeak",
+      "x": -80,
+      "z": -105,
+      "yaw": -0.6146629519221656,
+      "pitch": 0.08,
+      "hour": 11,
+      "weather": "clear",
+      "fps": 13,
+      "biome": "snow"
+    },
+    {
+      "name": "5-dust-flats",
+      "x": 160,
+      "z": 20,
+      "yaw": -0.5930025618815259,
+      "pitch": -0.03,
+      "hour": 13,
+      "weather": "clear",
+      "fps": 13,
+      "biome": "desert"
+    },
+    {
+      "name": "6-storm",
+      "x": 20,
+      "z": 70,
+      "yaw": 0,
+      "pitch": -0.02,
+      "hour": 14,
+      "weather": "storm",
+      "fps": 12,
+      "biome": "forest"
+    }
+  ],
+  "gpu": "ANGLE (Intel, Intel(R) UHD Graphics 620 (0x00005917) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  "quality": "High",
+  "errors": []
+}

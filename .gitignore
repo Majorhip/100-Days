@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+tests/golden/shots-latest/
+
+# Working copies the repo was built from (tracked copies live in original/ and tests/fixtures/)
+/Stranded-100-Days-PC (2).html
+/Save 1.json

@@ -1,0 +1,2 @@
+# Never rewrite line endings: the original game file and fixtures must stay byte-identical.
+* -text

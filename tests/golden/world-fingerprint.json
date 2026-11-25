@@ -1,0 +1,41 @@
+{
+  "source": "original/Stranded-100-Days-PC.html",
+  "recorded": "2026-11-25",
+  "world": "aaed1bf6d36ed40a41196d3573344e3fc6ffd13e22577d4602fd3edf905bf552",
+  "parts": {
+    "terrain": "40f8711b286cc12d58feccc5ec72627bf1b7f768a6f407bc70e030d69df71726",
+    "nodes": "959502fb8c3a61d7e75fc022453803e49880db8609d2791dc5c89f9da20670ad",
+    "nodeTints": "99f31fa2505fd3257b206dc0e47b47d72a518af7581fd746f15b29ab595fedd5",
+    "lakes": "e9e3e8eedd449dfbae02f87d7935e742fee2a1ecad24a2e23ef19e395502ae99",
+    "sites": "4ac66754439b71c21d918818cbc1dfe75d7da30fee051018d2e42d44f4fd4055",
+    "spawn": "f982c77edfd7a57748b7d56ed04edfa65dad5a1fc450d407afb2d625e76fca85"
+  },
+  "counts": {
+    "heights": 40401,
+    "nodes": 2909,
+    "byType": {
+      "boulder": 306,
+      "bush": 138,
+      "cactus": 125,
+      "crystal": 39,
+      "deadtree": 70,
+      "flintp": 102,
+      "herb": 78,
+      "ironrock": 61,
+      "mushroom": 108,
+      "oak": 250,
+      "palm": 47,
+      "pine": 640,
+      "reed": 184,
+      "snowpine": 300,
+      "sticks": 266,
+      "stones": 195
+    },
+    "lakes": 3,
+    "sites": 15
+  },
+  "spawn": {
+    "x": 16.100335739730905,
+    "z": 268.0168449726023
+  }
+}
