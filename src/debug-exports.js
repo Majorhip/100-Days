@@ -52,4 +52,8 @@ export * from './build/sleep.js';
 export * from './creatures/creatures.js';
 export * from './creatures/spawner.js';
 export * from './creatures/scout.js';
+export * from './story/props.js';
+export * from './story/landmarks.js';
+export * from './story/ray.js';
+export * from './story/quests.js';
 export * from './legacy.js';

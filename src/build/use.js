@@ -15,7 +15,8 @@ import { drinkHere } from '../player/health.js';
 import { key } from '../player/targeting.js';
 import { ROOFS, cellKey } from './structures.js';
 import { trySleep } from './sleep.js';
-import { badge, hint, toast, openPanel } from '../legacy.js';
+import { badge } from '../story/quests.js';
+import { hint, toast, openPanel } from '../legacy.js';
 
 // @moved-from: original
 

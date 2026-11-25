@@ -62,4 +62,8 @@ window.__stranded = ALL;
 // @moved-to: src/creatures/creatures.js
 // @moved-to: src/creatures/spawner.js
 // @moved-to: src/creatures/scout.js
+// @moved-to: src/story/props.js
+// @moved-to: src/story/landmarks.js
+// @moved-to: src/story/ray.js
+// @moved-to: src/story/quests.js
 // @moved-to: src/legacy.js

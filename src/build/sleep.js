@@ -11,7 +11,8 @@ import { stopFishing } from '../player/fishing.js';
 import { structuresStep, nearestFlame } from './update.js';
 import { clearCreatures, nearestHostile } from '../creatures/creatures.js';
 import { startRaid } from '../creatures/spawner.js';
-import { badge, hint, uiFade, showMorningReport, advanceTime, saveGame } from '../legacy.js';
+import { badge } from '../story/quests.js';
+import { hint, uiFade, showMorningReport, advanceTime, saveGame } from '../legacy.js';
 
 // @moved-from: original
 

@@ -11,7 +11,8 @@ import { SITES, biomeAt, heightAt, slopeAt, inSite } from '../world/terrain.js';
 import { nightAmount } from '../world/sky.js';
 import { give, addXP } from '../player/inventory.js';
 import { spawnCreature, removeCreature } from './creatures.js';
-import { badge, toast, banner } from '../legacy.js';
+import { badge } from '../story/quests.js';
+import { toast, banner } from '../legacy.js';
 
 // @moved-from: original
 

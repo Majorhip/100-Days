@@ -17,7 +17,9 @@ import { hurtPlayer } from '../player/health.js';
 import { nearestFlame } from '../build/update.js';
 import { endRaid } from './spawner.js';
 import { scoutAlert } from './scout.js';
-import { spawnPackNote, badge, tipOnce, hint, banner, uiFlash, dmgNumber } from '../legacy.js';
+import { spawnPackNote } from '../story/ray.js';
+import { badge, tipOnce } from '../story/quests.js';
+import { hint, banner, uiFlash, dmgNumber } from '../legacy.js';
 
 // @moved-from: original
 

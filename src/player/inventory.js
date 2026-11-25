@@ -7,7 +7,8 @@ import '../models/structures.js';   // load order: runs after the previous part 
 import { G } from '../state.js';
 import { sfx } from '../audio/audio.js';
 import { ITEMS, HANDS } from '../data/items.js';
-import { badge, uiDirty, lootToast, banner, uiFlash } from '../legacy.js';
+import { badge } from '../story/quests.js';
+import { uiDirty, lootToast, banner, uiFlash } from '../legacy.js';
 
 // @moved-from: original
 

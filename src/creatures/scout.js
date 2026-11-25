@@ -14,7 +14,9 @@ import { ANIMALS } from '../models/animals.js';
 import { inv, give, take, addXP } from '../player/inventory.js';
 import { POIS } from '../player/targeting.js';
 import { damageCreature } from './creatures.js';
-import { nearestClosedChest, badge, tipOnce, hint, toast, banner, dmgNumber } from '../legacy.js';
+import { nearestClosedChest } from '../story/props.js';
+import { badge, tipOnce } from '../story/quests.js';
+import { hint, toast, banner, dmgNumber } from '../legacy.js';
 
 // @moved-from: original
 

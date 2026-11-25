@@ -14,7 +14,8 @@ import { puff } from '../world/sky.js';
 import { give, addXP } from './inventory.js';
 import { _fwd } from './movement.js';
 import { refreshViewModel } from './viewmodel.js';
-import { badge, hint } from '../legacy.js';
+import { badge } from '../story/quests.js';
+import { hint } from '../legacy.js';
 
 // @moved-from: original
 

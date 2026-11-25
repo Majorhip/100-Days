@@ -4,18 +4,16 @@
 // The code between @moved-from and @end-moved must stay byte-identical to the original
 // (tests/golden/compare-build.mjs); changes go through tests/golden/approved-edits.mjs.
 
-import './creatures/scout.js';   // load order: runs after the previous part of the original script
+import './story/quests.js';   // load order: runs after the previous part of the original script
 import * as THREE from 'three';
-import { TAU, clamp, lerp, dist2, rnd, angDiff } from './core/math.js';
+import { TAU, clamp, dist2, rnd, angDiff } from './core/math.js';
 import { $ } from './ui/dom.js';
 import { hash2 } from './core/noise.js';
 import { HOUR_SECONDS, TICK, SAVE_KEY, SAVE_VERSION, WORLD, HALF } from './core/constants.js';
-import { box, cyl, cone, ico, sph, part, merge } from './core/geometry.js';
-import { GU, MAT_GLOW, vcMesh } from './gfx/core.js';
+import { GU } from './gfx/core.js';
 import { newGameState, G, R, setG } from './state.js';
 import { AU, audioInit, sfx, audioAmbient, setVolume } from './audio/audio.js';
-import { LAKES, SITES, biomeAt, siteH, heightAt, shorePoint, terrainColor } from './world/terrain.js';
-import { addCollider } from './world/collision.js';
+import { biomeAt, heightAt, shorePoint, terrainColor } from './world/terrain.js';
 import { nightAmount, puff } from './world/sky.js';
 import { GFXQ } from './gfx/quality.js';
 import { GFX } from './gfx/textures.js';
@@ -30,20 +28,17 @@ import { gfxLightPool, gfxUpdate } from './gfx/update.js';
 import { ITEMS, HOTBAR } from './data/items.js';
 import { RECIPES } from './data/recipes.js';
 import { BUILD_BY_ID } from './data/buildings.js';
-import { NOTES, DIALOGS, INTRO, LANDMARKS, BADGES, TIPS } from './data/story.js';
+import { NOTES, INTRO, LANDMARKS, BADGES, TIPS } from './data/story.js';
 import { NT, NODES, placeNodes } from './world/nodes.js';
 import { respawnNodes, applyNodeState, nodeNeeds } from './world/gathering.js';
-import { UNIT_BOX } from './models/animals.js';
-import { humanModel } from './models/people.js';
-import { planks, structureModel } from './models/structures.js';
 import { inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP } from './player/inventory.js';
 import { ambientTemp, SURV, survivalStep } from './game/survival.js';
 import { eat, quickEat, drinkCanteen } from './player/health.js';
 import { groundAt, _fwd, updatePlayer } from './player/movement.js';
-import { refreshViewModel, swingNow, updateViewModel } from './player/viewmodel.js';
-import { POIS, findTarget, targetPrompt, key, primaryAction, interact } from './player/targeting.js';
+import { refreshViewModel, updateViewModel } from './player/viewmodel.js';
+import { findTarget, targetPrompt, key, primaryAction, interact } from './player/targeting.js';
 import { updateArrows } from './player/bow.js';
-import { startFishing, stopFishing, updateFishing } from './player/fishing.js';
+import { stopFishing, updateFishing } from './player/fishing.js';
 import { setupInput, lockPointer, selectSlot } from './input/keyboard.js';
 import { STRUCT, rebuildStructures } from './build/structures.js';
 import { startBuild, cancelBuild, updateBuildGhost, placeBuild, tryDismantle } from './build/placement.js';
@@ -51,310 +46,13 @@ import { lightFire, addFuel } from './build/use.js';
 import { structuresStep, structuresNewDay, nearestFlame, updateStructures } from './build/update.js';
 import { updateCreatures } from './creatures/creatures.js';
 import { updateSpawner } from './creatures/spawner.js';
-import { initScout, scoutLeaves, scoutHungerCheck, updateScout } from './creatures/scout.js';
+import { initScout, scoutHungerCheck, updateScout } from './creatures/scout.js';
+import { CHESTS, LM_POS } from './story/props.js';
+import { buildLandmarks } from './story/landmarks.js';
+import { refreshPack, spawnPackNote, placeRay } from './story/ray.js';
+import { checkLandmarks, badge, tipOnce, updateQuests, updateStory, storyNewDay } from './story/quests.js';
 
 // @moved-from: original
-
-/* =========================================================================
-   09_story: landmarks, props, notes, treasure, quests, Uncle Ray, endings
-   ========================================================================= */
-const CHESTS = [];          // { id, x, y, z, loot }
-const LM_POS = {};          // landmark id -> { x, z, r }
-function prop(parts, x, y, z, ry, mat) { const m = vcMesh(parts, mat); m.position.set(x, y, z); m.rotation.y = ry || 0; R.scene.add(m); return m; }
-/** a cluster of big rocks: list of [dx, dz, size, heightScale, dy] */
-function rocks(cx, cy, cz, list, color, noCol) {
-  const ps = [];
-  list.forEach((r, i) => { ps.push(part(ico(1, 0), color || 0x77746e, [r[0], (r[4] || 0) + r[2] * (r[3] || 0.8) * 0.45, r[1]], [i * 1.3, i * 2.1, i * 0.7], [r[2], r[2] * (r[3] || 0.8), r[2]], 0.13)); if (!noCol && !(r[4] > 1.5)) addCollider({ x: cx + r[0], z: cz + r[1], r: r[2] * 0.85 }); });
-  return prop(ps, cx, cy, cz);
-}
-function addPoi(o) { POIS.push(o); return o; }
-function readNote(id) {
-  if (!G.notes.includes(id)) { G.notes.push(id); addXP(25); }
-  sfx('page'); showNote(NOTES[id].t, NOTES[id].body);
-}
-function addChest(id, x, z, loot, ry) {
-  const y = heightAt(x, z), g = new THREE.Group();
-  const base = vcMesh([...planks(1.0, 0.45, 0.65, 3, true, 0, 0.25, 0), part(box(1.04, 0.08, 0.69), 0xd9a520, [0, 0.47, 0]), part(box(0.08, 0.5, 0.7), 0xd9a520, [-0.36, 0.26, 0]), part(box(0.08, 0.5, 0.7), 0xd9a520, [0.36, 0.26, 0])]);
-  const lid = vcMesh([part(box(1.04, 0.22, 0.69), 0x9c7446, [0, 0.11, 0.345]), part(box(0.08, 0.24, 0.7), 0xd9a520, [-0.36, 0.11, 0.345]), part(box(0.08, 0.24, 0.7), 0xd9a520, [0.36, 0.11, 0.345]), part(box(0.14, 0.16, 0.05), 0xffd54a, [0, 0.06, 0.7])]);
-  lid.position.set(0, 0.5, -0.345); g.add(base); g.add(lid); g.position.set(x, y, z); g.rotation.y = ry || 0; R.scene.add(g);
-  const c = { id, x, y, z, loot, lid }; CHESTS.push(c); addCollider({ x, z, r: 0.55 });
-  if (G.chests[id]) lid.rotation.x = -1.9;
-  addPoi({ id: 'chest_' + id, x, y: y + 0.4, z, reach: 3.6, on: () => !G.chests[id], label: 'Open the treasure chest', act: () => openChest(c) });
-}
-function openChest(c) {
-  G.chests[c.id] = true; G.stats.chests++; c.lid.rotation.x = -1.9; sfx('chest'); uiFlash('#ffe066', 0.3);
-  puff(c.x, c.y + 0.8, c.z, 0xffe066, 14, { size: 0.14, up: 3.5, speed: 2.5 });
-  give('idol', 1); for (const k in c.loot) give(k, c.loot[k]); addXP(30);
-  banner('TREASURE! ' + G.stats.chests + ' / 10', 'You found a Golden Idol.');
-  if (G.stats.chests === 1) tipOnce('idol', 'Golden Idols belong at the Stone Circle. Find all ten!');
-  if (G.stats.chests >= 10) badge('treasure');
-}
-function nearestClosedChest() { let b = null, bd = 1e9; for (const c of CHESTS) { if (G.chests[c.id]) continue; const d = dist2(c.x, c.z, G.p.x, G.p.z); if (d < bd) { bd = d; b = c; } } return b; }
-
-function buildLandmarks() {
-  const S = SITES, y = k => siteH(S[k]);
-  R.worldFires = []; R.worldRoofs = []; R.worldStations = [];
-  for (const k in S) LM_POS[k] = { x: S[k].x, z: S[k].z, r: S[k].r + 16 };
-  LM_POS.mirror = { x: LAKES[0].x, z: LAKES[0].z, r: 42 }; LM_POS.oasis = { x: LAKES[2].x, z: LAKES[2].z, r: 30 }; LM_POS.cove = { x: R.start.x, z: R.start.z, r: 30 };
-
-  /* --- Shipwreck Cove --- */
-  const st = R.start, wk = shorePoint(Math.PI / 2 + 0.05, -9);
-  prop([part(box(3.2, 1.6, 8), 0x7a4a2a, [0, 0.3, 0], [0, 0, 0.5]), part(box(3.0, 0.2, 7.6), 0x9c7446, [0.4, 1.0, 0], [0, 0, 0.5]), part(box(0.25, 6, 0.25), 0x5e4126, [1.4, 3.0, -1], [0.25, 0, 0.75]), part(box(2.6, 1.8, 0.08), 0xe9e2cf, [2.6, 3.8, -1.2], [0.25, 0, 0.75]), part(box(1.8, 1.2, 2.2), 0xf2efe6, [0.3, 1.6, 2.2], [0, 0, 0.5])], wk.x, -0.5, wk.z, 0.5);
-  prop([part(box(2.2, 0.12, 0.4), 0x8a623a, [3, 0.06, -2], [0, 0.6, 0]), part(box(1.8, 0.12, 0.4), 0x7d5833, [-4, 0.06, 1], [0, -0.4, 0]), part(cyl(0.35, 0.35, 0.8, 8), 0x8a623a, [5.5, 0.35, 2], [Math.PI / 2, 0.4, 0]), part(sph(0.5, 8, 6), 0xff7a1e, [-3, 0.2, -3], null, [1, 0.35, 1])], st.x, heightAt(st.x, st.z), st.z + 4);
-  const cr = { x: st.x + 2.5, z: st.z - 6 }; cr.y = heightAt(cr.x, cr.z);
-  prop([...planks(1.3, 0.9, 1.0, 4, true, 0, 0.47, 0), part(box(1.36, 0.1, 1.06), 0x5e4126, [0, 0.95, 0]), part(box(0.4, 0.3, 0.02), 0xf2efe6, [0, 0.55, 0.51])], cr.x, cr.y, cr.z, 0.3); addCollider({ x: cr.x, z: cr.z, r: 0.8 });
-  addPoi({ id: 'crate', x: cr.x, y: cr.y + 0.6, z: cr.z, reach: 3.8, on: () => !G.flags.crate, label: 'Search the supply crate', act: () => { G.flags.crate = true; give('rawfish', 2); give('coconut', 2); give('bandage', 1); give('flint', 1); sfx('chest'); readNote('skipper'); } });
-
-  /* --- Uncle Ray's camp + the orange balloon --- */
-  const rc = S.rayCamp, ry = y('rayCamp');
-  prop([part(cone(2.1, 2.2, 4), 0x5d7d4c, [0, 1.1, 0], [0, Math.PI / 4, 0]), part(box(0.9, 1.3, 0.05), 0x2f3d28, [0, 0.65, 1.42], [-0.6, 0, 0])], rc.x - 3, ry, rc.z - 3, 0.4); addCollider({ x: rc.x - 3, z: rc.z - 3, r: 1.5 });
-  const cf = structureModel('campfire'); cf.position.set(rc.x + 1, ry, rc.z + 0.5); R.scene.add(cf); addCollider({ x: rc.x + 1, z: rc.z + 0.5, r: 0.6 });
-  prop([...planks(1.1, 0.7, 0.8, 3, true, 0, 0.36, 0), part(box(0.5, 0.05, 0.36), 0xf2efe6, [0, 0.74, 0], [0, 0.3, 0]), part(box(0.24, 0.02, 0.34), 0x8a3a2a, [0.02, 0.77, 0], [0, 0.3, 0])], rc.x - 0.5, ry, rc.z - 3.5, -0.2); addCollider({ x: rc.x - 0.5, z: rc.z - 3.5, r: 0.7 });
-  addPoi({ id: 'campNote', x: rc.x - 0.5, y: ry + 0.8, z: rc.z - 3.5, reach: 3.8, label: 'Read Uncle Ray\'s journal', act: () => readNote('camp') });
-  R.balloon = new THREE.Group();
-  const bm = new THREE.Mesh(merge([part(sph(3.4, 12, 9), 0xff7a1e, [0, 0, 0], null, [1, 1.15, 1], 0.04), part(cone(1.2, 1.6, 8), 0xe8650f, [0, -4.3, 0], [Math.PI, 0, 0]), part(box(0.5, 0.5, 0.5), 0xffffff, [0, -5.6, 0])]), new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0x7a3000, emissiveIntensity: 0.5, fog: false }));
-  bm.position.y = 44; R.balloon.add(bm);
-  const rope = new THREE.Mesh(UNIT_BOX, new THREE.MeshBasicMaterial({ color: 0xe9e2cf })); rope.scale.set(0.06, 38, 0.06); rope.position.y = 19.5; R.balloon.add(rope);
-  R.balloon.position.set(rc.x + 4, ry, rc.z - 4); R.scene.add(R.balloon); prop([part(box(0.2, 1, 0.2), 0x5e4126, [0, 0.5, 0])], rc.x + 4, ry, rc.z - 4);
-
-  /* --- carved arrow posts leading to the tower --- */
-  const tw = S.tower, ty = y('tower');
-  [0.14, 0.38, 0.62, 0.84].forEach((t, i) => {
-    const x = lerp(rc.x, tw.x, t) + (i % 2 ? 4 : -4), z = lerp(rc.z, tw.z, t), h = heightAt(x, z), a = Math.atan2(tw.x - x, tw.z - z);
-    prop([part(box(0.16, 2.2, 0.16), 0x6b4a2b, [0, 1.1, 0]), part(box(0.1, 0.4, 1.2), 0xd9c9a0, [0, 1.8, 0.1]), part(cone(0.36, 0.5, 3), 0xd9c9a0, [0, 1.8, 0.9], [Math.PI / 2, 0, 0], [0.3, 1, 1]), part(box(0.11, 0.12, 0.7), 0xd9342b, [0, 1.8, 0.1])], x, h, z, a);
-    addCollider({ x, z, r: 0.2 });
-    addPoi({ id: 'arrow' + i, x, y: h + 1.6, z, reach: 3.6, label: 'Read the carving', act: () => readNote('arrow') });
-  });
-
-  /* --- Radio Tower --- */
-  const tp = []; let w = 1.7;
-  for (let i = 0; i < 6; i++) { const y0 = i * 3.6, w2 = w - 0.22; for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) tp.push(part(box(0.16, 3.7, 0.16), 0xb0b6bd, [sx * w, y0 + 1.8, sz * w])); tp.push(part(box(w * 2 + 0.2, 0.12, 0.12), 0x9aa1a9, [0, y0 + 3.6, w]), part(box(w * 2 + 0.2, 0.12, 0.12), 0x9aa1a9, [0, y0 + 3.6, -w]), part(box(0.12, 0.12, w * 2 + 0.2), 0x9aa1a9, [w, y0 + 3.6, 0]), part(box(0.12, 0.12, w * 2 + 0.2), 0x9aa1a9, [-w, y0 + 3.6, 0]), part(box(0.1, 0.1, w * 2.9), 0xc23b2b, [w, y0 + 1.8, 0], [0.9, 0, 0]), part(box(w * 2.9, 0.1, 0.1), 0xc23b2b, [0, y0 + 1.8, w], [0, 0, 0.9])); w = w2; }
-  tp.push(part(box(0.14, 5, 0.14), 0xdfe5ea, [0, 24, 0]));
-  prop(tp, tw.x, ty, tw.z); addCollider({ x: tw.x, z: tw.z, r: 2.2 });
-  prop([part(box(1.2, 1.3, 0.7), 0x5a6a5a, [0, 0.65, 0]), part(box(0.9, 0.5, 0.04), 0x1c2a1c, [0, 0.9, 0.36]), part(box(0.5, 0.05, 0.36), 0xf2efe6, [0, 1.33, 0], [0, 0.2, 0])], tw.x + 3.4, ty, tw.z + 1, -0.6); addCollider({ x: tw.x + 3.4, z: tw.z + 1, r: 0.8 });
-  R.towerDish = prop([part(cone(1.1, 0.6, 10), 0xe9eef2, [0, 0, 0.3], [Math.PI / 2, 0, 0]), part(box(0.08, 0.08, 0.9), 0x9aa1a9, [0, 0, 0.7]), part(box(0.1, 3.4, 0.1), 0x9aa1a9, [0, 1.7, -0.2])], tw.x, ty + 21.6, tw.z, 0.8); R.towerDish.visible = !!G.flags.radio;
-  R.towerLamp = new THREE.Mesh(sph(0.5, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a1a, fog: false })); R.towerLamp.position.set(tw.x, ty + 26.8, tw.z); R.scene.add(R.towerLamp);
-  addPoi({
-    id: 'radio', x: tw.x + 3.4, y: ty + 1.1, z: tw.z + 1, reach: 4,
-    label: () => !G.notes.includes('tower') ? 'Read the repair log' : G.flags.radio ? 'Listen to the radio' : (inv('coil') && inv('battery') && inv('antenna')) ? 'Repair the radio tower!' : 'Radio — missing parts (' + (inv('coil') + inv('battery') + inv('antenna')) + '/3)',
-    act: () => {
-      if (!G.notes.includes('tower')) { readNote('tower'); return; }
-      if (G.flags.radio) { sfx('radio'); showDialog(G.flags.rayFree ? ['RADIO: "...Kestrel Island, we hear you loud and clear."'] : ['RAY: "...west face of Frostpeak, Sam. Iron pickaxe. I\'ll be here. Not going anywhere, ha..."']); return; }
-      if (!(inv('coil') && inv('battery') && inv('antenna'))) { readNote('tower'); return; }
-      take('coil', 1); take('battery', 1); take('antenna', 1); G.flags.radio = true; R.towerDish.visible = true; badge('radio'); addXP(200); sfx('radio');
-      if (G.flags.rayFree) showDialog(['The tower hums into life. The red lamp on top starts to blink.', 'RAY: "You did it! Now we can call home. Come and talk to me."']);
-      else showDialog(DIALOGS.radio);
-    }
-  });
-
-  /* --- Old Grizzle's den (west) + a second bear cave (east forest) --- */
-  const dn = S.den, dy = y('den');
-  rocks(dn.x, dy, dn.z - 7, [[-4.2, 0, 3.4, 1.1], [4.2, 0, 3.4, 1.1], [0, -3.4, 4, 1.2], [0, 0.2, 3.6, 0.5, 4.4], [-6.8, 2.5, 2.2], [6.6, 2.8, 2.4], [-2.5, -5.5, 2.6], [3, -5.8, 2.8]], 0x6b665f);
-  prop([part(box(1.4, 0.09, 0.09), 0xe9e2cf, [2, 0.06, 4], [0, 0.5, 0]), part(box(1.0, 0.08, 0.08), 0xe9e2cf, [-3, 0.06, 5], [0, -0.8, 0]), part(box(0.9, 0.08, 0.08), 0xe9e2cf, [0.5, 0.06, 7], [0, 1.3, 0]), part(ico(0.3, 0), 0xe9e2cf, [-1.5, 0.2, 6.5]), part(box(4.2, 5, 0.3), 0x0a0c0e, [0, 2, -7.6])], dn.x, dy, dn.z);
-  const c2 = S.cave2, c2y = y('cave2');
-  rocks(c2.x, c2y, c2.z - 4, [[-2.6, 0, 2.3, 1.1], [2.6, 0, 2.3, 1.1], [0, -2.2, 2.7, 1.1], [0, 0, 2.5, 0.5, 3.0]], 0x77746e);
-  addChest('cave2', c2.x + 0.2, c2.z - 3.4, { rope: 2, arrow: 6, bandage: 1 }, 0);
-
-  /* --- forest secrets --- */
-  const gr = S.grotto, gy = y('grotto'), gl = []; for (let i = 0; i < 9; i++) { const a = 0.7 + i / 9 * TAU * 0.86; gl.push([Math.cos(a) * 5.4, Math.sin(a) * 5.4, 1.5 + (i % 3) * 0.5, 1.5]); }
-  rocks(gr.x, gy, gr.z, gl, 0x66705f); addChest('grotto', gr.x, gr.z, { bandage: 2, rope: 2, flint: 3 }, 2.6);
-  const wd = S.wolfDen, wy = y('wolfDen'), wp = [];
-  [[-5, -2, 1.3, 4.5], [-2.5, -5, 1.1, 5.6], [2, -5.5, 1.5, 4], [5, -2, 1.2, 5]].forEach(r => { wp.push(part(cone(r[2], r[3], 5), 0x6d6a66, [r[0], r[3] / 2, r[1]], [0, r[0], 0.08], null, 0.12)); addCollider({ x: wd.x + r[0], z: wd.z + r[1], r: r[2] * 0.8 }); });
-  prop(wp, wd.x, wy, wd.z); addChest('wolfDen', wd.x, wd.z - 3.4, { fang: 2, arrow: 8, meat: 2 }, 0);
-  const sp = S.stump, sy = y('stump');
-  prop([part(cyl(1.25, 1.6, 1.5, 9), 0x5e4126, [0, 0.75, 0], null, null, 0.1), part(cyl(0.95, 0.95, 0.1, 9), 0x2a1c12, [0, 1.5, 0]), part(box(0.5, 0.5, 1.6), 0x5e4126, [1.5, 0.2, 0.8], [0, 0.6, 0.2]), part(ico(0.5, 0), 0x4a8c38, [-1.3, 0.3, 0.6])], sp.x, sy, sp.z); addCollider({ x: sp.x, z: sp.z, r: 1.4 });
-  addChest('stump', sp.x + 1.3, sp.z - 1.7, { rope: 1, herb: 3, arrow: 5 }, 2.2);
-
-  /* --- Stone Circle + altar --- */
-  const ci = S.circle, cy = y('circle'), cp = [];
-  for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; cp.push(part(box(1.3, 3.6 + (i % 3) * 0.5, 0.8), i % 2 ? 0x807c74 : 0x8d8980, [Math.cos(a) * 8, 1.7, Math.sin(a) * 8], [(i % 3 - 1) * 0.06, -a + Math.PI / 2, (i % 2 ? 0.07 : -0.05)], null, 0.1)); addCollider({ x: ci.x + Math.cos(a) * 8, z: ci.z + Math.sin(a) * 8, r: 0.8 }); }
-  cp.push(part(cyl(1.3, 1.6, 0.9, 8), 0x9a958b, [0, 0.45, 0]), part(cyl(1.0, 1.0, 0.06, 8), 0x5a5750, [0, 0.92, 0]));
-  prop(cp, ci.x, cy, ci.z); addCollider({ x: ci.x, z: ci.z, r: 1.5 });
-  R.idolMesh = []; for (let i = 0; i < 10; i++) { const a = i / 10 * TAU, m = new THREE.Mesh(cone(0.13, 0.4, 5), new THREE.MeshLambertMaterial({ color: 0xffd24a, emissive: 0x8a6200 })); m.position.set(ci.x + Math.cos(a) * 0.75, cy + 1.15, ci.z + Math.sin(a) * 0.75); m.visible = !!G.flags.storm; R.scene.add(m); R.idolMesh.push(m); }
-  addPoi({
-    id: 'altar', x: ci.x, y: cy + 1, z: ci.z, reach: 4.2,
-    label: () => G.flags.storm ? 'The altar hums with power' : inv('idol') >= 10 ? 'Place the ten Golden Idols' : 'Stone altar — ten empty hollows (' + inv('idol') + '/10 idols)',
-    act: () => {
-      if (G.flags.storm) { hint('The idols glow softly. The island is at peace.'); return; }
-      if (inv('idol') < 10) { hint('Ten small hollows are carved into the altar. You have ' + inv('idol') + ' of 10 Golden Idols.'); if (!G.notes.includes('oasis')) hint('Ten hollows are carved into the altar. Something belongs here...'); return; }
-      take('idol', 10); G.flags.storm = true; R.idolMesh.forEach(m => m.visible = true); give('stormspear', 1); badge('storm'); addXP(500);
-      sfx('thunder'); sfx('zap'); R.flashT = 0.8; uiFlash('#fff', 0.8); R.shake = 0.8; G.p.held = 'melee'; refreshViewModel();
-      banner('⚡ THE STORM SPEAR', 'Lightning strikes the altar. The island has chosen you.');
-    }
-  });
-
-  /* --- Dust Flats: outpost, mine, oasis, bone yard --- */
-  const op = S.outpost, oy = y('outpost');
-  prop([...planks(4.4, 0.12, 4.4, 7, false, 0, 0.06, 0), ...planks(4.4, 2.5, 0.14, 8, true, 0, 1.3, -2.15), part(box(0.14, 2.5, 4.4), 0x86603a, [-2.15, 1.3, 0]), part(box(0.14, 2.5, 4.4), 0x7d5833, [2.15, 1.3, 0]), part(box(5, 0.14, 5), 0xa0886a, [0, 2.65, 0]), part(box(0.14, 2.5, 0.14), 0x5e4126, [-2.15, 1.3, 2.15]), part(box(0.14, 2.5, 0.14), 0x5e4126, [2.15, 1.3, 2.15]),
-  part(box(1.4, 0.08, 0.7), 0x8a623a, [-1.2, 0.8, -1.6]), part(box(0.08, 0.8, 0.08), 0x5e4126, [-1.8, 0.4, -1.3]), part(box(0.08, 0.8, 0.08), 0x5e4126, [-0.6, 0.4, -1.3]), part(box(0.4, 0.04, 0.3), 0xf2efe6, [-1.2, 0.86, -1.6], [0, 0.2, 0]),
-  part(box(0.8, 1.9, 0.5), 0x5a6a78, [1.5, 0.95, -1.75]), part(box(0.06, 0.2, 0.04), 0xd9a520, [1.25, 1.0, -1.49])], op.x, oy, op.z);
-  addCollider({ x: op.x, z: op.z - 2.15, hw: 2.2, hd: 0.14 }); addCollider({ x: op.x - 2.15, z: op.z, hw: 0.14, hd: 2.2 }); addCollider({ x: op.x + 2.15, z: op.z, hw: 0.14, hd: 2.2 });
-  R.worldRoofs.push({ x: op.x, z: op.z, r: 2.6 });
-  addPoi({ id: 'outNote', x: op.x - 1.2, y: oy + 0.95, z: op.z - 1.5, reach: 3.4, label: 'Read the outpost notes', act: () => readNote('outpost') });
-  addPoi({
-    id: 'locker', x: op.x + 1.5, y: oy + 1, z: op.z - 1.5, reach: 3.4,
-    label: () => G.flags.locker ? 'Ray\'s locker (empty)' : G.notes.includes('pack') ? 'Open Ray\'s locker — code 9 4' : 'Ray\'s locker — it needs a 2-digit code',
-    act: () => {
-      if (G.flags.locker) { readNote('locker'); return; }
-      if (!G.notes.includes('pack')) { hint('The locker has a 2-digit code lock. Maybe Ray wrote the code down somewhere... in his pack?'); sfx('deny'); return; }
-      G.flags.locker = true; sfx('chest'); if (!inv('bow')) give('bow', 1); give('arrow', 14); if (!inv('canteen')) { give('canteen', 1); G.flags.canteen = 5; } give('bandage', 2); readNote('locker');
-    }
-  });
-  const mi = S.mine, my = y('mine');
-  rocks(mi.x, my, mi.z - 6, [[-3.4, 0, 3, 1.2], [3.4, 0, 3, 1.2], [0, -3, 3.6, 1.3], [0, 0, 3, 0.5, 3.6]], 0x8a5a3c);
-  prop([part(box(0.3, 3.2, 0.3), 0x5e4126, [-1.6, 1.6, 0]), part(box(0.3, 3.2, 0.3), 0x5e4126, [1.6, 1.6, 0]), part(box(3.9, 0.3, 0.34), 0x5e4126, [0, 3.2, 0]), part(box(3, 3, 0.2), 0x0a0c0e, [0, 1.5, -0.6]), part(box(0.1, 1.2, 0.1), 0x5e4126, [3, 0.6, 2]), part(box(0.9, 0.6, 0.06), 0xd9c9a0, [3, 1.3, 2.04])], mi.x, my, mi.z - 4.2);
-  addPoi({ id: 'mineNote', x: mi.x + 3, y: my + 1.3, z: mi.z - 2.2, reach: 3.6, label: 'Read the mine survey', act: () => readNote('mine') });
-  addChest('mine', mi.x - 0.2, mi.z - 3.2, { iron: 2, arrow: 8, bandage: 2 }, 0);
-  const oa = LAKES[2];
-  { const x = oa.x - 12.5, z = oa.z + 3, h = Math.max(0.1, heightAt(x, z)); prop([part(cyl(0.12, 0.16, 0.4, 7), 0x7fc9a0, [0, 0.12, 0], [1.3, 0, 0.4]), part(cyl(0.05, 0.07, 0.14, 6), 0x7a5632, [0.12, 0.2, 0.2], [1.3, 0, 0.4])], x, h, z, 0, MAT_GLOW); addPoi({ id: 'bottle', x, y: h + 0.2, z, reach: 3.4, label: 'Open the old bottle', act: () => readNote('oasis') }); }
-  addChest('oasis', oa.x + 19.5, oa.z - 4, { coconut: 3, iron: 1, rope: 2 }, -1.5);
-  const by = S.boneyard, byy = y('boneyard'), bp = [];
-  for (let i = -3; i <= 3; i++) for (const s of [1, -1]) { bp.push(part(box(0.5, 4.2, 0.5), 0xe9e2cf, [s * 3.4, 2.0, i * 2.6], [0, 0, s * 0.25], null, 0.08), part(box(0.45, 3.2, 0.45), 0xddd5c0, [s * 2.3, 5.0, i * 2.6], [0, 0, -s * 0.95], null, 0.08)); addCollider({ x: by.x + s * 3.9, z: by.z + 8 + i * 2.6, r: 0.4 }); }
-  bp.push(part(box(0.7, 0.7, 19), 0xe9e2cf, [0, 0.3, 0]), part(box(3, 2.2, 3.4), 0xe9e2cf, [0, 1.1, 11.6], null, null, 0.08), part(box(2.2, 0.8, 2.6), 0xddd5c0, [0, 0.4, 14.2]), part(box(0.6, 0.6, 0.2), 0x1a1a1a, [0.8, 1.5, 13.31]), part(box(0.6, 0.6, 0.2), 0x1a1a1a, [-0.8, 1.5, 13.31]), part(cone(0.4, 2, 5), 0xddd5c0, [1.4, 2.8, 10.6], [0, 0, -0.5]), part(cone(0.4, 2, 5), 0xddd5c0, [-1.4, 2.8, 10.6], [0, 0, 0.5]));
-  prop(bp, by.x, byy, by.z + 8); addCollider({ x: by.x, z: by.z + 19.6, r: 1.9 });
-
-  /* --- Frostpeak: cabin, frozen lake, crystal cavern, summit --- */
-  const cb = S.cabin, cby = y('cabin'), LOG = [0x7a5632, 0x6b4a2b, 0x86603a];
-  const logs = (w, x, z, rot) => { const ps = []; for (let i = 0; i < 6; i++) ps.push(part(cyl(0.24, 0.24, w, 6), LOG[i % 3], [x, 0.24 + i * 0.46, z], [0, rot, Math.PI / 2])); return ps; };
-  prop([...planks(5.4, 0.12, 5.4, 8, false, 0, 0.06, 0), ...logs(5.6, 0, -2.6, 0), ...logs(5.6, -2.6, 0, Math.PI / 2), ...logs(5.6, 2.6, 0, Math.PI / 2), ...logs(1.7, -1.95, 2.6, 0), ...logs(1.7, 1.95, 2.6, 0),
-  part(box(6.4, 0.2, 3.8), 0x6d5a48, [0, 3.6, -1.5], [0.5, 0, 0]), part(box(6.4, 0.2, 3.8), 0x7a6652, [0, 3.6, 1.5], [-0.5, 0, 0]), part(box(6.5, 0.14, 3.9), 0xf2f7fb, [0, 3.75, -1.5], [0.5, 0, 0]), part(box(6.5, 0.14, 3.9), 0xf2f7fb, [0, 3.75, 1.5], [-0.5, 0, 0]),
-  part(box(0.9, 1.0, 0.8), 0x3b4046, [1.7, 0.5, -1.8]), part(box(0.3, 3.6, 0.3), 0x3b4046, [1.7, 2.8, -1.9]), part(box(1.3, 0.08, 0.8), 0x8a623a, [-1.6, 0.8, -1.9]), part(box(0.08, 0.8, 0.08), 0x5e4126, [-2.1, 0.4, -1.6]), part(box(0.08, 0.8, 0.08), 0x5e4126, [-1.1, 0.4, -1.6]), part(box(0.4, 0.04, 0.3), 0xf2efe6, [-1.6, 0.86, -1.9], [0, -0.2, 0]),
-  ...planks(0.9, 0.5, 0.6, 3, true, -2.0, 0.26, 0.6), part(box(0.94, 0.1, 0.64), 0x5e4126, [-2.0, 0.55, 0.6])], cb.x, cby, cb.z);
-  addCollider({ x: cb.x, z: cb.z - 2.6, hw: 2.8, hd: 0.26 }); addCollider({ x: cb.x - 2.6, z: cb.z, hw: 0.26, hd: 2.8 }); addCollider({ x: cb.x + 2.6, z: cb.z, hw: 0.26, hd: 2.8 }); addCollider({ x: cb.x - 1.95, z: cb.z + 2.6, hw: 0.85, hd: 0.26 }); addCollider({ x: cb.x + 1.95, z: cb.z + 2.6, hw: 0.85, hd: 0.26 });
-  const stove = new THREE.Mesh(UNIT_BOX, new THREE.MeshBasicMaterial({ color: 0xff7a1e })); stove.scale.set(0.5, 0.3, 0.05); stove.position.set(cb.x + 1.7, cby + 0.45, cb.z - 1.38); R.scene.add(stove);
-  R.worldFires.push({ x: cb.x + 1.7, y: cby, z: cb.z - 1.6 }); R.worldRoofs.push({ x: cb.x, z: cb.z, r: 3.1 });
-  const wb = structureModel('bench'); wb.position.set(cb.x + 0.2, cby + 0.1, cb.z + 4.6); wb.rotation.y = 0.2; R.scene.add(wb); addCollider({ x: cb.x + 0.2, z: cb.z + 4.6, r: 0.8 }); R.worldStations.push({ x: cb.x + 0.2, z: cb.z + 4.6, type: 'bench' });
-  addPoi({ id: 'cabBench', x: cb.x + 0.2, y: cby + 0.9, z: cb.z + 4.6, reach: 3.6, label: 'Use Ray\'s workbench', act: () => openPanel('craft', 'bench') });
-  addPoi({ id: 'cabNote', x: cb.x - 1.6, y: cby + 0.95, z: cb.z - 1.7, reach: 3.4, label: 'Read Uncle Ray\'s journal', act: () => readNote('cabin') });
-  addPoi({ id: 'cabChest', x: cb.x - 2.0, y: cby + 0.5, z: cb.z + 0.6, reach: 3.2, on: () => !G.flags.furs, label: 'Open Ray\'s fur chest', act: () => { G.flags.furs = true; sfx('chest'); give('fur', 4); give('hide', 2); give('rope', 1); give('meat', 2); tipOnce('coat', 'That is exactly enough for a <b>Fur Coat</b>. Use the workbench outside the cabin!'); } });
-  const il = S.icelake, iy = y('icelake');
-  prop([...planks(2.6, 2.2, 0.12, 5, true, 0, 1.1, -1.3), part(box(0.12, 2.2, 2.6), 0x86603a, [-1.3, 1.1, 0]), part(box(0.12, 2.2, 2.6), 0x7d5833, [1.3, 1.1, 0]), part(box(3.1, 0.14, 3.1), 0xf2f7fb, [0, 2.3, 0]), part(box(0.5, 0.04, 0.36), 0xf2efe6, [-0.7, 0.9, -1.2], [1.2, 0, 0])], il.x + 9, iy, il.z + 3, -0.8);
-  addCollider({ x: il.x + 9, z: il.z + 3, r: 1.5 }); R.worldRoofs.push({ x: il.x + 7.4, z: il.z + 4.4, r: 2.2 });
-  prop([part(cyl(1.0, 1.0, 0.05, 10), 0x16405f, [0, 0.03, 0]), part(cyl(1.25, 1.25, 0.03, 10), 0xd6ecf7, [0, 0.01, 0])], il.x, iy, il.z);
-  addPoi({ id: 'icehole', x: il.x, y: iy + 0.1, z: il.z, reach: 4.2, label: () => bestTool('rod') ? 'Fish in the ice hole' : 'An ice-fishing hole. You need a Fishing Rod.', act: () => { if (!bestTool('rod')) { hint('Craft a Fishing Rod first: 3 sticks, 1 rope, 1 flint.'); sfx('deny'); return; } if (!R.fish) startFishing(il.x, il.z, true); } });
-  addPoi({ id: 'lakeNote', x: il.x + 8, y: iy + 1.0, z: il.z + 3.6, reach: 3.6, label: 'Read the fishing log', act: () => readNote('lake') });
-  addChest('icelake', il.x + 9.6, il.z + 4.4, { crystal: 1, iron: 2, fish: 2 }, -0.8);
-  const cv = S.crystal, cvy = y('crystal');
-  rocks(cv.x - 7, cvy, cv.z, [[-3, -4, 3.6, 1.3], [-3, 4, 3.6, 1.3], [-5.5, 0, 4.4, 1.5], [-2.6, 0, 3.4, 0.5, 4.2]], 0x586270);
-  prop([part(box(0.3, 4.4, 4.4), 0x04121c, [0, 2.2, 0])], cv.x - 8.2, cvy, cv.z);
-  const cg = prop([part(ico(0.5, 0), 0x6fe3ff, [0, 1.2, -1.4], null, [0.5, 1.6, 0.5]), part(ico(0.5, 0), 0x86ecff, [0, 2.3, 1.2], [0.4, 0, 0.3], [0.45, 1.4, 0.45]), part(ico(0.4, 0), 0x57c8f5, [0, 0.6, 0.5], null, [0.5, 1.2, 0.5])], cv.x - 8.0, cvy, cv.z, 0, MAT_GLOW); cg.castShadow = false;
-  R.rockfall = rocks(cv.x - 6.4, cvy, cv.z, [[0, -1.3, 1.5], [0, 1.2, 1.6], [0.9, 0, 1.3], [0.2, -0.2, 1.4, 0.8, 1.6], [0.3, 0.9, 1.0, 0.8, 2.3]], 0x6e7888, true);
-  R.rockfallCol = addCollider({ x: cv.x - 6.2, z: cv.z, r: 2.4 });
-  if (G.flags.rayFree) { R.rockfall.visible = false; R.rockfallCol.off = true; }
-  addPoi({
-    id: 'rockfall', x: cv.x - 4.6, y: cvy + 1.2, z: cv.z, reach: 4.6, on: () => !G.flags.rayFree,
-    label: () => bestTool('pick') === 'ironpick' ? 'Dig through the cave-in!' : 'A cave-in blocks the cavern. You need an IRON pickaxe.',
-    act: () => {
-      if (bestTool('pick') !== 'ironpick') { hint(G.flags.radio ? 'Your tools just bounce off. Ray said: an IRON pickaxe.' : 'Blue light glows between the rocks. Your tools just bounce off. Only an Iron Pickaxe could break through.'); sfx('deny'); return; }
-      G.p.held = 'pick'; refreshViewModel(); R.cinematic = true; let n = 0;
-      const dig = () => { sfx('mine'); R.shake = 0.3; swingNow(0.4); puff(cv.x - 5.6, cvy + 1.2, cv.z, 0x8e98a8, 8, { size: 0.4 }); if (++n < 5) setTimeout(dig, 420); else { R.rockfall.visible = false; R.rockfallCol.off = true; G.flags.rayFree = true; badge('ray'); addXP(400); sfx('discover'); placeRay(); R.cinematic = false; showDialog(DIALOGS.rescue, () => { saveGame(); }); } };
-      dig();
-    }
-  });
-  const sm = S.summit, smy = y('summit');
-  prop([part(box(0.3, 5, 0.3), 0xb0b6bd, [0, 1.4, 0], [0, 0, 1.1]), part(box(0.25, 3, 0.25), 0x9aa1a9, [2.9, 2.7, 0], [0, 0, 0.3]), part(cone(1.2, 0.7, 10), 0xe9eef2, [3.6, 4.2, 0], [0, 0, 0.9]), ...[0, 1, 2, 3, 4, 5, 6, 7].map(i => part(box(2.6, 0.2, 0.2), 0x6b4a2b, [Math.cos(i * 0.8) * 2.2 - 4, 0.15 + (i % 2) * 0.15, Math.sin(i * 0.8) * 2.2 + 3], [0, i * 0.8 + 1.5, 0]))], sm.x + 5, smy, sm.z - 5);
-  addPoi({ id: 'sumNote', x: sm.x + 5.4, y: smy + 1.2, z: sm.z - 5, reach: 4, label: 'Read the scratched mast', act: () => readNote('summit') });
-
-  /* --- three shore chests (old rowboats) --- */
-  [['east', 0.12, { iron: 1, rope: 2, coconut: 2 }], ['north', -Math.PI / 2 - 0.42, { crystal: 1, fur: 2, bandage: 2 }], ['west', Math.PI + 0.22, { rope: 2, arrow: 8, bandage: 1 }]].forEach(([id, ang, loot]) => {
-    const q = shorePoint(ang, 9), h = heightAt(q.x, q.z);
-    prop([part(box(1.5, 0.6, 3.6), 0x7a4a2a, [0, 0.2, 0], [0, 0, 0.5]), part(box(1.3, 0.1, 3.4), 0x9c7446, [0.2, 0.5, 0], [0, 0, 0.5]), part(box(0.1, 0.1, 2.6), 0xd9c9a0, [1.6, 0.1, 0.5], [0, 0.4, 0])], q.x + 2.4, h, q.z, ang);
-    addChest(id, q.x, q.z, loot, -ang + Math.PI / 2); LM_POS['shore_' + id] = { x: q.x, z: q.z };
-  });
-
-  /* --- Uncle Ray --- */
-  const rm = humanModel(true); R.ray = { model: rm, g: rm.g, x: 0, z: 0 }; rm.g.visible = false; R.scene.add(rm.g);
-  R.rayPoi = addPoi({ id: 'ray', x: 0, y: 0, z: 0, reach: 4, on: () => !!G.flags.rayFree, label: 'Talk to Uncle Ray', act: talkToRay });
-  placeRay();
-  /* --- dropped backpack (after a blackout) --- */
-  R.packMesh = prop([part(box(0.6, 0.7, 0.4), 0xc23b2b, [0, 0.35, 0]), part(box(0.5, 0.2, 0.42), 0x8a2a1f, [0, 0.72, 0]), part(box(0.4, 0.3, 0.1), 0xd9a520, [0, 0.3, 0.24])], 0, 0, 0);
-  R.packPoi = addPoi({ id: 'pack', x: 0, y: 0, z: 0, reach: 3.8, on: () => !!G.pack, label: 'Pick up your backpack', act: () => { for (const k in G.pack.items) give(k, G.pack.items[k], true); toast('🎒 You got all your things back!', 'ok'); sfx('chest'); G.pack = null; refreshPack(); } });
-  refreshPack();
-}
-function refreshPack() { const p = G.pack; R.packMesh.visible = !!p; if (p) { const h = heightAt(p.x, p.z); R.packMesh.position.set(p.x, h, p.z); R.packPoi.x = p.x; R.packPoi.y = h + 0.5; R.packPoi.z = p.z; } }
-function spawnPackNote() {
-  if (R.packNote) return; const dn = SITES.den, h = siteH(dn);
-  prop([part(box(0.7, 0.5, 0.5), 0x4d6e3c, [0, 0.25, 0], [0, 0.3, 0.2]), part(box(0.4, 0.03, 0.3), 0xf2efe6, [0.5, 0.03, 0.3], [0, 0.5, 0])], dn.x, h, dn.z - 4.6);
-  R.packNote = addPoi({ id: 'packNote', x: dn.x, y: h + 0.4, z: dn.z - 4.6, reach: 3.8, label: 'Search Ray\'s torn pack', act: () => { if (!G.flags.packLoot) { G.flags.packLoot = true; give('bandage', 2); give('rope', 2); } readNote('pack'); } });
-}
-function placeRay() {
-  const r = R.ray; if (!G.flags.rayFree) { r.g.visible = false; return; }
-  let x, z;
-  if (G.flags.rayChoice && G.spawn) { x = G.spawn.x + 2.2; z = G.spawn.z + 1.5; } else { x = SITES.tower.x + 3.6; z = SITES.tower.z + 3.6; }
-  r.x = x; r.z = z; const h = groundAt(x, z); r.g.position.set(x, h, z); r.g.visible = true;
-  R.rayPoi.x = x; R.rayPoi.y = h + 1.3; R.rayPoi.z = z;
-}
-function talkToRay() {
-  if (!G.flags.radio) { showDialog(DIALOGS.rayTowerNoRadio); return; }
-  if (!G.flags.rayChoice) {
-    showDialog(['RAY: "The mainland heard us! A rescue helicopter can be here by morning."', 'RAY: "Or... the supply ship comes on Day 100. We could stay. Finish what you started. Leave this island as legends."', 'RAY: "Your call, kiddo."'], () => {
-      showChoice('What do you tell Uncle Ray?', [['🚁 Call the helicopter', 'Finish the story now and go home.', () => { G.flags.rayChoice = 'heli'; G.ending = 'heli'; showEnding('heli'); }], ['🏝️ Stay until Day 100!', 'Keep surviving with Uncle Ray at your camp.', () => { G.flags.rayChoice = 'stay'; placeRay(); showDialog(DIALOGS.rayStay); saveGame(); }]]);
-    }); return;
-  }
-  showDialog(DIALOGS.rayIdle);
-}
-
-/* ---------- landmark discovery ---------- */
-function checkLandmarks() {
-  const p = G.p;
-  for (const L of LANDMARKS) {
-    if (G.found[L.id]) continue; const q = LM_POS[L.id]; if (!q) continue;
-    if (dist2(p.x, p.z, q.x, q.z) < q.r) {
-      G.found[L.id] = true; addXP(40); sfx('discover'); banner('DISCOVERED', L.n);
-      if (Object.keys(G.found).length >= LANDMARKS.length) badge('explorer');
-    }
-  }
-}
-function badge(id) {
-  if (G.badges[id] || !BADGES[id]) return; G.badges[id] = G.day;
-  toast('🏅 Badge earned: <b>' + BADGES[id][1] + '</b>', 'gold'); addXP(25); sfx('quest');
-}
-function tipOnce(id, msg) { if (G.flags['tip_' + id]) return; G.flags['tip_' + id] = 1; toast('💡 ' + msg, 'tip', 9000); }
-
-/* ---------- quests ---------- */
-const partsHave = () => (inv('coil') || G.flags.radio ? 1 : 0) + (inv('battery') || G.flags.radio ? 1 : 0) + (inv('antenna') || G.flags.radio ? 1 : 0);
-const QUESTS = [
-  { t: 'Search the supply crate on the beach', wp: () => POIS.find(q => q.id === 'crate'), done: () => G.flags.crate },
-  { t: 'Collect 3 sticks, 3 stones and some reeds', s: () => 'Look on the ground. Press <b>E</b> to pick things up.  🥢 ' + Math.min(3, inv('stick')) + '/3   🪨 ' + Math.min(3, inv('stone')) + '/3   🌾 ' + Math.min(1, inv('fibre')) + '/1', done: () => (inv('stick') >= 3 && inv('stone') >= 3 && inv('fibre') >= 1) || bestTool('axe') },
-  { t: 'Craft a Stone Axe', s: () => 'Press <b>C</b> to open the Craft menu.', done: () => !!bestTool('axe') },
-  { t: 'Chop down a tree', s: () => 'Walk up to a tree and <b>left click</b>.', done: () => G.stats.wood >= 1 },
-  { t: 'Build a Campfire and light it', s: () => 'Press <b>B</b> to build. Then press <b>E</b> on the fire.', done: () => G.flags.fireLit },
-  { t: 'Cook the fish from the crate', s: () => 'Press <b>E</b> on your lit campfire. Raw food makes you sick!', done: () => G.stats.cooked >= 1 || G.scout.friend },
-  { t: 'Build a Shelter and sleep through the night', s: () => 'Press <b>B</b>. You can sleep after 7 pm.', done: () => G.flags.slept },
-  { t: 'Find Uncle Ray\'s camp', s: () => 'Look for the orange balloon to the north-west.', wp: () => SITES.rayCamp, done: () => G.notes.includes('camp') },
-  { t: 'Make friends with Scout', s: () => 'He wants meat — raw is fine! Hunt a rabbit or deer with a spear.', wp: () => R.scoutPoi, done: () => G.scout.friend },
-  { t: 'Follow the carved arrows to the Radio Tower', wp: () => SITES.tower, done: () => G.notes.includes('tower') },
-  { t: 'Find the 3 missing radio parts', s: () => (inv('coil') || G.flags.radio ? '✅' : '⬜') + ' Power Coil — Old Grizzle\'s den, WEST<br>' + (inv('battery') || G.flags.radio ? '✅' : '⬜') + ' Battery — Dust Flats, EAST' + (G.notes.includes('locker') ? ' (the Bone Yard)' : ' (Ray\'s outpost)') + '<br>' + (inv('antenna') || G.flags.radio ? '✅' : '⬜') + ' Antenna — Frostpeak summit, NORTH', wp: () => !(inv('coil') || G.flags.radio) ? (G.bossDead.grizzle ? R.packNote : SITES.den) : !(inv('battery') || G.flags.radio) ? (G.flags.locker ? SITES.boneyard : SITES.outpost) : SITES.summit, done: () => partsHave() >= 3 },
-  { t: 'Repair the Radio Tower', wp: () => SITES.tower, done: () => G.flags.radio },
-  { t: 'Free Uncle Ray from the Crystal Cavern', s: () => 'West face of Frostpeak. Bring an <b>Iron Pickaxe</b>' + (bestTool('pick') === 'ironpick' ? ' ✅' : ' (furnace + iron ore)') + '.', wp: () => SITES.crystal, done: () => G.flags.rayFree },
-  { t: 'Talk to Uncle Ray at the Radio Tower', wp: () => R.rayPoi, done: () => !!G.flags.rayChoice },
-  { t: 'Survive until the ship arrives on Day 100', s: () => 'Day ' + G.day + ' of 100. Build, explore, find all ten idols!', done: () => G.day >= 100 },
-  { t: 'You are a legend of Kestrel Island', s: () => 'Keep exploring for as long as you like.', done: () => false }
-];
-function updateQuests() {
-  // if the player has already done a later goal (explored ahead), skip the earlier ones
-  for (let i = QUESTS.length - 2; i > G.quest; i--) if (QUESTS[i].done()) { G.quest = i; break; }
-  let q = QUESTS[G.quest], guard = 0;
-  while (q && q.done() && guard++ < 20) {
-    G.quest++; addXP(30); sfx('quest'); toast('✅ ' + q.t, 'ok'); q = QUESTS[G.quest];
-    if (q) questPop(q.t);
-  }
-  R.quest = q || null; R.wp = q && q.wp ? q.wp() : null;
-}
-function updateStory(dt) {
-  if (R.balloon) { R.balloon.rotation.z = Math.sin(R.t * 0.5) * 0.04; R.balloon.rotation.x = Math.cos(R.t * 0.37) * 0.04; }
-  R.towerLamp.visible = !!G.flags.radio && Math.sin(R.t * 3) > 0;
-  const r = R.ray; if (r.g.visible) { const a = Math.atan2(G.p.x - r.x, G.p.z - r.z); r.g.rotation.y += angDiff(r.g.rotation.y, a) * Math.min(1, dt * 3); r.model.armL.rotation.x = Math.sin(R.t * 1.2) * 0.08; r.model.head.rotation.y = Math.sin(R.t * 0.6) * 0.15; }
-  // sparkle on unopened treasure chests so they catch the eye
-  if (Math.random() < dt * 3) { const c = nearestClosedChest(); if (c && dist2(c.x, c.z, G.p.x, G.p.z) < 40) puff(c.x + rnd(-0.5, 0.5), c.y + 0.9, c.z + rnd(-0.4, 0.4), 0xffe066, 1, { size: 0.07, up: 1.5, g: 0, speed: 0.3, life: 1.6, grow: 0.2 }); }
-}
-/** runs at each dawn */
-function storyNewDay() {
-  if (G.scout.friend && G.scout.fed < G.day - 1) scoutLeaves();
-  if (G.flags.rayChoice && G.flags.rayFree) { give('meat', 2, true); give('arrow', 3, true); toast('🧔 Uncle Ray cooked breakfast and made you some arrows.', 'ok'); placeRay(); }
-  if (G.day >= 10) badge('d10'); if (G.day >= 25) badge('d25'); if (G.day >= 50) badge('d50');
-  if (G.day >= 100 && !G.flags.ship) { G.flags.ship = true; badge('d100'); G.ending = G.ending || 'ship'; R.pendingEnding = G.flags.rayFree ? 'ship' : 'alone'; }
-}
 
 /* =========================================================================
    10_ui: HUD, toasts, panels (pack/crafting, build, fire, chest, journal,
@@ -1212,4 +910,4 @@ function touchHelpHTML() {
 }
 // @end-moved
 
-export { CHESTS, LM_POS, prop, rocks, addPoi, readNote, addChest, openChest, nearestClosedChest, buildLandmarks, refreshPack, spawnPackNote, placeRay, talkToRay, checkLandmarks, badge, tipOnce, partsHave, QUESTS, updateQuests, updateStory, storyNewDay, _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };
+export { _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };

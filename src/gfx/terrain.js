@@ -14,7 +14,7 @@ import { LAKES, SITES, biomeW, finalH, HGT, terrainColor } from '../world/terrai
 import { makeNoiseTex, GFX } from './textures.js';
 import { waterMaterial } from './water.js';
 import { NT, NODES } from '../world/nodes.js';
-import { CHESTS } from '../legacy.js';
+import { CHESTS } from '../story/props.js';
 
 // @moved-from: original
 

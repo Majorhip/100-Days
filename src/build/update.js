@@ -9,7 +9,7 @@ import { G, R } from '../state.js';
 import { biomeAt } from '../world/terrain.js';
 import { nightAmount, puff } from '../world/sky.js';
 import { isRoofed, douse } from './use.js';
-import { badge } from '../legacy.js';
+import { badge } from '../story/quests.js';
 
 // @moved-from: original
 /** all time-based structure logic, in game hours (also used while sleeping) */
