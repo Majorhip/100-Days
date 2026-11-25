@@ -17,6 +17,7 @@ import { uiDirty, hint, toast, uiDamage, uiFade } from '../ui/hud.js';
 import { showMessage } from '../ui/panels.js';
 import { saveGame } from '../save.js';
 import { onNewDay } from '../game/time.js';
+import { packSpot } from './swim.js';   // added after the migration
 
 // @moved-from: original
 function hurtPlayer(dmg, src) {
@@ -31,8 +32,8 @@ function blackout(why) {
   // drop loose materials as a backpack at this spot (tools, clothes and story items stay with you)
   const items = {}; let any = false;
   for (const id in G.inv) { const d = ITEMS[id]; if (!d.tool && !d.wear && !d.story && id !== 'canteen') { items[id] = G.inv[id]; any = true; } }
-  if (any) { for (const id in items) delete G.inv[id]; G.pack = { x: p.x, z: p.z, items }; }
-  const msg = { cold: 'You got too cold and blacked out.', thirst: 'You ran out of water and blacked out.', hunger: 'You got too hungry and blacked out.' }[why] || 'You were knocked out!';
+  if (any) { for (const id in items) delete G.inv[id]; G.pack = Object.assign(packSpot(p.x, p.z), { items }); }
+  const msg = { drown: 'You got too tired to keep swimming and blacked out.', cold: 'You got too cold and blacked out.', thirst: 'You ran out of water and blacked out.', hunger: 'You got too hungry and blacked out.' }[why] || 'You were knocked out!';
   uiFade(true, 900, () => {
     clearCreatures(); endRaid(true);
     const s = G.spawn || R.start; p.x = s.x; p.z = s.z; p.y = groundAt(p.x, p.z); p.vy = 0;

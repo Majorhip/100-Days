@@ -5,7 +5,7 @@
 //   node tests/smoke.mjs [target]     (default: dist/index.html)
 //
 // new game -> chop a tree -> build and light a campfire -> a night with wolves -> a storm ->
-// sleep until morning -> swim -> visit all three biomes -> switch through all four graphics
+// sleep until morning -> swim (float, cross the lake, in from the shore and out) -> visit all three biomes -> switch through all four graphics
 // levels. Each action uses the game's own functions (hitNode, startBuild/placeBuild, addFuel,
 // lightFire, spawnCreature, trySleep, setQuality...) and then lets the game run in real time.
 import { launch, openGame, prepPage, SAVE_KEY, HIGH_SETTINGS } from './golden/browser.mjs';
@@ -87,10 +87,41 @@ try {
     return day0;
   }, day0 => ev(d => { const { G } = window.__stranded; return { ok: G.day === d + 1 && G.hour >= 6 && G.hour < 7, info: `woke on day ${G.day} at ${G.hour.toFixed(2)} h` }; }, day0));
 
-  await step('swim', async () => {
+  // swimming (added after the migration, src/player/swim.js): the original walked along the lake bed
+  await step('swim: float', async () => {
     await ev(() => { const { G, LAKES } = window.__stranded; const L = LAKES.find(l => l.id === 'mirror'); G.p.x = L.x; G.p.z = L.z; G.p.y = 0.5; G.p.vy = 0; });
     await wait(4000);
-  }, () => ev(() => { const { G, R } = window.__stranded; return { ok: G.p.y < 0 && R.stepKind === 'water', info: `in Mirror Lake, y ${G.p.y.toFixed(2)}, ${R.stepKind}` }; }));
+  }, () => ev(() => {
+    const { G, R } = window.__stranded, lift = R.camera.position.y - R.water.position.y;
+    return { ok: R.swim === true && G.p.y > -1.45 && G.p.y < -0.95 && R.ground < -2.5 && lift > 0.25 && R.stepKind === 'water', info: `Mirror Lake: body ${G.p.y.toFixed(2)}, bed ${R.ground.toFixed(2)}, eyes ${lift.toFixed(2)} m above the water` };
+  }));
+
+  await step('swim: across the lake', async () => {
+    const a = await ev(() => { const { G, R } = window.__stranded; G.p.stam = 100; G.p.yaw = Math.atan2(-1, 0); R.keys.KeyW = true; return { x: G.p.x, z: G.p.z }; });   // face +x
+    await wait(4000);
+    return ev(a0 => { const { G, R } = window.__stranded; R.keys.KeyW = false; return { moved: Math.hypot(G.p.x - a0.x, G.p.z - a0.z), stam: G.p.stam, swim: R.swim, y: G.p.y }; }, a);
+  }, r => ({ ok: r.moved > 6 && r.swim && r.stam < 99 && r.y > -1.45, info: `${r.moved.toFixed(1)} m in 4 s, afloat ${r.swim}, stamina ${r.stam.toFixed(0)}` }));
+
+  await step('swim: in from the shore and out', async () => {
+    // start on the bank, walk in until afloat, then turn round and walk out onto dry land
+    await ev(() => {
+      const { G, R, LAKES, heightAt, groundAt } = window.__stranded, L = LAKES.find(l => l.id === 'mirror');
+      let r = 20; while (heightAt(L.x, L.z + r) < 0.8 && r < 90) r += 0.5;
+      G.p.x = L.x; G.p.z = L.z + r + 1; G.p.y = groundAt(G.p.x, G.p.z); G.p.vy = 0; G.p.stam = 100;
+      G.p.yaw = 0;                        // forward is -z, toward the lake centre
+      R.keys.KeyW = true;
+    });
+    const tIn = Date.now();
+    await page.waitForFunction(() => window.__stranded.R.swim === true, { timeout: 30000, polling: 100 });
+    const secsIn = (Date.now() - tIn) / 1000;
+    await wait(1500);
+    await ev(() => { window.__stranded.G.p.yaw = Math.PI; });   // turn round: forward is +z, back to the bank
+    const tOut = Date.now();
+    await page.waitForFunction(() => { const { G, R } = window.__stranded; return !R.swim && G.p.y > 0.3; }, { timeout: 30000, polling: 100 });
+    const secsOut = (Date.now() - tOut) / 1000;
+    await ev(() => { window.__stranded.R.keys.KeyW = false; });
+    return { secsIn, secsOut };
+  }, r => ev(rr => { const { G, R, groundAt } = window.__stranded; const onLand = Math.abs(G.p.y - groundAt(G.p.x, G.p.z)) < 0.05; return { ok: onLand && !R.swim, info: `afloat after ${rr.secsIn.toFixed(1)} s, back on land after ${rr.secsOut.toFixed(1)} s` }; }, r));
 
   for (const [biome, x, z] of [['forest', 0, 60], ['desert', 205, 10], ['snow', -60, -150]]) {
     await step(`visit ${biome}`, async () => {

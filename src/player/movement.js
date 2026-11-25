@@ -12,6 +12,7 @@ import { sfx } from '../audio/audio.js';
 import { heightAt } from '../world/terrain.js';
 import { collide } from '../world/collision.js';
 import { hint } from '../ui/hud.js';
+import { SEA_LIMIT, swimTire, swimStep } from './swim.js';   // added after the migration
 
 // @moved-from: original
 
@@ -34,7 +35,7 @@ function updatePlayer(dt) {
   const moving = mx !== 0 || mz !== 0, grounded = p.y <= R.ground + 0.02;
   const wading = p.y < -0.25, sprint = moving && (k.ShiftLeft || k.ShiftRight || (R.joy && R.joy.mag > 0.93 && free)) && p.stam > 1 && !wading && !R.fish;
   R.sprinting = sprint;
-  if (sprint) p.stam = Math.max(0, p.stam - 13 * dt); else p.stam = Math.min(100, p.stam + (moving ? 9 : 16) * dt);
+  if (sprint) p.stam = Math.max(0, p.stam - 13 * dt); else if (R.swim) swimTire(p, dt, moving); else p.stam = Math.min(100, p.stam + (moving ? 9 : 16) * dt);
   let speed = sprint ? 8.4 : 5.0; if (wading) speed *= 0.55; if (p.warm < 15) speed *= 0.8;
   if (moving) {
     const l = Math.hypot(mx, mz); if (l > 1) { mx /= l; mz /= l; }
@@ -44,7 +45,7 @@ function updatePlayer(dt) {
       let nx = clamp(p.x + ax, -HALF + 4, HALF - 4), nz = clamp(p.z + az, -HALF + 4, HALF - 4);
       const c = collide(nx, nz, 0.42); nx = c[0]; nz = c[1];
       const gh = groundAt(nx, nz), run = Math.hypot(nx - p.x, nz - p.z);
-      if (gh < -1.25) { if (!R.tips.deep) { R.tips.deep = 1; hint('The water is too deep to cross.'); setTimeout(() => R.tips.deep = 0, 6000); } return false; }
+      if (gh < SEA_LIMIT) { if (!R.tips.deep) { R.tips.deep = 1; hint('The sea is too rough out here. Swim back to the island!'); setTimeout(() => R.tips.deep = 0, 6000); } return false; }
       if (run > 0.0001 && (gh - (grounded ? R.ground : p.y)) / run > 1.45) return false;   // too steep (a jump gets you up a ledge)
       G.stats.dist += run; R.stepAcc += run; p.x = nx; p.z = nz; return true;
     };
@@ -52,13 +53,13 @@ function updatePlayer(dt) {
   } else { const c = collide(p.x, p.z, 0.42); p.x = c[0]; p.z = c[1]; }
   R.ground = groundAt(p.x, p.z);
   if (free && k.Space && grounded && !wading) { p.vy = 6.6; sfx('step', R.stepKind); }
-  p.vy -= 19 * dt; p.y += p.vy * dt;
-  if (p.y <= R.ground) { if (p.vy < -9) { R.shake = Math.max(R.shake, 0.2); sfx('thunk'); } p.y = R.ground; p.vy = 0; }
+  if (!swimStep(p, dt)) { p.vy -= 19 * dt; p.y += p.vy * dt; }   // afloat: src/player/swim.js
+  if (R.swim) { /* afloat */ } else if (p.y <= R.ground) { if (p.vy < -9) { R.shake = Math.max(R.shake, 0.2); sfx('thunk'); } p.y = R.ground; p.vy = 0; }
   else if (p.vy <= 0 && p.y - R.ground < 0.45) { p.y = R.ground; p.vy = 0; }   // stick to slopes when walking downhill
   // footsteps + head bob
   if (R.stepAcc > (sprint ? 3.0 : 2.3) && grounded) { R.stepAcc = 0; sfx('step', R.stepKind); }
   R.bob = moving && grounded ? R.bob + dt * (sprint ? 13 : 9) : R.bob * 0.9;
-  const cam = R.camera, bobY = Math.sin(R.bob) * (moving && grounded ? 0.055 : 0), eye = wading ? 1.25 : 1.62;
+  const cam = R.camera, bobY = Math.sin(R.bob) * (moving && grounded ? 0.055 : 0), eye = wading && !R.swim ? Math.max(1.25, 0.4 - p.y) : 1.62;
   R.eye = lerp(R.eye || 1.62, eye, Math.min(1, dt * 6));
   cam.position.set(p.x, p.y + R.eye + bobY, p.z);
   if (R.shake > 0) { R.shake = Math.max(0, R.shake - dt * 1.6); cam.position.x += rnd(-1, 1) * R.shake * 0.25; cam.position.y += rnd(-1, 1) * R.shake * 0.25; }
