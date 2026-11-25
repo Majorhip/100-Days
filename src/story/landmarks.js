@@ -23,7 +23,9 @@ import { startFishing } from '../player/fishing.js';
 import { LM_POS, prop, rocks, addPoi, readNote, addChest } from './props.js';
 import { refreshPack, placeRay, talkToRay } from './ray.js';
 import { badge, tipOnce } from './quests.js';
-import { hint, toast, banner, uiFlash, openPanel, showDialog, saveGame } from '../legacy.js';
+import { hint, toast, banner, uiFlash } from '../ui/hud.js';
+import { openPanel, showDialog } from '../ui/panels.js';
+import { saveGame } from '../legacy.js';
 
 // @moved-from: original
 

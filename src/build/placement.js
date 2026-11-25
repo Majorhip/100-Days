@@ -17,7 +17,7 @@ import { give, canAfford, pay, addXP } from '../player/inventory.js';
 import { FLOORS, groundAt, _fwd } from '../player/movement.js';
 import { STRUCT, ROOFS, WALLS, cellKey, spawnStructure, removeStructure } from './structures.js';
 import { badge, tipOnce } from '../story/quests.js';
-import { uiDirty, hint } from '../legacy.js';
+import { uiDirty, hint } from '../ui/hud.js';
 
 // @moved-from: original
 

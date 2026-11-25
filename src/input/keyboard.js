@@ -14,7 +14,8 @@ import { refreshViewModel } from '../player/viewmodel.js';
 import { primaryAction, interact } from '../player/targeting.js';
 import { stopFishing } from '../player/fishing.js';
 import { cancelBuild, tryDismantle } from '../build/placement.js';
-import { hint, openPanel, closePanel, switchInvTab } from '../legacy.js';
+import { hint } from '../ui/hud.js';
+import { openPanel, closePanel, switchInvTab } from '../ui/panels.js';
 
 // @moved-from: original
 

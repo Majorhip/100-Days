@@ -16,7 +16,7 @@ import { POIS } from '../player/targeting.js';
 import { damageCreature } from './creatures.js';
 import { nearestClosedChest } from '../story/props.js';
 import { badge, tipOnce } from '../story/quests.js';
-import { hint, toast, banner, dmgNumber } from '../legacy.js';
+import { hint, toast, banner, dmgNumber } from '../ui/hud.js';
 
 // @moved-from: original
 

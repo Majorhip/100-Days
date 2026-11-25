@@ -13,7 +13,9 @@ import { GFX } from './textures.js';
 import { gfxStampGrass } from './terrain.js';
 import { updateLife } from './life.js';
 import { PP, gradeUpdate } from './post.js';
-import { toast, saveSettings, setQuality } from '../legacy.js';
+import { toast } from '../ui/hud.js';
+import { saveSettings } from '../save.js';
+import { setQuality } from '../legacy.js';
 
 // @moved-from: original
 

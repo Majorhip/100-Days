@@ -13,7 +13,9 @@ import { groundAt } from './movement.js';
 import { clearCreatures } from '../creatures/creatures.js';
 import { endRaid } from '../creatures/spawner.js';
 import { refreshPack } from '../story/ray.js';
-import { uiDirty, hint, toast, uiDamage, uiFade, showMessage, onNewDay, saveGame } from '../legacy.js';
+import { uiDirty, hint, toast, uiDamage, uiFade } from '../ui/hud.js';
+import { showMessage } from '../ui/panels.js';
+import { onNewDay, saveGame } from '../legacy.js';
 
 // @moved-from: original
 function hurtPlayer(dmg, src) {

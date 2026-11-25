@@ -20,7 +20,7 @@ import { STRUCT } from '../build/structures.js';
 import { placeBuild } from '../build/placement.js';
 import { structPrompt, useStructure } from '../build/use.js';
 import { nearestHostile, damageCreature } from '../creatures/creatures.js';
-import { hint } from '../legacy.js';
+import { hint } from '../ui/hud.js';
 
 // @moved-from: original
 

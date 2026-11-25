@@ -8,7 +8,7 @@ import { G } from '../state.js';
 import { sfx } from '../audio/audio.js';
 import { ITEMS, HANDS } from '../data/items.js';
 import { badge } from '../story/quests.js';
-import { uiDirty, lootToast, banner, uiFlash } from '../legacy.js';
+import { uiDirty, lootToast, banner, uiFlash } from '../ui/hud.js';
 
 // @moved-from: original
 

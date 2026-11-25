@@ -14,7 +14,7 @@ import { ITEMS } from '../data/items.js';
 import { inv, give, take, dmgMult } from './inventory.js';
 import { _fwd } from './movement.js';
 import { damageCreature } from '../creatures/creatures.js';
-import { hint } from '../legacy.js';
+import { hint } from '../ui/hud.js';
 
 // @moved-from: original
 

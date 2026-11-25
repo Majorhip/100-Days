@@ -15,7 +15,7 @@ import { POIS } from '../player/targeting.js';
 import { scoutLeaves } from '../creatures/scout.js';
 import { LM_POS, nearestClosedChest } from './props.js';
 import { placeRay } from './ray.js';
-import { toast, banner, questPop } from '../legacy.js';
+import { toast, banner, questPop } from '../ui/hud.js';
 
 // @moved-from: original
 

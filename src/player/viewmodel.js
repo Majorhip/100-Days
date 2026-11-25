@@ -9,7 +9,7 @@ import { G, R } from '../state.js';
 import { toolModel } from '../models/tools.js';
 import { inv, heldId } from './inventory.js';
 import { resolveSwing } from './targeting.js';
-import { uiDirty } from '../legacy.js';
+import { uiDirty } from '../ui/hud.js';
 
 // @moved-from: original
 

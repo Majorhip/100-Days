@@ -66,4 +66,9 @@ window.__stranded = ALL;
 // @moved-to: src/story/landmarks.js
 // @moved-to: src/story/ray.js
 // @moved-to: src/story/quests.js
+// @moved-to: src/ui/hud.js
+// @moved-to: src/ui/map.js
+// @moved-to: src/ui/panels.js
+// @moved-to: src/ui/settings.js
+// @moved-to: src/save.js
 // @moved-to: src/legacy.js

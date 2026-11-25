@@ -12,7 +12,7 @@ import { sfx } from '../audio/audio.js';
 import { heightAt } from '../world/terrain.js';
 import { GFXQ } from './quality.js';
 import { GFX } from './textures.js';
-import { uiFlash } from '../legacy.js';
+import { uiFlash } from '../ui/hud.js';
 
 // @moved-from: original
 

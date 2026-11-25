@@ -18,7 +18,8 @@ import { planks } from '../models/structures.js';
 import { give, addXP } from '../player/inventory.js';
 import { POIS } from '../player/targeting.js';
 import { badge, tipOnce } from './quests.js';
-import { banner, uiFlash, showNote } from '../legacy.js';
+import { banner, uiFlash } from '../ui/hud.js';
+import { showNote } from '../ui/panels.js';
 
 // @moved-from: original
 

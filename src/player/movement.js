@@ -11,7 +11,7 @@ import { G, R } from '../state.js';
 import { sfx } from '../audio/audio.js';
 import { heightAt } from '../world/terrain.js';
 import { collide } from '../world/collision.js';
-import { hint } from '../legacy.js';
+import { hint } from '../ui/hud.js';
 
 // @moved-from: original
 

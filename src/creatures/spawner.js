@@ -12,7 +12,7 @@ import { nightAmount } from '../world/sky.js';
 import { give, addXP } from '../player/inventory.js';
 import { spawnCreature, removeCreature } from './creatures.js';
 import { badge } from '../story/quests.js';
-import { toast, banner } from '../legacy.js';
+import { toast, banner } from '../ui/hud.js';
 
 // @moved-from: original
 

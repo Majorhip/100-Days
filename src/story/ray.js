@@ -11,7 +11,8 @@ import { DIALOGS } from '../data/story.js';
 import { give } from '../player/inventory.js';
 import { groundAt } from '../player/movement.js';
 import { prop, addPoi, readNote } from './props.js';
-import { showDialog, showChoice, showEnding, saveGame } from '../legacy.js';
+import { showDialog, showChoice, showEnding } from '../ui/panels.js';
+import { saveGame } from '../legacy.js';
 
 // @moved-from: original
 function refreshPack() { const p = G.pack; R.packMesh.visible = !!p; if (p) { const h = heightAt(p.x, p.z); R.packMesh.position.set(p.x, h, p.z); R.packPoi.x = p.x; R.packPoi.y = h + 0.5; R.packPoi.z = p.z; } }

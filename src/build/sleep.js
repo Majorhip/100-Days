@@ -12,7 +12,9 @@ import { structuresStep, nearestFlame } from './update.js';
 import { clearCreatures, nearestHostile } from '../creatures/creatures.js';
 import { startRaid } from '../creatures/spawner.js';
 import { badge } from '../story/quests.js';
-import { hint, uiFade, showMorningReport, advanceTime, saveGame } from '../legacy.js';
+import { hint, uiFade } from '../ui/hud.js';
+import { showMorningReport } from '../ui/panels.js';
+import { advanceTime, saveGame } from '../legacy.js';
 
 // @moved-from: original
 

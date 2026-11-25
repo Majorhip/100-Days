@@ -77,8 +77,8 @@ export const SPEC = [
   { step: 12, at: 'refreshPack', file: 'src/story/ray.js', what: 'The dropped backpack and Uncle Ray.' },
   { step: 12, at: 'checkLandmarks', file: 'src/story/quests.js', what: 'Discovering landmarks, badges, tips, quests and the story day by day.' },
   // ---- 10_ui ----
-  { step: 13, at: '_dirty', file: 'src/ui/feedback.js', what: 'Hints, toasts, loot rows, banners, screen flashes and floating numbers.' },
-  { step: 13, at: 'METERS', file: 'src/ui/hud.js', what: 'The HUD: meters, compass, clock, minimap label.' },
+  // one file: updateHUD (HUD) clears the _dirty flag that uiDirty (feedback) sets
+  { step: 13, at: '_dirty', file: 'src/ui/hud.js', what: 'The HUD: hints, toasts, loot rows, banners, screen flashes, floating numbers, meters, compass, clock.' },
   { step: 13, at: 'FOG_N', file: 'src/ui/map.js', what: 'Fog of war, the minimap and the big map.' },
   { step: 13, at: 'openPanel', file: 'src/ui/panels.js', what: 'Panels: pack, crafting, building, fire, chest, journal, messages, dialogue, endings.' },
   { step: 13, at: 'helpHTML', file: 'src/ui/settings.js', what: 'How to play and the settings panel.' },

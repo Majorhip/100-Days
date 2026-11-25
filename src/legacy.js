@@ -4,16 +4,15 @@
 // The code between @moved-from and @end-moved must stay byte-identical to the original
 // (tests/golden/compare-build.mjs); changes go through tests/golden/approved-edits.mjs.
 
-import './story/quests.js';   // load order: runs after the previous part of the original script
+import './save.js';   // load order: runs after the previous part of the original script
 import * as THREE from 'three';
-import { TAU, clamp, dist2, rnd, angDiff } from './core/math.js';
+import { clamp, rnd } from './core/math.js';
 import { $ } from './ui/dom.js';
-import { hash2 } from './core/noise.js';
-import { HOUR_SECONDS, TICK, SAVE_KEY, SAVE_VERSION, WORLD, HALF } from './core/constants.js';
+import { HOUR_SECONDS, TICK, SAVE_KEY, SAVE_VERSION } from './core/constants.js';
 import { GU } from './gfx/core.js';
 import { newGameState, G, R, setG } from './state.js';
-import { AU, audioInit, sfx, audioAmbient, setVolume } from './audio/audio.js';
-import { biomeAt, heightAt, shorePoint, terrainColor } from './world/terrain.js';
+import { AU, audioInit, sfx, audioAmbient } from './audio/audio.js';
+import { biomeAt, heightAt, shorePoint } from './world/terrain.js';
 import { nightAmount, puff } from './world/sky.js';
 import { GFXQ } from './gfx/quality.js';
 import { GFX } from './gfx/textures.js';
@@ -25,524 +24,35 @@ import { gfxBuildGrass } from './gfx/grass.js';
 import { buildLife } from './gfx/life.js';
 import { PP, ppInit, ppResize, gfxRender } from './gfx/post.js';
 import { gfxLightPool, gfxUpdate } from './gfx/update.js';
-import { ITEMS, HOTBAR } from './data/items.js';
-import { RECIPES } from './data/recipes.js';
-import { BUILD_BY_ID } from './data/buildings.js';
-import { NOTES, INTRO, LANDMARKS, BADGES, TIPS } from './data/story.js';
-import { NT, NODES, placeNodes } from './world/nodes.js';
+import { INTRO } from './data/story.js';
+import { NT, placeNodes } from './world/nodes.js';
 import { respawnNodes, applyNodeState, nodeNeeds } from './world/gathering.js';
-import { inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP } from './player/inventory.js';
-import { ambientTemp, SURV, survivalStep } from './game/survival.js';
-import { eat, quickEat, drinkCanteen } from './player/health.js';
+import { inv, bestTool, heldId, heldDef } from './player/inventory.js';
+import { ambientTemp, survivalStep } from './game/survival.js';
+import { quickEat, drinkCanteen } from './player/health.js';
 import { groundAt, _fwd, updatePlayer } from './player/movement.js';
 import { refreshViewModel, updateViewModel } from './player/viewmodel.js';
-import { findTarget, targetPrompt, key, primaryAction, interact } from './player/targeting.js';
+import { findTarget, primaryAction, interact } from './player/targeting.js';
 import { updateArrows } from './player/bow.js';
-import { stopFishing, updateFishing } from './player/fishing.js';
-import { setupInput, lockPointer, selectSlot } from './input/keyboard.js';
+import { updateFishing } from './player/fishing.js';
+import { setupInput, lockPointer } from './input/keyboard.js';
 import { STRUCT, rebuildStructures } from './build/structures.js';
-import { startBuild, cancelBuild, updateBuildGhost, placeBuild, tryDismantle } from './build/placement.js';
-import { lightFire, addFuel } from './build/use.js';
-import { structuresStep, structuresNewDay, nearestFlame, updateStructures } from './build/update.js';
+import { cancelBuild, updateBuildGhost, placeBuild, tryDismantle } from './build/placement.js';
+import { structuresStep, structuresNewDay, updateStructures } from './build/update.js';
 import { updateCreatures } from './creatures/creatures.js';
 import { updateSpawner } from './creatures/spawner.js';
 import { initScout, scoutHungerCheck, updateScout } from './creatures/scout.js';
-import { CHESTS, LM_POS } from './story/props.js';
+import { CHESTS } from './story/props.js';
 import { buildLandmarks } from './story/landmarks.js';
 import { refreshPack, spawnPackNote, placeRay } from './story/ray.js';
-import { checkLandmarks, badge, tipOnce, updateQuests, updateStory, storyNewDay } from './story/quests.js';
+import { checkLandmarks, tipOnce, updateQuests, updateStory, storyNewDay } from './story/quests.js';
+import { uiDirty, icon, esc, hint, toast, banner, updateNums, buildHUD, updateHUD } from './ui/hud.js';
+import { fogArr, fogSave, revealFog, prerenderMap } from './ui/map.js';
+import { openPanel, showEnding } from './ui/panels.js';
+import { helpHTML, settingsHTML, bindSettingsInputs } from './ui/settings.js';
+import { loadSettings } from './save.js';
 
 // @moved-from: original
-
-/* =========================================================================
-   10_ui: HUD, toasts, panels (pack/crafting, build, fire, chest, journal,
-          map, pause), dialogs, morning report, endings, title screen
-   ========================================================================= */
-let _dirty = true;
-function uiDirty() { _dirty = true; }
-const icon = id => id === 'hands' ? '✋' : (ITEMS[id] ? ITEMS[id].e[0] : '❔');
-const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-
-/* ---------- small feedback ---------- */
-function hint(msg, secs) { const h = $('hint'); h.innerHTML = tx(msg); h.classList.add('on'); clearTimeout(R.hintT); R.hintT = setTimeout(() => h.classList.remove('on'), (secs || 3.2) * 1000); }
-function toast(msg, kind, ms) {
-  const box = $('toasts'), d = document.createElement('div'); d.className = 'toast ' + (kind || ''); d.innerHTML = tx(msg); box.appendChild(d);
-  while (box.children.length > 5) box.removeChild(box.firstChild);
-  setTimeout(() => d.classList.add('out'), ms || 5000); setTimeout(() => d.remove(), (ms || 5000) + 600);
-}
-function lootToast(id, n) {
-  const box = $('loot'), now = performance.now();
-  let row = [...box.children].find(r => r.dataset.id === id && now - r._t < 2500);
-  if (row) { row._n += n; row._t = now; row.querySelector('b').textContent = '+' + row._n; row.classList.remove('bump'); void row.offsetWidth; row.classList.add('bump'); }
-  else {
-    row = document.createElement('div'); row.className = 'lootrow'; row.dataset.id = id; row._n = n; row._t = now;
-    row.innerHTML = '<b>+' + n + '</b> ' + icon(id) + ' ' + ITEMS[id].n; box.appendChild(row);
-    while (box.children.length > 6) box.removeChild(box.firstChild);
-  }
-  clearTimeout(row._k); row._k = setTimeout(() => { row.classList.add('out'); setTimeout(() => row.remove(), 500); }, 2600);
-}
-function banner(title, sub) {
-  const b = $('banner'); b.innerHTML = (title ? '<div class="bt">' + title + '</div>' : '') + (sub ? '<div class="bs">' + sub + '</div>' : '');
-  b.classList.remove('on'); void b.offsetWidth; b.classList.add('on'); clearTimeout(R.bannerT); R.bannerT = setTimeout(() => b.classList.remove('on'), 3800);
-}
-function questPop(t) { const q = $('quest'); q.classList.remove('pop'); void q.offsetWidth; q.classList.add('pop'); }
-function uiFlash(color, a) { const f = $('flash'); f.style.transition = 'none'; f.style.background = color; f.style.opacity = a; void f.offsetWidth; f.style.transition = 'opacity .7s'; f.style.opacity = 0; }
-function uiDamage() { const v = $('vignette'); v.classList.remove('hit'); void v.offsetWidth; v.classList.add('hit'); }
-function uiFade(on, ms, cb) { const f = $('fade'); f.style.transition = 'opacity ' + ms + 'ms'; f.style.opacity = on ? 1 : 0; f.style.pointerEvents = on ? 'all' : 'none'; if (cb) setTimeout(cb, ms + 30); }
-function dmgNumber(x, y, z, text, kind) {
-  const d = document.createElement('div'); d.className = 'num ' + (kind || ''); d.textContent = text; $('nums').appendChild(d);
-  R.nums.push({ d, x, y, z, t: 0, dx: rnd(-0.4, 0.4) });
-}
-const _pv = new THREE.Vector3();
-function updateNums(dt) {
-  for (let i = R.nums.length - 1; i >= 0; i--) {
-    const n = R.nums[i]; n.t += dt; if (n.t > 1.1) { n.d.remove(); R.nums.splice(i, 1); continue; }
-    _pv.set(n.x + n.dx * n.t, n.y + n.t * 1.2, n.z).project(R.camera);
-    if (_pv.z > 1) { n.d.style.display = 'none'; continue; }
-    n.d.style.display = ''; n.d.style.transform = 'translate(' + ((_pv.x + 1) / 2 * innerWidth) + 'px,' + ((1 - _pv.y) / 2 * innerHeight) + 'px) translate(-50%,-50%) scale(' + (n.t < 0.12 ? 1 + (0.12 - n.t) * 5 : 1) + ')';
-    n.d.style.opacity = n.t > 0.75 ? (1.1 - n.t) / 0.35 : 1;
-  }
-}
-
-/* ---------- HUD ---------- */
-const METERS = [['hp', '❤️', '#e8473f'], ['food', '🍗', '#e89a3f'], ['water', '💧', '#3fa0e8'], ['warm', '🔥', '#f0c23a'], ['stam', '⚡', '#8fd45a']];
-function buildHUD() {
-  $('meters').innerHTML = METERS.map(m => '<div class="meter" id="m_' + m[0] + '"><span class="mi">' + m[1] + '</span><div class="mb"><div class="mf" style="background:' + m[2] + '"></div><div class="mg"></div></div><span class="mv"></span></div>').join('');
-  const sc = document.createElement('div'); sc.id = 'scoutchip'; $('meters').appendChild(sc);
-  $('hotbar').innerHTML = HOTBAR.map((s, i) => '<div class="slot" id="hb_' + s + '"><span class="k">' + (i + 1) + '</span><span class="ic"></span><span class="c"></span></div>').join('');
-  HOTBAR.forEach(s => $('hb_' + s).onclick = () => selectSlot(s));
-  $('minimap').onclick = e => { e.stopPropagation(); if (R.started && !R.panel && !R.cinematic && !R.sleeping) openPanel('map'); };
-  $('minimap').title = 'Click to open the map (M)';
-  const cp = $('compassIn'); cp.innerHTML = '';
-  ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'].forEach((t, i) => { const d = document.createElement('span'); d.className = 'cm' + (t.length === 1 ? ' big' : ''); d.textContent = t; d.dataset.b = i * Math.PI / 4; cp.appendChild(d); });
-  for (let i = 0; i < 24; i++) { const d = document.createElement('span'); d.className = 'tick'; d.dataset.b = i * Math.PI / 12 + Math.PI / 24; cp.appendChild(d); }
-  R.compWp = document.createElement('span'); R.compWp.className = 'cwp'; R.compWp.innerHTML = '◆<i></i>'; cp.appendChild(R.compWp);
-}
-function compassPlace(el, bearing) {
-  const rel = angDiff(-G.p.yaw, bearing);
-  if (Math.abs(rel) > 1.35) { el.style.display = 'none'; return rel; }
-  el.style.display = ''; el.style.left = (50 + rel / 1.35 * 50) + '%'; el.style.opacity = 1 - Math.abs(rel) / 1.6; return rel;
-}
-function wpPos() { const w = R.wp; return w ? { x: w.x, z: w.z } : null; }
-const WEATHER_ICON = { clear: '☀️', cloudy: '⛅', rain: '🌧️', storm: '⛈️' };
-function hourStr(h) { const hh = Math.floor(h), mm = Math.floor((h - hh) * 60 / 10) * 10; return (hh % 12 || 12) + ':' + String(mm).padStart(2, '0') + (hh < 12 ? ' am' : ' pm'); }
-function updateHUD(dt) {
-  const p = G.p;
-  // meters
-  for (const [k] of METERS) {
-    const v = k === 'hp' ? p.hp / p.maxHp * 100 : p[k], el = $('m_' + k);
-    el.querySelector('.mf').style.width = clamp(v, 0, 100) + '%';
-    el.querySelector('.mv').textContent = k === 'hp' ? Math.ceil(p.hp) : Math.ceil(v);
-    el.classList.toggle('low', v < 25 && k !== 'stam'); el.classList.toggle('hide', k === 'stam' && v > 99.5);
-  }
-  const cold = R.temp < SURV.comfort && p.warm < 99, hot = R.heat;
-  $('m_warm').querySelector('.mg').className = 'mg ' + (cold ? 'cold' : R.nearFire && p.warm < 99.5 ? 'heat' : '');
-  $('m_water').querySelector('.mg').className = 'mg ' + (hot ? 'drain' : '');
-  const sch = $('scoutchip'), sst = !G.scout.friend ? '' : G.scout.fed >= G.day ? 'full' : 'hungry';
-  if (sch._s !== sst) { sch._s = sst; sch.style.display = sst ? '' : 'none'; sch.className = sst; sch.innerHTML = sst === 'full' ? '🐕 Scout: full ✓' : '🐕 Scout is hungry! 🥩'; }
-  $('temp').textContent = (cold ? '🥶 ' : hot ? '🥵 ' : '') + Math.round(R.temp) + '°';
-  $('temp').className = cold ? 'cold' : hot ? 'hot' : '';
-  // clock
-  const night = nightAmount();
-  $('day').textContent = 'DAY ' + G.day; $('time').textContent = (night > 0.5 ? '🌙 ' : '☀️ ') + hourStr(G.hour);
-  $('weather').textContent = (G.weather === 'clear' && night > 0.5 ? '🌙' : WEATHER_ICON[G.weather]) + (R.raid ? ' 🌕' : '') + (R.sheltered ? ' 🏠' : '');
-  $('dayprog').style.width = (G.day / 100 * 100) + '%';
-  // compass
-  for (const el of $('compassIn').children) if (el.dataset.b !== undefined) compassPlace(el, +el.dataset.b);
-  const w = wpPos();
-  if (w) { const d = dist2(w.x, w.z, p.x, p.z), rel = compassPlace(R.compWp, Math.atan2(w.x - p.x, -(w.z - p.z))); R.compWp.querySelector('i').textContent = Math.round(d) + 'm'; if (Math.abs(rel) > 1.35) { R.compWp.style.display = ''; R.compWp.style.left = (rel > 0 ? 98 : 2) + '%'; R.compWp.style.opacity = 0.8; } }
-  else R.compWp.style.display = 'none';
-  // quest
-  if (_dirty || (R.qT = (R.qT || 0) - dt) <= 0) {
-    R.qT = 0.5; const q = R.quest;
-    $('quest').innerHTML = q ? '<div class="ql">GOAL</div><div class="qt">' + q.t + '</div>' + (q.s ? '<div class="qs">' + tx(q.s()) + '</div>' : '') : '';
-  }
-  // hotbar
-  if (_dirty) {
-    for (const s of HOTBAR) {
-      const id = bestTool(s), el = $('hb_' + s);
-      el.classList.toggle('none', !id); el.classList.toggle('sel', G.p.held === s);
-      el.querySelector('.ic').textContent = id ? icon(id) : ''; el.querySelector('.c').textContent = s === 'bow' && id ? inv('arrow') : '';
-      el.title = id ? (id === 'hands' ? 'Hands' : ITEMS[id].n) : '';
-      el.style.background = id && id !== 'hands' && ITEMS[id].bg ? 'linear-gradient(180deg,' + ITEMS[id].bg + '66,#0006)' : '';
-    }
-    $('canteen').style.display = inv('canteen') ? '' : 'none'; $('canteen').innerHTML = '🧴 <b>' + (G.flags.canteen || 0) + '</b>/5 <kbd>G</kbd>';
-    $('lvl').textContent = 'LV ' + p.level; $('xpf').style.width = (p.xp / xpNeed(p.level) * 100) + '%';
-    if (R.panel === 'inv' || R.panel === 'craft' || R.panel === 'build' || R.panel === 'chest' || R.panel === 'fire') renderPanel();
-    _dirty = false;
-  }
-  // prompt
-  let pr = '';
-  if (R.build) pr = R.build.ok ? (R.touch ? '<kbd class="tk">✅</kbd>' : key('Click')) + ' Place ' + R.build.def.n + '  ' + key('R') + ' rotate  ' + key('X') + ' stop' : '❌ ' + (R.build.why || '');
-  else if (R.fish) pr = R.fish.phase === 'bite' ? '🐟 <b>CLICK NOW!</b>' : '🎣 Waiting for a bite...';
-  else {
-    pr = targetPrompt(R.target);
-    const t = R.target; if (t && t.kind === 'node' && NT[t.ref.t].hp && t.ref.hp < NT[t.ref.t].hp) { const k = t.ref.hp / NT[t.ref.t].hp; pr += '<div class="pbar"><div style="width:' + (k * 100) + '%"></div></div>'; }
-  }
-  if (pr !== R.lastPr) { $('prompt').innerHTML = pr; R.lastPr = pr; }
-  $('cross').className = R.target ? 'on' : '';
-  // boss + focus bars
-  const b = R.boss;
-  $('bossbar').style.display = b ? '' : 'none';
-  if (b) { $('bossname').textContent = b.def.n; $('bossfill').style.width = Math.max(0, b.hp / b.maxHp * 100) + '%'; }
-  const f = !b && R.focus && !R.focus.dead ? R.focus : null;
-  $('focus').style.display = f ? '' : 'none';
-  if (f) { $('focusname').textContent = f.def.n + (f.raid ? ' 🌕' : ''); $('focusfill').style.width = Math.max(0, f.hp / f.maxHp * 100) + '%'; }
-  // vignettes: low health, cold, wolf moon
-  const lowHp = p.hp / p.maxHp < 0.3;
-  $('vignette').style.boxShadow = lowHp ? 'inset 0 0 ' + (140 + Math.sin(R.t * 6) * 30) + 'px rgba(200,0,0,.55)' : cold && p.warm < 30 ? 'inset 0 0 160px rgba(140,200,255,.55)' : R.raid ? 'inset 0 0 160px rgba(120,0,0,.35)' : 'none';
-  drawMinimap();
-}
-
-/* ---------- map ---------- */
-const FOG_N = 90;
-function fogArr() { if (!R.fog) { R.fog = new Uint8Array(FOG_N * FOG_N); if (G.fog) for (let i = 0; i < G.fog.length; i++) { const c = G.fog.charCodeAt(i) - 48; for (let b = 0; b < 6; b++) { const j = i * 6 + b; if (j < R.fog.length) R.fog[j] = (c >> b) & 1; } } } return R.fog; }
-function fogSave() { const f = fogArr(); let s = ''; for (let i = 0; i < f.length; i += 6) { let c = 0; for (let b = 0; b < 6; b++) c |= (f[i + b] || 0) << b; s += String.fromCharCode(48 + c); } G.fog = s; }
-function revealFog() {
-  const f = fogArr(), cx = Math.floor((G.p.x + HALF) / WORLD * FOG_N), cz = Math.floor((G.p.z + HALF) / WORLD * FOG_N), r = 6;
-  for (let x = -r; x <= r; x++) for (let z = -r; z <= r; z++) { if (x * x + z * z > r * r) continue; const i = cx + x, j = cz + z; if (i >= 0 && j >= 0 && i < FOG_N && j < FOG_N && !f[j * FOG_N + i]) { f[j * FOG_N + i] = 1; R.fogDirty = true; } }
-}
-/** a tiny FOG_N×FOG_N parchment mask; drawn scaled-up with smoothing so the explored edge fades softly */
-function fogCanvas() {
-  if (!R.fogCv) { R.fogCv = document.createElement('canvas'); R.fogCv.width = R.fogCv.height = FOG_N; R.fogDirty = true; }
-  if (R.fogDirty) {
-    R.fogDirty = false; const f = fogArr(), ctx = R.fogCv.getContext('2d'), img = ctx.createImageData(FOG_N, FOG_N);
-    for (let i = 0; i < f.length; i++) { const n = hash2(i, 7) * 18; img.data[i * 4] = 226 + n * 0.5; img.data[i * 4 + 1] = 212 + n * 0.4; img.data[i * 4 + 2] = 180 + n * 0.2; img.data[i * 4 + 3] = f[i] ? 0 : 255; }
-    ctx.putImageData(img, 0, 0);
-    // blur a 4x copy so explored edges fade softly instead of looking blocky
-    if (!R.fogSoft) { R.fogSoft = document.createElement('canvas'); R.fogSoft.width = R.fogSoft.height = FOG_N * 4; }
-    const sc = R.fogSoft.getContext('2d'); sc.clearRect(0, 0, FOG_N * 4, FOG_N * 4); sc.imageSmoothingEnabled = true;
-    try { sc.filter = 'blur(5px)'; } catch (e) { }
-    sc.drawImage(R.fogCv, -2, -2, FOG_N * 4 + 4, FOG_N * 4 + 4); sc.filter = 'none';
-  }
-  return R.fogSoft;
-}
-const fogAt = (x, z) => { const i = Math.floor((x + HALF) / WORLD * FOG_N), j = Math.floor((z + HALF) / WORLD * FOG_N); return i >= 0 && j >= 0 && i < FOG_N && j < FOG_N && fogArr()[j * FOG_N + i] === 1; };
-function prerenderMap() {
-  const S = 360, cv = document.createElement('canvas'); cv.width = cv.height = S; const ctx = cv.getContext('2d'), img = ctx.createImageData(S, S), c = [0, 0, 0];
-  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
-    const x = -HALF + (i + 0.5) * WORLD / S, z = -HALF + (j + 0.5) * WORLD / S, h = heightAt(x, z), o = (j * S + i) * 4;
-    if (h < 0) { const d = clamp(-h / 6, 0, 1); img.data[o] = 40 - d * 20; img.data[o + 1] = 120 - d * 50; img.data[o + 2] = 190 - d * 60; img.data[o + 3] = 255; continue; }
-    const sh = clamp(1 + (heightAt(x - 2, z - 2) - h) * 0.12, 0.7, 1.25); terrainColor(x, z, h, 1, c);
-    img.data[o] = clamp(c[0] * 255 * sh, 0, 255); img.data[o + 1] = clamp(c[1] * 255 * sh, 0, 255); img.data[o + 2] = clamp(c[2] * 255 * sh, 0, 255); img.data[o + 3] = 255;
-  }
-  ctx.putImageData(img, 0, 0);
-  // forests as darker dots
-  ctx.fillStyle = 'rgba(20,60,25,.55)'; for (const n of NODES) if (NT[n.t].cls === 'tree' && n.t !== 'deadtree') { ctx.fillRect((n.x + HALF) / 2 - 1, (n.z + HALF) / 2 - 1, 2, 2); }
-  R.mapImg = cv;
-}
-const toMap = (v, S) => (v + HALF) / WORLD * S;
-function drawMarkers(ctx, S, scale, mini) {
-  const p = G.p;
-  for (const s of G.structures) if (s.k === 'flag' || s.k === 'bed' || s.k === 'campfire') { ctx.font = (mini ? 11 : 18) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(s.k === 'flag' ? '🚩' : s.k === 'bed' ? '🛏️' : '🔥', toMap(s.x, S), toMap(s.z, S)); }
-  ctx.fillStyle = '#7a5632'; for (const s of G.structures) if (s.k === 'floor' || s.k === 'wall' || s.k === 'roof') ctx.fillRect(toMap(s.x, S) - 1.5 * scale, toMap(s.z, S) - 1.5 * scale, 3 * scale, 3 * scale);
-  if (G.pack) { ctx.font = (mini ? 13 : 20) + 'px sans-serif'; ctx.fillText('🎒', toMap(G.pack.x, S), toMap(G.pack.z, S)); }
-  if (G.scout.friend && R.scout && !mini) { ctx.font = '14px sans-serif'; ctx.fillText('🐕', toMap(R.scout.x, S), toMap(R.scout.z, S)); }
-  const w = wpPos();
-  if (w) { let x = toMap(w.x, S), z = toMap(w.z, S); if (mini) { x = clamp(x, -1e9, 1e9); } ctx.fillStyle = '#ffd24a'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2; star(ctx, x, z, mini ? 6 : 10); }
-  // player arrow
-  const px = toMap(p.x, S), pz = toMap(p.z, S), a = -p.yaw;
-  ctx.save(); ctx.translate(px, pz); ctx.rotate(a); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#d9342b'; ctx.lineWidth = mini ? 2 : 3;
-  const k = mini ? 6 : 10; ctx.beginPath(); ctx.moveTo(0, -k); ctx.lineTo(k * 0.7, k * 0.7); ctx.lineTo(0, k * 0.3); ctx.lineTo(-k * 0.7, k * 0.7); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore();
-}
-function star(ctx, x, y, r) { ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = i / 10 * TAU - Math.PI / 2, rr = i % 2 ? r * 0.45 : r; ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); } ctx.closePath(); ctx.stroke(); ctx.fill(); }
-function drawMinimap() {
-  if (!R.mapImg) return;
-  R.mmT = (R.mmT || 0) - 1; if (R.mmT > 0) return; R.mmT = 3;
-  const cv = $('minimap'), ctx = cv.getContext('2d'), W = cv.width, S = 720, p = G.p;   // S: map drawn at 1px = 1m
-  ctx.save(); ctx.clearRect(0, 0, W, W); ctx.beginPath(); ctx.arc(W / 2, W / 2, W / 2 - 2, 0, TAU); ctx.clip();
-  ctx.fillStyle = '#1d4f78'; ctx.fillRect(0, 0, W, W);
-  ctx.translate(W / 2 - toMap(p.x, S), W / 2 - toMap(p.z, S)); ctx.imageSmoothingEnabled = true; ctx.drawImage(R.mapImg, 0, 0, S, S); ctx.drawImage(fogCanvas(), 0, 0, S, S);
-  for (const L of LANDMARKS) if (G.found[L.id] && LM_POS[L.id]) { ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(L.e, toMap(LM_POS[L.id].x, S), toMap(LM_POS[L.id].z, S)); }
-  drawMarkers(ctx, S, 1, true);
-  ctx.restore();
-  // waypoint arrow on the rim when off the minimap
-  const w = wpPos();
-  if (w) { const dx = w.x - p.x, dz = w.z - p.z, d = Math.hypot(dx, dz); if (d > W / 2 - 8) { const a = Math.atan2(dz, dx), r = W / 2 - 9; ctx.fillStyle = '#ffd24a'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2; star(ctx, W / 2 + Math.cos(a) * r, W / 2 + Math.sin(a) * r, 6); } }
-  ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(W / 2, W / 2, W / 2 - 2, 0, TAU); ctx.stroke();
-  ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('N', W / 2, 12);
-}
-function mapView() {
-  if (R.mapAll) return { x0: -HALF, z0: -HALF, span: WORLD };
-  const f = fogArr(); let i0 = FOG_N, j0 = FOG_N, i1 = -1, j1 = -1;
-  for (let j = 0; j < FOG_N; j++) for (let i = 0; i < FOG_N; i++) if (f[j * FOG_N + i]) { if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j; }
-  if (i1 < 0) return { x0: G.p.x - 100, z0: G.p.z - 100, span: 200 };
-  const c = WORLD / FOG_N, pad = 24;
-  let x0 = -HALF + i0 * c - pad, x1 = -HALF + (i1 + 1) * c + pad, z0 = -HALF + j0 * c - pad, z1 = -HALF + (j1 + 1) * c + pad;
-  const span = clamp(Math.max(x1 - x0, z1 - z0, 200), 200, WORLD), cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-  return { x0: clamp(cx - span / 2, -HALF, HALF - span), z0: clamp(cz - span / 2, -HALF, HALF - span), span };
-}
-function renderMap(box) {
-  const S = Math.min(640, innerHeight - (R.touch ? 92 : 190), innerWidth - 80), v = mapView(), k = S / v.span;
-  const found = Object.keys(G.found).length;
-  box.innerHTML = '<h2>🗺️ Kestrel Island <button class="mini" data-a="mapall">' + (R.mapAll ? '🔍 Zoom to where I\'ve explored' : '🏝️ Show the whole island') + '</button></h2><canvas id="bigmap" width="' + S + '" height="' + S + '"></canvas><div class="mapkey">⭐ goal &nbsp; ➤ you &nbsp; 🎒 your dropped pack &nbsp;·&nbsp; The map fills in as you explore. Places found: <b>' + found + ' / ' + LANDMARKS.length + '</b></div>';
-  const ctx = $('bigmap').getContext('2d'), C = (x, z) => [(x - v.x0) * k, (z - v.z0) * k];
-  ctx.fillStyle = '#e2d4b4'; ctx.fillRect(0, 0, S, S);
-  ctx.imageSmoothingEnabled = true;
-  const m = 360 / WORLD; ctx.drawImage(R.mapImg, (v.x0 + HALF) * m, (v.z0 + HALF) * m, v.span * m, v.span * m, 0, 0, S, S);
-  // grid every 100 m
-  ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1;
-  for (let g = -300; g <= 300; g += 100) { const [gx] = C(g, 0), [, gz] = C(0, g); ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, S); ctx.moveTo(0, gz); ctx.lineTo(S, gz); ctx.stroke(); }
-  // fog of war, soft-edged
-  const fc = fogCanvas(), fm = FOG_N * 4 / WORLD; ctx.drawImage(fc, (v.x0 + HALF) * fm, (v.z0 + HALF) * fm, v.span * fm, v.span * fm, 0, 0, S, S);
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  // region names appear once you've been near them
-  ctx.font = 'bold ' + Math.round(clamp(S / 24, 14, 26)) + 'px Georgia,serif'; ctx.fillStyle = 'rgba(70,50,25,.55)';
-  for (const [name, x, z] of [['FROSTPEAK', -20, -250], ['DUST FLATS', 215, 10], ['DEEPWOOD', -150, 95]]) if (fogAt(x, z) || fogAt(x, z + 40)) { const [px, pz] = C(x, z); ctx.fillText(name, px, pz); }
-  // your base
-  for (const s of G.structures) if (s.k === 'floor' || s.k === 'wall' || s.k === 'roof') { const [px, pz] = C(s.x, s.z), w = Math.max(3, 3 * k); ctx.fillStyle = '#7a5632'; ctx.fillRect(px - w / 2, pz - w / 2, w, w); }
-  ctx.font = '18px sans-serif';
-  for (const s of G.structures) if (s.k === 'flag' || s.k === 'bed' || s.k === 'campfire' || s.k === 'shelter') { const [px, pz] = C(s.x, s.z); ctx.fillText({ flag: '🚩', bed: '🛏️', campfire: '🔥', shelter: '⛺' }[s.k], px, pz); }
-  // discovered landmarks
-  for (const L of LANDMARKS) if (G.found[L.id] && LM_POS[L.id]) {
-    const [x, z] = C(LM_POS[L.id].x, LM_POS[L.id].z); if (x < -20 || z < -20 || x > S + 20 || z > S + 20) continue;
-    ctx.font = '22px sans-serif'; ctx.fillText(L.e, x, z);
-    ctx.font = 'bold 12px sans-serif'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.strokeText(L.n, x, z + 18); ctx.fillStyle = '#fff'; ctx.fillText(L.n, x, z + 18);
-  }
-  ctx.font = '20px sans-serif';
-  if (G.pack) { const [px, pz] = C(G.pack.x, G.pack.z); ctx.fillText('🎒', px, pz); }
-  if (G.scout.friend && R.scout) { const [px, pz] = C(R.scout.x, R.scout.z); ctx.font = '15px sans-serif'; ctx.fillText('🐕', px + 8, pz + 8); }
-  const w = wpPos();
-  if (w) { let [px, pz] = C(w.x, w.z); px = clamp(px, 12, S - 12); pz = clamp(pz, 12, S - 12); ctx.fillStyle = '#ffd24a'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2; star(ctx, px, pz, 11); }
-  const [px, pz] = C(G.p.x, G.p.z);
-  ctx.save(); ctx.translate(px, pz); ctx.rotate(-G.p.yaw); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#d9342b'; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(8, 8); ctx.lineTo(0, 3); ctx.lineTo(-8, 8); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore();
-  ctx.strokeStyle = '#5a4630'; ctx.lineWidth = 4; ctx.strokeRect(2, 2, S - 4, S - 4);
-  ctx.fillStyle = '#5a4630'; ctx.font = 'bold 18px Georgia,serif'; ctx.fillText('N ▲', S - 30, 22);
-  ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(Math.round(v.span) + ' m across', 10, S - 12);
-  bindPanel(box);
-}
-/* ---------- panels ---------- */
-function openPanel(name, arg, opts) {
-  if (R.build && name !== 'pause') cancelBuild();
-  if (R.fish) stopFishing();
-  R.panel = name; R.panelArg = arg; R.panelNext = null; R.panelOnClose = opts && opts.onClose;
-  R.keys = {}; R.mouseDown = false; if (R.touchReset) R.touchReset();
-  $('panel').className = 'on p_' + name; R.panelOpenT = performance.now(); renderPanel();
-  if (document.pointerLockElement) document.exitPointerLock();
-  sfx('click');
-}
-function closePanel() {
-  if (!R.panel) return;
-  const cb = R.panelOnClose; R.panelOnClose = null; R.panelNext = null;
-  $('panel').className = ''; R.panel = null; R.panelArg = null; R.closedAt = R.t;
-  if (cb) cb();
-  if (!R.panel && R.started) lockPointer();
-}
-const closeBtn = '<button class="x" data-a="close">✕</button>';
-function stationNear(type) {
-  const p = G.p;
-  if (type === 'fire') return !!nearestFlame(p.x, p.z, 4.5, true);
-  for (const s of G.structures) if (s.k === type && dist2(s.x, s.z, p.x, p.z) < 4.5) return true;
-  for (const s of R.worldStations) if (s.type === type && dist2(s.x, s.z, p.x, p.z) < 4.5) return true;
-  return false;
-}
-const STATION_NAME = { bench: 'a Workbench', furnace: 'a Furnace', fire: 'a lit Campfire' };
-function costHTML(cost) { return Object.keys(cost).map(k => '<span class="cost ' + (inv(k) >= cost[k] ? 'ok' : 'no') + '" title="' + ITEMS[k].n + '">' + icon(k) + ' ' + inv(k) + '/' + cost[k] + '</span>').join(''); }
-function itemSlot(id, n, act) { const d = ITEMS[id]; return '<div class="item" data-a="' + act + '" data-id="' + id + '" style="' + (d.bg ? 'background:linear-gradient(180deg,' + d.bg + '55,#0004)' : '') + '"><span class="ic">' + d.e[0] + '</span><span class="n">' + (n > 1 ? n : '') + '</span><div class="tip"><b>' + d.n + '</b><br>' + d.d + '</div></div>'; }
-const ITEM_ORDER = Object.keys(ITEMS);
-const PACK_GROUPS = [['tools', '⚔️ Tools and weapons', 'click to hold'], ['wear', '🧥 Clothes and armour', 'worn automatically'], ['food', '🍗 Food and medicine', 'click to eat'], ['mat', '🪵 Materials', 'for crafting and building'], ['story', '⭐ Special', 'story items']];
-function packGroup(id) { const d = ITEMS[id]; return d.story ? 'story' : d.tool || id === 'canteen' || id === 'arrow' ? 'tools' : d.wear ? 'wear' : d.food ? 'food' : 'mat'; }
-const CRAFT_GROUPS = [['tools', '⚔️ Tools and weapons'], ['wear', '🧥 Clothes and armour'], ['supp', '🎒 Supplies'], ['furn', '🏭 Furnace']];
-function craftGroup(id) { const d = ITEMS[id]; return id === 'iron' ? 'furn' : d.wear ? 'wear' : d.tool ? 'tools' : 'supp'; }
-const BUILD_GROUPS = [['🔥 Survival', ['campfire', 'shelter', 'bed', 'collector', 'garden', 'torchpost']], ['🏠 Cabin pieces', ['floor', 'wall', 'door', 'roof']], ['🛠️ Workshop', ['bench', 'furnace', 'chest']], ['🛡️ Defence and decoration', ['spikes', 'flag']]];
-const INV_TABS = [['inv', '🎒 Pack', 'TAB', 'What you are carrying'], ['craft', '🛠️ Craft', 'C', 'Make tools, weapons and gear to carry'], ['build', '🏠 Build', 'B', 'Place things in the world — fires, shelters, walls']];
-function invTabs(P) {
-  const cur = INV_TABS.find(t => t[0] === P);
-  return '<div class="tabs bigtabs">' + INV_TABS.map(t => '<button class="tab ' + (t[0] === P ? 'sel' : '') + '" data-a="ptab" data-id="' + t[0] + '">' + t[1] + (R.touch ? '' : ' <kbd>' + t[2] + '</kbd>') + '</button>').join('') + '</div><p class="tabsub">' + cur[3] + '</p>';
-}
-function switchInvTab(t) { if (R.panel === t) { closePanel(); return; } R.panel = t; $('panel').className = 'on p_' + t; renderPanel(); sfx('click'); }
-function renderPanel() {
-  const box = $('panelBox'), P = R.panel, p = G.p; let h = '';
-  if (P === 'inv' || P === 'craft' || P === 'build') h += closeBtn + invTabs(P);
-  if (P === 'inv') {
-    const items = ITEM_ORDER.filter(id => inv(id) > 0);
-    if (R.touch && R.invInfo && ITEMS[R.invInfo]) h += '<div class="invinfo">' + ITEMS[R.invInfo].e[0] + ' <b>' + ITEMS[R.invInfo].n + '</b> — ' + ITEMS[R.invInfo].d + '</div>';
-    if (!items.length) h += '<p class="dim">Your pack is empty! Pick things up with <kbd>E</kbd>.</p>';
-    h += '<div class="pgroups">';
-    for (const [gid, gname, tipTxt] of PACK_GROUPS) {
-      const ids = items.filter(id => packGroup(id) === gid); if (!ids.length) continue;
-      h += '<div class="grp"><h4>' + gname + ' <span>' + tipTxt + '</span></h4><div class="grid">' + ids.map(id => itemSlot(id, inv(id), 'use')).join('') + '</div></div>';
-    }
-    h += '</div>';
-    const wr = []; if (armorValue()) wr.push('🛡️ ' + Math.round(armorValue() * 100) + '% armour'); if (wearStat('warm', 0, Math.max)) wr.push('🧥 +' + wearStat('warm', 0, Math.max) + '° warmth'); if (dmgMult() > 1.01) wr.push('⚔️ +' + Math.round((dmgMult() - 1) * 100) + '% damage');
-    if (wr.length) h += '<p class="gear">You are wearing: ' + wr.join(' &nbsp; ') + '</p>';
-    h += '<p class="foot">Want to make something? Open <b>🛠️ Craft</b> <kbd>C</kbd> for tools and gear, or <b>🏠 Build</b> <kbd>B</kbd> for things you place in the world.</p>';
-  } else if (P === 'craft') {
-    const atBench = stationNear('bench'), atFurn = stationNear('furnace');
-    h += '<p class="station">' + (atBench || atFurn ? '✅ You are at ' + [atBench ? 'a 🛠️ <b>Workbench</b>' : '', atFurn ? 'a 🏭 <b>Furnace</b>' : ''].filter(Boolean).join(' and ') + ' — everything it unlocks can be made here.' : 'Some things need a 🛠️ <b>Workbench</b> or 🏭 <b>Furnace</b>. Build one in the 🏠 Build tab, then come here while standing next to it.') + '</p><div class="rgrid">';
-    for (const [gid, gname] of CRAFT_GROUPS) {
-      const list = RECIPES.filter(r => r.station !== 'fire' && craftGroup(r.id) === gid).map(r => {
-        const d = ITEMS[r.id], near = !r.station || stationNear(r.station), owned = d.tool && bestTool(d.tool.slot) && ITEMS[bestTool(d.tool.slot)].tool.tier >= d.tool.tier;
-        return { r, d, near, owned, can: near && canAfford(r.cost) };
-      }).sort((x, y) => (y.can - x.can) || (x.owned - y.owned) || (y.near - x.near));
-      h += '<div class="grp"><h4>' + gname + '</h4><div class="recipes">';
-      for (const { r, d, near, owned, can } of list)
-        h += '<div class="rec ' + (can ? 'can' : '') + (owned ? ' owned' : '') + '"><span class="ric">' + d.e[0] + '</span><div class="rt"><b>' + d.n + (r.n ? ' ×' + r.n : '') + '</b>' + (owned ? ' <span class="dim">(you have one)</span>' : '') + '<div class="rd">' + d.d + '</div><div>' + costHTML(r.cost) + (r.station ? ' <span class="need ' + (near ? 'ok' : '') + '">' + (r.station === 'bench' ? '🛠️ Workbench' : '🏭 Furnace') + (near ? ' ✓' : '') + '</span>' : '') + '</div></div><button data-a="craft" data-id="' + r.id + '" ' + (can ? '' : 'disabled') + '>Make</button></div>';
-      h += '</div></div>';
-    }
-    h += '</div><p class="foot">🍳 Cooking happens at a lit campfire — look at the fire and press <kbd>E</kbd>.</p>';
-  } else if (P === 'build') {
-    h += '<div class="bgroups">';
-    for (const [gname, ids] of BUILD_GROUPS) {
-      h += '<div class="grp"><h4>' + gname + '</h4><div class="bgrid">';
-      for (const id of ids) { const b = BUILD_BY_ID[id], can = canAfford(b.cost); h += '<div class="bcard ' + (can ? 'can' : '') + '" data-a="build" data-id="' + b.id + '"><div class="bic">' + b.e[0] + '</div><b>' + b.n + '</b><div class="rd">' + b.d + '</div><div>' + costHTML(b.cost) + '</div></div>'; }
-      h += '</div></div>';
-    }
-    h += '</div><p class="foot">Click a card, then point where it should go and click to place it. Floors, walls and roofs snap together — build a real cabin! <kbd>X</kbd> takes things apart (you get half back).</p>';
-  } else if (P === 'fire') {
-    const s = R.panelArg, d = s.d;
-    h += closeBtn + '<h2>🔥 Campfire</h2><div class="firebar"><div style="width:' + (d.fuel / 12 * 100) + '%"></div></div><p class="center">' + (d.lit ? 'Burning — <b>' + d.fuel.toFixed(1) + ' hours</b> of fuel left' : d.fuel > 0 ? 'Fuel ready (' + d.fuel.toFixed(1) + 'h). Light it!' : 'The fire pit is empty. Add fuel first.') + '</p>';
-    h += '<div class="row center"><button data-a="fuel" data-id="stick" ' + (inv('stick') ? '' : 'disabled') + '>+ 🥢 Stick <small>(¾ h) · ' + inv('stick') + '</small></button><button data-a="fuel" data-id="wood" ' + (inv('wood') ? '' : 'disabled') + '>+ 🪵 Wood <small>(3 h) · ' + inv('wood') + '</small></button>' + (d.lit ? '' : '<button class="big" data-a="light" ' + (d.fuel > 0 ? '' : 'disabled') + '>🔥 Light it</button>') + '</div>';
-    h += '<h3>🍳 Cooking</h3>' + (d.lit ? '' : '<p class="dim center">Light the fire to cook.</p>') + '<div class="recipes">';
-    for (const r of RECIPES.filter(r => r.station === 'fire')) { const can = d.lit && canAfford(r.cost), it = ITEMS[r.id]; h += '<div class="rec ' + (can ? 'can' : '') + '"><span class="ric">' + it.e[0] + '</span><div class="rt"><b>' + it.n + '</b><div class="rd">' + it.d + '</div><div>' + costHTML(r.cost) + '</div></div><button data-a="craft" data-id="' + r.id + '" ' + (can ? '' : 'disabled') + '>Cook</button><button data-a="cookall" data-id="' + r.id + '" ' + (can ? '' : 'disabled') + '>All</button></div>'; }
-    h += '</div><p class="foot">Cooked food fills you up much more than raw. Rain puts out fires without a roof.</p>';
-  } else if (P === 'chest') {
-    const s = R.panelArg, ci = s.d.items, mine = ITEM_ORDER.filter(id => inv(id) > 0 && !ITEMS[id].story), stored = ITEM_ORDER.filter(id => ci[id] > 0);
-    h += closeBtn + '<h2>📦 Storage Chest</h2><div class="cols"><div class="col"><h3>Your pack <button class="mini" data-a="depositall">Store all materials ➜</button></h3><div class="grid">' + (mine.map(id => itemSlot(id, inv(id), 'put')).join('') || '<p class="dim">Empty</p>') + '</div></div>';
-    h += '<div class="col"><h3>In the chest <button class="mini" data-a="takeall">⬅ Take all</button></h3><div class="grid">' + (stored.map(id => itemSlot(id, ci[id], 'get')).join('') || '<p class="dim">Empty</p>') + '</div></div></div><p class="foot">Click an item to move it. Things in chests are safe if you black out.</p>';
-  } else if (P === 'journal') {
-    const tab = R.jTab || 'notes';
-    h += closeBtn + '<h2>📓 Sam\'s Journal</h2><div class="tabs">' + [['notes', '📜 Notes'], ['badges', '🏅 Badges'], ['stats', '📊 Stats'], ['help', '❓ How to play']].map(t => '<button class="tab ' + (tab === t[0] ? 'sel' : '') + '" data-a="jtab" data-id="' + t[0] + '">' + t[1] + '</button>').join('') + '</div><div class="jbody">';
-    if (tab === 'notes') h += G.notes.length ? G.notes.map(id => '<div class="noteln" data-a="note" data-id="' + id + '">📜 ' + NOTES[id].t + '</div>').join('') : '<p class="dim">No notes found yet. Explore the island!</p>';
-    if (tab === 'badges') { h += '<div class="badges">' + Object.keys(BADGES).map(k => { const b = BADGES[k], got = G.badges[k]; return '<div class="badge ' + (got ? 'got' : '') + '"><span>' + (got ? b[0] : '🔒') + '</span><b>' + b[1] + '</b><small>' + b[2] + '</small></div>'; }).join('') + '</div>'; }
-    if (tab === 'stats') { const st = G.stats; h += '<table class="stats">' + [['📅 Day', G.day + ' / 100'], ['⭐ Level', p.level], ['🗺️ Places found', Object.keys(G.found).length + ' / ' + LANDMARKS.length], ['💰 Treasure chests', st.chests + ' / 10'], ['🌳 Trees chopped', st.wood], ['⚔️ Creatures defeated', st.kills], ['👑 Bosses defeated', st.bosses + ' / 3'], ['🐟 Fish caught', st.fish], ['🔨 Things built', st.built], ['🛠️ Things crafted', st.crafted], ['👣 Distance walked', (st.dist / 1000).toFixed(1) + ' km'], ['💫 Blackouts', st.blackouts]].map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') + '</table>'; }
-    if (tab === 'help') h += helpHTML();
-    h += '</div>';
-  } else if (P === 'map') { box.innerHTML = closeBtn; const d = document.createElement('div'); box.appendChild(d); renderMap(d); bindPanel(box); box.onclick = null; return; }
-  else if (P === 'pause') {
-    h += '<h2>⏸️ Paused</h2><div class="menu"><button class="big" data-a="close">▶ Keep playing</button></div>' + settingsHTML() + '<div class="menu">' + (R.touch && (document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen) ? '<button data-a="fs">⛶ Full screen</button>' : '') + '<button data-a="save">💾 Save game</button><button data-a="quit">🏠 Save and quit to title</button></div><p class="foot">Your game also saves automatically every time you sleep.</p>';
-  } else if (P === 'msg') {
-    const a = R.panelArg; h += '<h2>' + a.t + '</h2><div class="msg">' + a.html + '</div><div class="menu"><button class="big" data-a="next">' + (a.btn || 'OK') + '</button></div>'; R.panelNext = () => closePanel();
-  } else if (P === 'note') {
-    const a = R.panelArg; h += '<div class="paper"><h2>' + esc(a.t) + '</h2><div class="pbody">' + esc(a.body).replace(/\n/g, '<br>') + '</div></div><div class="menu"><button class="big" data-a="next">Close</button></div>'; R.panelNext = () => closePanel();
-  } else if (P === 'dialog') {
-    const a = R.panelArg, line = a.lines[a.i], who = line.match(/^([A-Z]{2,}):\s*/);
-    h += '<div class="dlg">' + (who ? '<div class="who">' + (who[1] === 'RAY' ? '🧔 Uncle Ray' : who[1] === 'RADIO' ? '📻 Radio' : who[1]) + '</div>' : '') + '<div class="line">' + esc(who ? line.slice(who[0].length) : line) + '</div><div class="dnext">' + (a.i + 1 < a.lines.length ? 'Click or press E ▶' : 'Click or press E ✔') + '</div></div>';
-    R.panelNext = () => { a.i++; if (a.i < a.lines.length) { renderPanel(); sfx('click'); } else closePanel(); };
-  } else if (P === 'choice') {
-    const a = R.panelArg; h += '<h2>' + a.q + '</h2><div class="choices">' + a.opts.map((o, i) => '<div class="choice" data-a="choose" data-id="' + i + '"><b>' + o[0] + '</b><small>' + o[1] + '</small></div>').join('') + '</div>';
-  } else if (P === 'morning') {
-    const a = R.panelArg; h += '<div class="morning"><div class="mday">DAY ' + G.day + '</div><div class="msub">' + a.sub + '</div><ul>' + a.lines.map(l => '<li>' + l + '</li>').join('') + '</ul><div class="tipbox">💡 ' + a.tip + '</div></div><div class="menu"><button class="big" data-a="next">☀️ Start the day</button></div>'; R.panelNext = () => closePanel();
-  } else if (P === 'ending') {
-    h += R.panelArg; R.panelNext = null;
-  }
-  box.innerHTML = tx(h); bindPanel(box);
-  box.onclick = P === 'dialog' ? () => { if (performance.now() - (R.panelOpenT || 0) < 300) return; if (R.panelNext) R.panelNext(); } : null;
-}
-function bindPanel(box) {
-  box.querySelectorAll('[data-a]').forEach(el => { if (el.dataset.a === 'set') { bindSetting(el); return; } el.onclick = e => { e.stopPropagation(); if (performance.now() - (R.panelOpenT || 0) < 300) return; panelAction(el.dataset.a, el.dataset.id, el); }; });
-}
-function panelAction(a, id, el) {
-  audioInit();
-  const s = R.panelArg;
-  switch (a) {
-    case 'close': closePanel(); break;
-    case 'next': if (R.panelNext) R.panelNext(); else closePanel(); break;
-    case 'use': {
-      const d = ITEMS[id]; R.invInfo = id;
-      if (d.food) { eat(id); renderPanel(); }
-      else if (d.tool) { G.p.held = d.tool.slot; refreshViewModel(); closePanel(); }
-      else if (id === 'canteen') { drinkCanteen(); renderPanel(); }
-      else { if (R.touch) renderPanel(); else hint(d.d); }
-      break;
-    }
-    case 'craft': case 'cookall': craft(id, a === 'cookall'); break;
-    case 'build': { const b = BUILD_BY_ID[id]; if (!canAfford(b.cost)) { sfx('deny'); el.classList.add('shake'); setTimeout(() => el.classList.remove('shake'), 400); return; } closePanel(); startBuild(id); break; }
-    case 'fuel': addFuel(s, id); renderPanel(); break;
-    case 'light': lightFire(s); renderPanel(); break;
-    case 'put': { const n = inv(id); take(id, n); s.d.items[id] = (s.d.items[id] || 0) + n; if (ITEMS[id].tool && G.p.held === ITEMS[id].tool.slot && !bestTool(G.p.held)) G.p.held = 'hands'; refreshViewModel(); sfx('click'); renderPanel(); break; }
-    case 'get': give(id, s.d.items[id], true); delete s.d.items[id]; sfx('click'); renderPanel(); break;
-    case 'depositall': for (const k of ITEM_ORDER) { const d = ITEMS[k]; if (inv(k) && !d.tool && !d.wear && !d.story && !d.food && k !== 'canteen') { s.d.items[k] = (s.d.items[k] || 0) + inv(k); delete G.inv[k]; } } uiDirty(); sfx('click'); renderPanel(); break;
-    case 'takeall': for (const k in s.d.items) give(k, s.d.items[k], true); s.d.items = {}; sfx('click'); renderPanel(); break;
-    case 'jtab': R.jTab = id; renderPanel(); break;
-    case 'ptab': switchInvTab(id); break;
-    case 'mapall': R.mapAll = !R.mapAll; renderPanel(); break;
-    case 'note': { const n = NOTES[id]; openPanel('note', { t: n.t, body: n.body }, { onClose: () => openPanel('journal') }); break; }
-    case 'choose': { const o = s.opts[+id]; R.panelOnClose = null; closePanel(); o[2](); break; }
-    case 'save': saveGame(); toast('💾 Game saved', 'ok'); break;
-    case 'quit': saveGame(); location.reload(); break;
-    case 'endkeep': closePanel(); break;
-    case 'fs': goFullscreen(); break;
-  }
-}
-function craft(id, all) {
-  const r = RECIPES.find(q => q.id === id); if (!r) return;
-  let made = 0;
-  do {
-    if (r.station && !stationNear(r.station)) { hint('You need to be next to ' + STATION_NAME[r.station] + '.'); sfx('deny'); break; }
-    if (!canAfford(r.cost)) { if (!made) { hint('Not enough materials.'); sfx('deny'); } break; }
-    pay(r.cost); give(id, r.n || 1, true); made++;
-    G.stats.crafted++; addXP(r.xp || 3);
-    if (r.station === 'fire') G.stats.cooked++;
-  } while (all && made < 30);
-  if (!made) return;
-  const d = ITEMS[id]; sfx(r.station === 'fire' ? 'sizzle' : 'craft');
-  toast((r.station === 'fire' ? '🍳 Cooked ' : '🔨 Made ') + d.e[0] + ' ' + d.n + (made * (r.n || 1) > 1 ? ' ×' + made * (r.n || 1) : ''), 'ok', 2500);
-  if (id === 'iron') badge('iron');
-  if (d.tool) { const best = bestTool(d.tool.slot); if (best === id) { G.p.held = d.tool.slot; refreshViewModel(); } }
-  if (d.wear) toast('You are now wearing the ' + d.n + '.', 'ok', 3000);
-  if (id === 'axe') tipOnce('axe', 'Your axe is in hotbar slot <b>2</b>. Walk up to a tree and left click!');
-  if (id === 'torch') tipOnce('torch', 'Press <b>T</b> any time to hold your torch. Wolves hate it!');
-  if (id === 'canteen') { G.flags.canteen = G.flags.canteen || 0; tipOnce('canteen', 'Fill your canteen at any water with <b>E</b>, then drink with <b>G</b>.'); }
-  renderPanel();
-}
-function showMessage(t, html, cb, btn) { openPanel('msg', { t, html, btn }, { onClose: cb }); }
-function showNote(t, body) { openPanel('note', { t, body }); }
-function showDialog(lines, cb) { openPanel('dialog', { lines, i: 0 }, { onClose: cb }); }
-function showChoice(q, opts) { openPanel('choice', { q, opts }); }
-function showMorningReport(cb) {
-  const p = G.p, r = R.report, lines = [];
-  lines.push(r.bed ? '🛏️ You slept in a cosy bed. Health restored: <b>' + Math.ceil(p.hp) + '/' + p.maxHp + '</b>' : '⛺ You slept in your shelter. Health: <b>' + Math.ceil(p.hp) + '/' + p.maxHp + '</b>');
-  if (p.food < 30) lines.push('🍗 Your tummy is rumbling. <b>Eat something soon!</b>');
-  if (p.water < 30) lines.push('💧 You are very thirsty. <b>Find water!</b>');
-  if (p.warm < 40) lines.push('🥶 You got cold in the night. A fire or a roof would help.');
-  if (r.fireRain) lines.push('🌧️ Rain put your campfire out. Build a <b>Thatch Roof</b> over it.');
-  else if (r.fireOut) lines.push('🔥 Your campfire burned out in the night.');
-  if (r.scoutLeft) lines.push('🐕 <b>Scout got too hungry and went home</b> to Uncle Ray\'s camp. Take him some meat to win him back.');
-  else if (G.scout.friend) lines.push('🐕 Scout is hungry. <b>Feed him meat today</b> (raw is fine).');
-  if (G.weather === 'rain' || G.weather === 'storm') lines.push('🌧️ It\'s raining this morning.');
-  if (G.day % 10 === 0) lines.push('🌕 <b>TONIGHT IS A WOLF MOON!</b> Get your base ready. Walls, spikes and a good weapon.');
-  else if (G.day % 10 === 9) lines.push('🌕 Tomorrow night is a Wolf Moon...');
-  if (G.day === 100) lines.push('🚢 <b>The ship is coming today!</b>');
-  const left = 100 - G.day;
-  openPanel('morning', { sub: left > 0 ? left + ' days until the ship comes' : 'The ship is here!', lines, tip: TIPS[G.day % TIPS.length] }, { onClose: cb });
-}
-function showEnding(kind) {
-  const st = G.stats, title = { heli: '🚁 HOME AT LAST', ship: '🚢 DAY 100 — LEGENDS OF KESTREL ISLAND', alone: '🚢 DAY 100 — THE SHIP ARRIVES' }[kind];
-  const story = {
-    heli: 'The helicopter lands right next to the Radio Tower. Uncle Ray grabs Scout, you grab your journal, and Kestrel Island shrinks below you into the blue.<br><br>Back home, nobody believes half of your stories. That\'s okay. <b>You know they\'re true.</b>',
-    ship: 'On the morning of Day 100 a ship\'s horn echoes across Shipwreck Cove. Skipper Jo kept her promise!<br><br>She stares at your camp, your tools, your trophies — and at Uncle Ray, who can\'t stop telling everyone how you saved him.<br><br><b>You survived 100 days. You are a legend.</b>',
-    alone: 'On the morning of Day 100 a ship\'s horn echoes across Shipwreck Cove. Skipper Jo kept her promise!<br><br>You survived 100 days on your own. But somewhere on Frostpeak, Uncle Ray is still waiting...<br><br><b>You can keep playing to find him.</b>'
-  }[kind];
-  sfx('horn'); setTimeout(() => sfx('levelup'), 1400);
-  const html = '<div class="ending"><h1>' + title + '</h1><p>' + story + '</p><div class="estats"><span>📅 Day ' + G.day + '</span><span>⭐ Level ' + G.p.level + '</span><span>💰 ' + st.chests + '/10 treasure</span><span>👑 ' + st.bosses + '/3 bosses</span><span>🗺️ ' + Object.keys(G.found).length + '/' + LANDMARKS.length + ' places</span><span>🏅 ' + Object.keys(G.badges).length + '/' + Object.keys(BADGES).length + ' badges</span></div><p class="dim">' + (st.chests < 10 ? 'Still ' + (10 - st.chests) + ' Golden Idols hidden out there...' : '') + '</p><div class="menu"><button class="big" data-a="endkeep">🏝️ Keep exploring</button></div></div>';
-  saveGame(); openPanel('ending', html);
-}
-function helpHTML() {
-  if (R.touch) return touchHelpHTML() + '<p><b>Staying alive:</b> keep ❤️ health, 🍗 food, 💧 water and 🔥 warmth up. If health hits zero you black out and drop your pack.</p><p><b>Nights</b> are cold and wolves come out. Build a campfire and a shelter, then sleep after 7 pm. <b>Every 10th night is a Wolf Moon!</b></p>';
-  return '<table class="help">' + [['W A S D', 'Walk'], ['Mouse', 'Look around'], ['Arrow keys', 'Look around (no mouse needed)'], ['Shift', 'Sprint'], ['Space', 'Jump'], ['Left click', 'Chop, mine, attack, shoot, fish'], ['E', 'Pick up, talk, use, open, drink'], ['1 – 7  or  mouse wheel', 'Switch tool'], ['TAB', 'Your pack'], ['C', 'Craft tools, weapons and gear'], ['B', 'Build things in the world'], ['F', 'Quick-eat the best food'], ['G', 'Drink from canteen'], ['T', 'Hold your torch'], ['M', 'Map'], ['J', 'Journal'], ['X', 'Take apart something you built'], ['Esc', 'Pause and settings']].map(r => '<tr><td><kbd>' + r[0] + '</kbd></td><td>' + r[1] + '</td></tr>').join('') + '</table>' +
-    '<p><b>Staying alive:</b> keep ❤️ health, 🍗 food, 💧 water and 🔥 warmth up. If food, water or warmth hit zero you lose health. If health hits zero you black out and drop your pack.</p><p><b>Nights</b> are cold and wolves come out. Build a campfire and a shelter, then sleep after 7 pm to skip the night.</p><p><b>Every 10th night is a Wolf Moon.</b> A whole pack of wolves attacks, and they are not afraid of fire. Build walls!</p>';
-}
-function settingsHTML() {
-  return '<div class="settings"><label>🖱️ Mouse speed <input type="range" min="0.3" max="2.5" step="0.1" value="' + R.sens + '" data-a="set" data-id="sens"></label>' +
-    '<label>🔊 Volume <input type="range" min="0" max="1" step="0.05" value="' + R.vol + '" data-a="set" data-id="vol"></label>' +
-    '<label>🎵 Music <input type="checkbox" ' + (R.music ? 'checked' : '') + ' data-a="set" data-id="music"></label>' +
-    '<label>🖥️ Graphics <select data-a="set" data-id="quality">' + [1, 2, 3, 4].map(q => '<option value="' + q + '" ' + (R.quality === q ? 'selected' : '') + '>' + GFXQ[q].n + '</option>').join('') + '</select></label>' +
-    (R.touch ? '' : '<label>👀 Look mode <select data-a="set" data-id="look"><option value="lock" ' + (!R.dragLook ? 'selected' : '') + '>Mouse look (click to lock)</option><option value="drag" ' + (R.dragLook ? 'selected' : '') + '>Click and drag to look</option></select></label>') + '</div>';
-}
-function bindSetting(el) {
-  const id = el.dataset.id; el.onclick = e => e.stopPropagation();
-  const apply = () => {
-    if (id === 'sens') R.sens = +el.value; if (id === 'vol') setVolume(+el.value); if (id === 'music') R.music = el.checked;
-    if (id === 'quality') { setQuality(+el.value); R.gfxManual = true; } if (id === 'look') R.dragLook = el.value === 'drag';
-    saveSettings();
-  };
-  el.oninput = apply; el.onchange = apply;
-}
-function bindSettingsInputs(root) { root.querySelectorAll('[data-a="set"]').forEach(bindSetting); }
-function saveSettings() { try { localStorage.setItem(SAVE_KEY + '_set', JSON.stringify({ sens: R.sens, vol: R.vol, music: R.music, quality: R.quality, drag: R.dragLook, gfxV: 2, gfxManual: !!R.gfxManual })); } catch (e) { } }
-function loadSettings() { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY + '_set') || 'null'); if (s) { R.sens = s.sens || 1; R.vol = s.vol === undefined ? 0.7 : s.vol; R.music = s.music !== false; R.quality = s.gfxV ? (s.quality || 3) : (s.quality === 1 ? 1 : 3); R.gfxManual = !!s.gfxManual; R.dragLook = !!s.drag; } } catch (e) { } }
 
 /* =========================================================================
    11_main: boot, title screen, time + weather, save/load, the game loop
@@ -910,4 +420,4 @@ function touchHelpHTML() {
 }
 // @end-moved
 
-export { _dirty, uiDirty, icon, esc, hint, toast, lootToast, banner, questPop, uiFlash, uiDamage, uiFade, dmgNumber, _pv, updateNums, METERS, buildHUD, compassPlace, wpPos, WEATHER_ICON, hourStr, updateHUD, FOG_N, fogArr, fogSave, revealFog, fogCanvas, fogAt, prerenderMap, toMap, drawMarkers, star, drawMinimap, mapView, renderMap, openPanel, closePanel, closeBtn, stationNear, STATION_NAME, costHTML, itemSlot, ITEM_ORDER, PACK_GROUPS, packGroup, CRAFT_GROUPS, craftGroup, BUILD_GROUPS, INV_TABS, invTabs, switchInvTab, renderPanel, bindPanel, panelAction, craft, showMessage, showNote, showDialog, showChoice, showMorningReport, showEnding, helpHTML, settingsHTML, bindSetting, bindSettingsInputs, saveSettings, loadSettings, advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };
+export { advanceTime, nextWeather, onNewDay, saveGame, readSave, mergeSave, applyWorldState, setQuality, onResize, initWorld, showTitle, INTRO_ART, playIntro, startGame, slowTick, _last, _secT, _fpsN, _fpsT, frame, updatePlayerCamOnly, renderFrame, titleCamera, boot, IS_TOUCH, TX_RULES, tx, TB, tbtn, audioWake, initTouch, goFullscreen, touchUsable, touchAction, _tState, updateTouch, touchHelpHTML };

@@ -16,7 +16,8 @@ import { key } from '../player/targeting.js';
 import { ROOFS, cellKey } from './structures.js';
 import { trySleep } from './sleep.js';
 import { badge } from '../story/quests.js';
-import { hint, toast, openPanel } from '../legacy.js';
+import { hint, toast } from '../ui/hud.js';
+import { openPanel } from '../ui/panels.js';
 
 // @moved-from: original
 
