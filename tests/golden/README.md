@@ -140,7 +140,7 @@ Each view loads the fixture save, sets the position, time and weather, freezes t
 | `tests/survival.test.js` | **27 tests**, Node, under a second. Runs the real survival rules (`src/game/survival.js`) with small stand-ins for what they still reach into (the TODO(split) list). It pins:<br>• hunger 3.0/h and thirst 3.8/h; sprinting ×1.6/×1.5; asleep ×0.5; desert heat doubles thirst<br>• warmth: comfort at 14°, +11/h, +34/h by a fire, cold loss 0.85 per degree<br>• health: +2.5/h awake, +4 sheltered or +7 in bed asleep; −5 starving, −7 thirsty, −9 frozen<br>• blackouts (cold, then thirst, then hunger); a floor of 5 health while asleep<br>• every ambient-temperature rule<br>• the 30 Hz tick adds up to the same result as one big step<br>• cooked against raw food values<br>Changing one rate (hunger 3.0 → 3.1) made 6 tests fail. |
 | `tests/world.test.js` | The island fingerprint, models included, matches the original. |
 | `tests/save.test.js` | • The Phase 1 save loads.<br>• It **round-trips exactly**: loading it and saving straight away gives back the fixture with no differences, and doing it again gives the identical text (`roundtrip.mjs`).<br>• The save key is unchanged (`stranded100_v3`). |
-| `tests/smoke.mjs` | Headless Chrome on the real graphics card, using the game's own functions, with zero page errors allowed. The original passes the same 14 steps with the same results:<br>• a new game<br>• chop a tree (pine, 5 swings, 4 wood)<br>• build and light a campfire<br>• a night with two wolves<br>• a storm<br>• sleep until 06:05 the next day<br>• swim in Mirror Lake<br>• all three biomes<br>• all four graphics levels |
+| `tests/smoke.mjs` | Headless Chrome on the real graphics card, using the game's own functions, with zero page errors allowed. 16 steps:<br>• a new game<br>• chop a tree (pine, 5 swings, 4 wood)<br>• build and light a campfire<br>• a night with two wolves<br>• a storm<br>• sleep until 06:05 the next day<br>• swim: float in Mirror Lake (eyes 0.4 m above the water, 3.2 m bed below), swim across it, walk in from the bank and back out<br>• all three biomes<br>• all four graphics levels<br>The original passed the 14 steps from before swimming with the same results; it fails the three swim steps, because it walks along the lake bed. |
 
 **Balance targets.** "Energy" in MIGRATION.md is the food meter.
 - **What the tests prove:**
@@ -148,7 +148,7 @@ Each view loads the fixture save, sets the position, time and weather, freezes t
   - Breaking even takes 9.8 berries, or 3.9 roast mushrooms, or 1.8 cooked fish, or 1.5 cooked meat.
   - Cooking triples mushrooms, quadruples fish and nearly quadruples meat (×3.8).
 - **What they can't prove yet:** the four targets themselves (forage only ≈ −36, fire + cooked forage ≈ −2, fire + fishing ≈ −9, hunting + fire ≈ 0). They depend on what a typical forage, fishing or hunting day gathers, and that model isn't in the repository. Inventing one that lands on these numbers would prove nothing, so this is marked `todo` in `survival.test.js` until the original day model turns up.
-- **Observation, not changed:** in water deeper than you are tall, the player walks along the lakebed (Mirror Lake: 3.2 m down). The original does the same.
+- **Water depth (fixed after the migration, see Swimming below):** in deep water the original walked the player along the lake bed (Mirror Lake: 3.2 m down).
 
 ## Export / Import save (the first feature after the freeze)
 MIGRATION.md §7 asks for this as insurance before the game goes to Caspar. Saves live in the browser, and a new copy of the game file may not see them.
@@ -163,6 +163,24 @@ MIGRATION.md §7 asks for this as insurance before the game goes to Caspar. Save
   4. A copy with no save offers Continue after Load a save file.
   5. A file that isn't a save is refused with a message.
   6. Zero page errors.
+
+## Swimming
+In the original, the player was stopped where the water got 1.25 m deep, but a lake bank, a teleport or a blackout could still put them deeper, and then they walked along the bed with the camera under water.
+- **Now:** in water deeper than 1.2 m the player floats, eyes 0.4 m above the surface (the same eye height as standing). Jumping in from a height dips under and bobs back up, with a splash.
+- **Stamina:** swimming uses ⚡ stamina, 2.5 a second while moving and 1 a second treading water: about 40 s of swimming from full. With none left, the player loses 4 health a second until they reach the shore. A blackout that way says so (`drown`).
+- **The open sea** deeper than 4.5 m (about 30 m past the beach) still stops the player: "The sea is too rough out here." The lakes are at most 3.2 m deep, so all of them can be swum.
+- **Wading:** the eyes stay at least 0.4 m above the water. The original crouched to 1.25 m, which put the camera at the waterline in waist-deep water, flickering under it with the waves.
+- **Backpack:** a blackout in deep water drops the backpack on the nearest shore, not the lake bed.
+- **Code:** `src/player/swim.js` (new module), called from `updatePlayer()`; 7 ledger entries.
+- **Tests:** the three swim steps in `tests/smoke.mjs`.
+
+## Phase 6: ship
+- **`npm run ship`** builds the game, copies it to `release/Stranded-100-Days-PC.html` (the original file name, so it replaces Caspar's copy one for one; `release/` is not in git), then runs `ship.mjs`.
+- **`ship.mjs`** plays it the way Caspar will, in one browser profile. 7 out of 7 pass:
+  1. The original file, opened from a folder, starts a game and saves it with its own code (Day 9, 13 wood).
+  2. The release file put in its place (same name, same folder): the title offers Continue (Day 9), Continue loads Day 9 with the 13 wood, zero page errors.
+  3. The release file opened from a different folder, as if freshly downloaded: the same three checks.
+- **Why it works:** the save key is unchanged (`stranded100_v3`), and Chrome and Edge give every local file one shared storage. Firefox and Safari may keep each file apart. The original has no Export button, so in those browsers check on Caspar's computer before deleting the old copy.
 
 ### From here on
 - **The migration is over.** `tools/split/split.mjs` now refuses to run, because `src/` holds code added after the migration and regenerating it from the original would delete that code.

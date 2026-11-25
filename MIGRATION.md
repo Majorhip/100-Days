@@ -147,8 +147,8 @@ Move one or two sections per session, in dependency order. Run the parity checks
 - **Smoke test** in headless Chrome: new game, chop, build and light a fire, night with wolves, storm, sleep, swim, visit all three biomes, switch through all four graphics levels. Zero errors.
 
 ### Phase 6 — Ship (1 evening)
-- [ ] `npm run build` → `dist/index.html` → give Caspar the file (keep the same file name).
-- [ ] Confirm his existing save appears in the new file (see §7, saves risk).
+- [x] `npm run ship` builds and copies the game to `release/Stranded-100-Days-PC.html` (the same file name). Giving Caspar the file is a hand-over step.
+- [x] Confirm his existing save appears in the new file (see §7, saves risk). `tests/golden/ship.mjs`, run by `npm run ship`: a game saved by the original file shows Continue (and loads) in the new file, both replacing it in the same folder and downloaded to another folder, in Chrome/Edge. Firefox and Safari may keep each local file's storage apart, and the original has no Export button, so if Caspar plays in one of those, check on his computer before deleting the old copy. From the new file on, Export / Import save covers any browser.
 - [ ] Optional: GitHub Pages for a link.
 
 ---

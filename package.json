@@ -17,7 +17,8 @@
     "golden:touch": "node tests/golden/touchcheck.mjs",
     "golden:build": "node tests/golden/compare-build.mjs",
     "parity": "vite build && node tests/golden/parity.mjs dist/index.html --shots",
-    "split": "node tools/split/split.mjs"
+    "split": "node tools/split/split.mjs",
+    "ship": "vite build && node tools/ship.mjs && node tests/golden/ship.mjs"
   },
   "devDependencies": {
     "acorn": "^8.19.0",
