@@ -12,7 +12,7 @@ import { groundAt } from '/src/player/movement.js';
 // target height of the top of the model in metres (roughly the real animal, sized to the game's)
 export const HEIGHT = {
   Wolf: 1.05, Stag: 2.1, Deer: 1.5, Fox: 0.62, Husky: 0.85, ShibaInu: 0.68, Horse: 2.1, Horse_White: 2.1, Donkey: 1.55, Alpaca: 1.85, Bull: 1.7, Cow: 1.6,
-  BlackBear: 1.5, Bunny: 0.6, Frog: 0.3, Rat: 0.3, Spider: 0.7, Snake: 0.5, Crab: 0.45, Bat: 0.5, Pig: 0.8, Shark: 0.9, Fish: 0.35
+  BlackBear: 1.5, Bear: 1.5, Grizzle: 1.5 * 1.55, Frostclaw: 1.5 * 1.7, Bunny: 0.6, Frog: 0.3, Rat: 0.3, Spider: 0.7, Snake: 0.5, Crab: 0.45, Bat: 0.5, Pig: 0.8, Shark: 0.9, Fish: 0.35
 };
 const loader = new GLTFLoader();
 const mixers = [];
@@ -26,7 +26,7 @@ function gameMaterials(root) {
     if (!o.isMesh) return;
     // glTF colours are linear; the game renders without colour management (its hex colours are
     // used as they are), so convert back to the sRGB values the artist picked
-    const conv = m => { const g = litMat({ color: m.color ? m.color.clone().convertLinearToSRGB().getHex() : 0xffffff }); if (m.map) { m.map.encoding = THREE.LinearEncoding; g.map = m.map; } g.skinning = !!o.isSkinnedMesh; g.vertexColors = false; return g; };
+    const conv = m => { const g = litMat({ color: m.color ? m.color.clone().convertLinearToSRGB().getHex() : 0xffffff }); if (m.map) { m.map.encoding = THREE.LinearEncoding; g.map = m.map; } g.skinning = !!o.isSkinnedMesh; g.vertexColors = false; g.name = m.name; return g; };
     o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
     o.castShadow = true; o.frustumCulled = false;
   });
@@ -47,6 +47,25 @@ export async function place(names, { x0, z, gap, faceYaw = 0 }) {
       const box = new THREE.Box3().setFromObject(obj), s = (HEIGHT[n] || 1) / (box.max.y - box.min.y);
       obj.scale.setScalar(s); label = n;
       const b2 = new THREE.Box3().setFromObject(obj); obj.userData.lift = -b2.min.y;
+    }
+    else if (name.startsWith('game:')) {
+      // a finished game model, held at one moment of a clip: game:<File>[@<clip>[@<seconds>]]
+      // (the bears from tools/animals/rig-bear.mjs); sized from its standing pose like the game
+      // does, by the body alone (not Frostclaw's ice), eyes and ice lit as the game would
+      const [file, clipName = 'Idle', at = '0'] = name.slice(5).split('@');
+      const gltf = await loader.loadAsync('/assets/animals/game/' + file + '.glb');
+      obj = gltf.scene; gameMaterials(obj);
+      obj.traverse(o => { if (o.isMesh && /^(Eyes|Ice|IceDeep)$/.test(o.material.name)) o.material.emissive.copy(o.material.color).multiplyScalar(o.material.name === 'Eyes' && file === 'Bear' ? 0 : 0.6); });
+      const mixer = new THREE.AnimationMixer(obj), clip = n => gltf.animations.find(a => a.name === n);
+      const pose = (c, t) => { mixer.stopAllAction(); const a = mixer.clipAction(c); a.reset().play(); a.time = t; a.paused = true; mixer.update(0); obj.updateMatrixWorld(true); };
+      pose(clip('Idle'), 0);
+      const box = new THREE.Box3(), v = new THREE.Vector3();
+      obj.traverse(o => { if (o.isSkinnedMesh) { const p = o.geometry.attributes.position; for (let i = 0; i < p.count; i++) { o.boneTransform(i, v); box.expandByPoint(v.applyMatrix4(o.matrixWorld)); } } });
+      const s = (HEIGHT[file] || 1.5) / (box.max.y - box.min.y);
+      const inner = obj; obj = new THREE.Group(); obj.add(inner);
+      inner.scale.setScalar(s); inner.position.set(-(box.min.x + box.max.x) / 2 * s, -box.min.y * s, -(box.min.z + box.max.z) / 2 * s);
+      pose(clip(clipName), +at);
+      label = `${file} ${clipName}@${at}`;
     }
     else {
       const gltf = await loader.loadAsync('/assets/animals/raw/' + name + '.glb');
