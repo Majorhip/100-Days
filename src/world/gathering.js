@@ -45,7 +45,7 @@ function depleteNode(n, quiet) {
     R.scene.add(piv); R.fx.push({ kind: 'fall', m: piv, t: 0 }); sfx('treefall');
   } else if (def.cls === 'rock' || def.cls === 'crystal') { puff(n.x, n.y + 0.6, n.z, def.cls === 'crystal' ? 0x9eeaff : 0x9a9a96, 12, { size: 0.35 }); }
 }
-function restoreNode(n) { n.gone = false; n.hp = NT[n.t].hp || 1; setNodeMatrix(n, true, true); if (n.col) n.col.off = false; delete G.nodeState[n.idx]; }
+function restoreNode(n) { if (n.absent) { delete G.nodeState[n.idx]; return; } n.gone = false; n.hp = NT[n.t].hp || 1; setNodeMatrix(n, true, true); if (n.col) n.col.off = false; delete G.nodeState[n.idx]; }
 function respawnNodes() {
   for (const k in G.nodeState) {
     if (G.nodeState[k] <= G.day) { const n = NODES[k]; if (!n) { delete G.nodeState[k]; continue; } if (dist2(n.x, n.z, G.p.x, G.p.z) > 30 || NT[n.t].cls === 'stay') restoreNode(n); }

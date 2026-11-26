@@ -244,6 +244,23 @@ In the original, the player was stopped where the water got 1.25 m deep, but a l
 
   `node tools/animals/water.mjs docs/animals/water` takes the screenshots.
 
+## After the animals: loading bar, rarer finds and animals
+- **Loading bar** (`src/ui/loading.js`): the original built the island and then compiled all 37 shaders on the first frame. That was one freeze of 10–20 s, and Chrome could offer to kill the "unresponsive" page.
+  - `initWorld()` now pauses between its steps (`loadStep`), so the bar moves.
+  - `warmUp()` then compiles the shaders one material at a time, including the animals and the post-processing passes (47 shaders in all, so the first wolf no longer stutters). It then draws the first frame behind the loading screen.
+  - Measured on this PC: the longest freeze went from 8.9 s to 1.4 s.
+  - During a pause, other code (the animal models finishing parsing) may draw random numbers. Those come from a separate generator, so the island's random sequence is unbroken and the island fingerprint still matches the original.
+- **Rarer finds** (`src/world/rarity.js`): the island is laid out exactly as before, with the same `NODES` and the same save indices, so the fingerprint and old saves still match. Then only a share of each small find is really there:
+  - sticks and stones 55%, flint 65%, mushrooms 50%, herbs 65%, berry bushes 60%, reeds 70%
+  - Which ones stay is fixed by index, with no random numbers. Everything within 40 m of the start stays, for a fair first day.
+  - A missing find is hidden, can't be picked, never grows back (`restoreNode` ignores it, even if an older save lists it), and leaves no bare patch in the grass.
+- **Rarer animals:** each kind has a smaller cap and a chance per second that one turns up, instead of the original's instant refill:
+  - common: rabbits, goats, crabs, frogs
+  - uncommon: deer, scorpions, snakes
+  - rare: boars, foxes, and the herds (about one every 3 minutes in their biome)
+  - Night wolves and snow wolves still come, one at a time. Dens, lairs, bosses and raids are unchanged.
+- **Tests:** the `rarer finds and animals` smoke step checks the share of each kind, that none are missing near the start, that missing finds are hidden, can't be picked and don't regrow, and the caps.
+
 ## Phase 6: ship
 - **`npm run ship`** builds the game, copies it to `release/Stranded-100-Days-PC.html` (the original file name, so it replaces Caspar's copy one for one; `release/` is not in git), then runs `ship.mjs`.
 - **`ship.mjs`** plays it the way Caspar will, in one browser profile. 7 out of 7 pass:

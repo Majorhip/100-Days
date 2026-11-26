@@ -223,5 +223,79 @@ export const EDITS = [
   {
     kind: 'replace', was: "updatePlayer(dt); updateCreatures(dt); updateScout(dt);", now: "updatePlayer(dt); updateCreatures(dt); updateSea(dt); updateScout(dt);",
     why: "Life in the water (src/creatures/sea.js): the shark appears for swimmers in the deep sea; fish swim in the lakes."
+  },
+  // ---- after the migration: start-up with a progress bar (no more "page unresponsive") ----
+  {
+    kind: 'module', file: 'src/ui/loading.js', globals: ['Promise', 'Date', 'Array'],
+    why: 'Start-up with a progress bar. The original built the island and compiled all 37 shaders in one long freeze (10-20 s with nothing moving, and Chrome could call the page unresponsive). loadStep() lets the page draw between the steps of initWorld(); warmUp() compiles the shaders a material at a time (the animals and post-processing too), then draws the first frame behind the loading screen. Random numbers drawn by other code during a pause come from a separate generator, so the island is laid out exactly as before.'
+  },
+  {
+    kind: 'replace',
+    was: `function initWorld() {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setSize(innerWidth, innerHeight); document.body.insertBefore(renderer.domElement, document.body.firstChild);
+  R.renderer = renderer;
+  R.scene = new THREE.Scene();
+  R.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.08, 1300); R.camera.rotation.order = 'YXZ'; R.scene.add(R.camera);
+  buildTerrain(R.scene);
+  R.start = shorePoint(Math.PI / 2 - 0.06, 7);
+  buildSky(R.scene); buildPrecip(R.scene); buildFx(R.scene);
+  placeNodes(R.scene); buildLandmarks(); initScout();
+  gfxBakeTerrain(); buildLife(R.scene); ppInit();
+  R.torchLight = new THREE.PointLight(0xffa850, 0, 18, 1.6); R.torchLight.position.set(0.3, 0.1, -0.5); R.torchLight.userData.on = false; R.camera.add(R.torchLight);
+  prerenderMap(); buildHUD();
+  setupInput(renderer.domElement);
+  addEventListener('resize', onResize);
+  setQuality(R.quality);
+}`,
+    now: `async function initWorld() {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setSize(innerWidth, innerHeight); document.body.insertBefore(renderer.domElement, document.body.firstChild);
+  R.renderer = renderer;
+  R.scene = new THREE.Scene();
+  R.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.08, 1300); R.camera.rotation.order = 'YXZ'; R.scene.add(R.camera);
+  await loadStep(0.02, 'Raising the island'); buildTerrain(R.scene);
+  R.start = shorePoint(Math.PI / 2 - 0.06, 7);
+  await loadStep(0.08, 'Painting the sky'); buildSky(R.scene); buildPrecip(R.scene); buildFx(R.scene);
+  await loadStep(0.11, 'Growing the trees'); placeNodes(R.scene); buildLandmarks(); initScout();
+  await loadStep(0.17, 'Planting grass and flowers'); gfxBakeTerrain(); buildLife(R.scene); ppInit();
+  R.torchLight = new THREE.PointLight(0xffa850, 0, 18, 1.6); R.torchLight.position.set(0.3, 0.1, -0.5); R.torchLight.userData.on = false; R.camera.add(R.torchLight);
+  await loadStep(0.23, 'Drawing the map'); prerenderMap(); buildHUD();
+  setupInput(renderer.domElement);
+  addEventListener('resize', onResize);
+  await loadStep(0.27, 'Setting up the graphics'); setQuality(R.quality);
+}`,
+    why: 'Start-up progress bar: initWorld() pauses between its steps (src/ui/loading.js) so the bar moves and the page stays responsive. The steps and their order are unchanged.'
+  },
+  {
+    kind: 'replace', was: 'function boot() {', now: 'async function boot() {',
+    why: 'Start-up progress bar: boot() waits for initWorld() and the shader warm-up (src/ui/loading.js).'
+  },
+  {
+    kind: 'replace', was: '  try { initWorld(); }', now: '  try { await initWorld(); await warmUp(() => { titleCamera(0); renderFrame(0); }); }',
+    why: 'Start-up progress bar: after building the island, compile the shaders a few at a time and draw the first frame while the loading screen is still up (src/ui/loading.js), instead of one long freeze on the first frame.'
+  },
+  // ---- after the migration: rarer finds and rarer animals (a harder game; finds are a surprise) ----
+  {
+    kind: 'module', file: 'src/world/rarity.js', globals: [],
+    why: 'Rarer finds and animals. Small finds (sticks, stones, flint, mushrooms, herbs, berry bushes, reeds): the island is laid out as before (same nodes, same save indices) but only a share of each kind is really there, chosen by index, not at random; everything within 40 m of the start stays. Animals: a smaller cap per kind and a chance per second that one turns up, common to rare, instead of an instant refill.'
+  },
+  {
+    kind: 'replace', was: '  buildGrass(scene);\n}', now: '  thinPickups(NODES, setNodeMatrix);   // rarer finds: src/world/rarity.js\n  buildGrass(scene);\n}',
+    why: 'Rarer finds: after the island is laid out (unchanged), take out the finds that are not there (src/world/rarity.js).'
+  },
+  {
+    kind: 'replace', was: 'function restoreNode(n) { n.gone = false;', now: 'function restoreNode(n) { if (n.absent) { delete G.nodeState[n.idx]; return; } n.gone = false;',
+    why: 'Rarer finds: a find that is not there never grows back (a save from before this change may still list it as gathered).'
+  },
+  {
+    kind: 'replace', was: "  for (const n of NODES) if (NT[n.t].cls === 'pick' && n.t !== 'reed') stamp(n.x, n.z, 1.6, 35);", now: "  for (const n of NODES) if (NT[n.t].cls === 'pick' && n.t !== 'reed' && !n.absent) stamp(n.x, n.z, 1.6, 35);",
+    why: 'Rarer finds: no bare patch in the grass where a find is not there.'
+  },
+  {
+    kind: 'replace', was: '  const want = (type, cap, biome, o) => { if ((cnt[type] || 0) < cap) {', now: '  const want = (type, cap, biome, o) => { if ((cnt[type] || 0) < rareCap(type, cap) && rareRoll(type)) {',
+    why: 'Rarer animals (src/world/rarity.js): a smaller cap per kind, and one turns up now and then (common kinds often, foxes rarely) instead of the moment one is gone.'
   }
 ];

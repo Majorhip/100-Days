@@ -47,6 +47,7 @@ import { loadSettings, saveGame, readSave, mergeSave, applyWorldState } from './
 import { advanceTime } from './game/time.js';
 import { initTouch, goFullscreen, updateTouch } from './input/touch.js';
 import { updateSea } from './creatures/sea.js';   // added after the migration: the shark and the lake fish
+import { loadStep, warmUp } from './ui/loading.js';   // added after the migration: start-up with a progress bar
 
 // @moved-from: original
 
@@ -67,23 +68,23 @@ function setQuality(q) {
 }
 function onResize() { if (R.touch && R.started && !R.panel && innerHeight > innerWidth) openPanel('pause'); if (!R.renderer) return; R.camera.aspect = innerWidth / innerHeight; R.camera.updateProjectionMatrix(); R.renderer.setSize(innerWidth, innerHeight);
   const db = R.renderer.getDrawingBufferSize(new THREE.Vector2()); if (GFX.uPx) GFX.uPx.value = db.y / (2 * Math.tan(R.camera.fov * Math.PI / 360)); if (PP.on) ppResize(); }
-function initWorld() {
+async function initWorld() {
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setSize(innerWidth, innerHeight); document.body.insertBefore(renderer.domElement, document.body.firstChild);
   R.renderer = renderer;
   R.scene = new THREE.Scene();
   R.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.08, 1300); R.camera.rotation.order = 'YXZ'; R.scene.add(R.camera);
-  buildTerrain(R.scene);
+  await loadStep(0.02, 'Raising the island'); buildTerrain(R.scene);
   R.start = shorePoint(Math.PI / 2 - 0.06, 7);
-  buildSky(R.scene); buildPrecip(R.scene); buildFx(R.scene);
-  placeNodes(R.scene); buildLandmarks(); initScout();
-  gfxBakeTerrain(); buildLife(R.scene); ppInit();
+  await loadStep(0.08, 'Painting the sky'); buildSky(R.scene); buildPrecip(R.scene); buildFx(R.scene);
+  await loadStep(0.11, 'Growing the trees'); placeNodes(R.scene); buildLandmarks(); initScout();
+  await loadStep(0.17, 'Planting grass and flowers'); gfxBakeTerrain(); buildLife(R.scene); ppInit();
   R.torchLight = new THREE.PointLight(0xffa850, 0, 18, 1.6); R.torchLight.position.set(0.3, 0.1, -0.5); R.torchLight.userData.on = false; R.camera.add(R.torchLight);
-  prerenderMap(); buildHUD();
+  await loadStep(0.23, 'Drawing the map'); prerenderMap(); buildHUD();
   setupInput(renderer.domElement);
   addEventListener('resize', onResize);
-  setQuality(R.quality);
+  await loadStep(0.27, 'Setting up the graphics'); setQuality(R.quality);
 }
 
 /* ---------- title screen + intro ---------- */
@@ -192,10 +193,10 @@ function titleCamera(dt) {
 }
 
 /* ---------- boot ---------- */
-function boot() {
+async function boot() {
   loadSettings(); initTouch();
   if (!window.WebGLRenderingContext) { $('loading').innerHTML = 'Sorry — this browser can\'t show 3D graphics (WebGL).'; return; }
-  try { initWorld(); }
+  try { await initWorld(); await warmUp(() => { titleCamera(0); renderFrame(0); }); }
   catch (e) { $('loading').innerHTML = 'Something went wrong while building the island:<br><small>' + esc(e.message) + '</small>'; console.error(e); return; }
   $('loading').style.display = 'none';
   showTitle();

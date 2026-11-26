@@ -140,7 +140,7 @@ function gfxStampGrass() {
   for (const s of G.structures) stamp(s.x, s.z, s.k === 'floor' || s.k === 'wall' || s.k === 'door' || s.k === 'roof' ? 2.4 : s.k === 'shelter' ? 2.8 : s.k === 'garden' ? 2.2 : 1.7);
   for (const c of CHESTS) stamp(c.x, c.z, 1.4);
   // keep small pickups (sticks, stones, flint, mushrooms, herbs) easy to spot
-  for (const n of NODES) if (NT[n.t].cls === 'pick' && n.t !== 'reed') stamp(n.x, n.z, 1.6, 35);
+  for (const n of NODES) if (NT[n.t].cls === 'pick' && n.t !== 'reed' && !n.absent) stamp(n.x, n.z, 1.6, 35);
   GFX.noGrassTex.needsUpdate = true; GFX.noGrassDirty = false;
 }
 // @end-moved

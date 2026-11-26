@@ -69,3 +69,5 @@ export * from './player/swim.js';
 export * from './models/gltf-animals.js';
 export * from './creatures/wildlife.js';
 export * from './creatures/sea.js';
+export * from './ui/loading.js';
+export * from './world/rarity.js';

@@ -14,6 +14,7 @@ import { R } from '../state.js';
 import { LAKES, SITES, biomeW, heightAt, slopeAt, inSite } from './terrain.js';
 import { shCell, addCollider } from './collision.js';
 import { gfxNodeMat } from '../gfx/grass.js';
+import { thinPickups } from './rarity.js';   // added after the migration: rarer finds
 
 // @moved-from: original
 
@@ -141,6 +142,7 @@ function placeNodes(scene) {
     shCell(n.x, n.z).nodes.push(n);
   });
   for (const t in NODE_MESH) { const nm = NODE_MESH[t]; nm.m.instanceMatrix.needsUpdate = true; if (nm.m.instanceColor) nm.m.instanceColor.needsUpdate = true; if (nm.ov) { nm.ov.instanceMatrix.needsUpdate = true; nm.ov.instanceColor.needsUpdate = true; } }
+  thinPickups(NODES, setNodeMatrix);   // rarer finds: src/world/rarity.js
   buildGrass(scene);
 }
 const _nm = new THREE.Matrix4(), _nq = new THREE.Quaternion(), _np = new THREE.Vector3(), _ns = new THREE.Vector3(), _ne = new THREE.Euler();

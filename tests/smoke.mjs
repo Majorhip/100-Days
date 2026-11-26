@@ -223,6 +223,28 @@ try {
     info: `torch: wolf flees ${r.torch[0]}, snow wolf flees ${r.torch[1]}; lantern: ${r.lantern[0]}, ${r.lantern[1]}; blue light ${r.light.on && r.light.color === '7fdcff'}`
   }));
 
+  // rarer finds: about half the small finds are not there (hidden, cannot be picked, never
+  // grow back), all of them stay near the start; rarer animals: smaller caps, one at a time
+  await step('rarer finds and animals', () => ev(() => {
+    const S = window.__stranded, { NODES, PICKUP_KEEP, R } = S, out = { kinds: {}, nearStart: 0, hiddenOk: true, unpickable: true, regrow: false };
+    for (const n of NODES) {
+      if (PICKUP_KEEP[n.t] === undefined) { if (n.absent) out.other = (out.other || 0) + 1; continue; }
+      const k = out.kinds[n.t] = out.kinds[n.t] || [0, 0]; k[0]++; if (n.absent) k[1]++;
+      if (n.absent && Math.hypot(n.x - R.start.x, n.z - R.start.z) < S.START_SAFE) out.nearStart++;
+      if (n.absent) {
+        const m = S.NODE_MESH[n.t].m.instanceMatrix.array; if (m[n.i * 16] > 0.001) out.hiddenOk = false;
+        S.nodeNear(n.x, n.z, 1, q => { if (q === n) out.unpickable = false; });
+      }
+    }
+    const a = NODES.find(n => n.absent); S.G.nodeState[a.idx] = 0; S.restoreNode(a); out.regrow = !a.absent || !a.gone || a.idx in S.G.nodeState;
+    out.caps = ['rabbit', 'deer', 'fox', 'snake'].map(t => S.rareCap(t, 2)).join('/');
+    return out;
+  }), r => {
+    const share = Object.entries(r.kinds).map(([t, [n, gone]]) => `${t} ${n - gone}/${n}`).join(', ');
+    const thinned = Object.values(r.kinds).every(([n, gone]) => gone > n * 0.2 && gone < n * 0.6);
+    return { ok: thinned && !r.other && r.nearStart === 0 && r.hiddenOk && r.unpickable && !r.regrow && r.caps === '1/1/2/1', info: `${share}; near start missing ${r.nearStart}; caps of 2: ${r.caps}` };
+  });
+
   await step('a storm', async () => {
     await ev(() => { const { G } = window.__stranded; G.weather = 'storm'; G.weatherHrs = 99; G.hour = 14; });
     await wait(6000);

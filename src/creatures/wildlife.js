@@ -8,6 +8,7 @@ import { G, R } from '../state.js';
 import { LAKES, SITES, biomeAt, heightAt, inSite } from '../world/terrain.js';
 import { spawnCreature, removeCreature } from './creatures.js';
 import { spawnPoint } from './spawner.js';
+import { rareCap, rareRoll } from '../world/rarity.js';
 
 /** a point on the sea shore (sand, not snow, not a lake bank) 20–60 m from the player */
 function beachPoint() {
@@ -45,12 +46,13 @@ function lakeEdgePoint() {
  */
 function updateWildlife(cnt, night) {
   const p = G.p, b = R.biome;
-  const want = (type, cap, find, o) => { if ((cnt[type] || 0) < cap) { const s = find(); if (s) spawnCreature(type, s.x, s.z, o); } };
+  // rarer animals (src/world/rarity.js): a smaller cap, and one turns up now and then
+  const want = (type, cap, find, o) => { if ((cnt[type] || 0) < rareCap(type, cap) && rareRoll(type)) { const s = find(); if (s) spawnCreature(type, s.x, s.z, o); } };
   if (b === 'forest') want('boar', 1, () => spawnPoint('forest', 46, 72));
   if (b === 'desert') want('snake', night ? 1 : 2, () => spawnPoint('desert', 30, 60));
   if (b !== 'snow') want('crab', 3, beachPoint);
   // a herd of 2–4 in its biome, far enough off to watch; herds stay together (keepHerds)
-  const herd = (type, biome) => { if (cnt[type]) return; const s = spawnPoint(biome, 50, 75); if (!s) return; const n = 2 + Math.floor(rnd(3)), id = type + Math.floor(rnd(1e6)); for (let i = 0; i < n; i++) { const c = spawnCreature(type, s.x + rnd(-4, 4), s.z + rnd(-4, 4)); c.herd = id; } };
+  const herd = (type, biome) => { if (cnt[type] || !rareRoll(type)) return; const s = spawnPoint(biome, 50, 75); if (!s) return; const n = 2 + Math.floor(rnd(3)), id = type + Math.floor(rnd(1e6)); for (let i = 0; i < n; i++) { const c = spawnCreature(type, s.x + rnd(-4, 4), s.z + rnd(-4, 4)); c.herd = id; } };
   if (b === 'forest' && !night) herd('horse', 'forest');
   if (b === 'desert') herd('donkey', 'desert');
   if (b === 'snow' && !night) herd('alpaca', 'snow');
