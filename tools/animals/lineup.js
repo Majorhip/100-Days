@@ -3,6 +3,7 @@
 // own lights and material (litMat), next to the hand-built models they would replace.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { R } from '/src/state.js';
 import { litMat } from '/src/gfx/core.js';
 import { ANIMALS } from '/src/models/animals.js';
@@ -11,7 +12,7 @@ import { groundAt } from '/src/player/movement.js';
 // target height of the top of the model in metres (roughly the real animal, sized to the game's)
 export const HEIGHT = {
   Wolf: 1.05, Stag: 2.1, Deer: 1.5, Fox: 0.62, Husky: 0.85, ShibaInu: 0.68, Horse: 2.1, Horse_White: 2.1, Donkey: 1.55, Alpaca: 1.85, Bull: 1.7, Cow: 1.6,
-  Bunny: 0.6, Frog: 0.3, Rat: 0.3, Spider: 0.7, Snake: 0.5, Crab: 0.45, Bat: 0.5, Pig: 0.8, Shark: 0.9, Fish: 0.35
+  BlackBear: 1.5, Bunny: 0.6, Frog: 0.3, Rat: 0.3, Spider: 0.7, Snake: 0.5, Crab: 0.45, Bat: 0.5, Pig: 0.8, Shark: 0.9, Fish: 0.35
 };
 const loader = new GLTFLoader();
 const mixers = [];
@@ -37,6 +38,16 @@ export async function place(names, { x0, z, gap, faceYaw = 0 }) {
   for (const name of names) {
     let obj, label = name;
     if (name.startsWith('old:')) { obj = ANIMALS[name.slice(4)]().g; label = name; }
+    else if (name.startsWith('obj:')) {
+      // a static textured model (OBJ + base colour PNG) in raw/<Name>/<Name>.obj
+      const n = name.slice(4), dir = '/assets/animals/raw/' + n + '/';
+      obj = await new OBJLoader().loadAsync(dir + n + '.obj');
+      const map = await new THREE.TextureLoader().loadAsync(dir + n + '_BaseColor.png');
+      obj.traverse(o => { if (o.isMesh) { o.material = litMat({ color: 0xffffff }); o.material.map = map; o.castShadow = true; } });
+      const box = new THREE.Box3().setFromObject(obj), s = (HEIGHT[n] || 1) / (box.max.y - box.min.y);
+      obj.scale.setScalar(s); label = n;
+      const b2 = new THREE.Box3().setFromObject(obj); obj.userData.lift = -b2.min.y;
+    }
     else {
       const gltf = await loader.loadAsync('/assets/animals/raw/' + name + '.glb');
       obj = gltf.scene; gameMaterials(obj);
@@ -54,7 +65,7 @@ export async function place(names, { x0, z, gap, faceYaw = 0 }) {
       obj.userData.clips = gltf.animations.map(a => a.name);
     }
     const gy = groundAt(x, z);
-    obj.position.set(x, gy, z); obj.rotation.y = faceYaw;
+    obj.position.set(x, gy + (obj.userData.lift || 0), z); obj.rotation.y = faceYaw;
     R.scene.add(obj);
     obj.updateMatrixWorld(true);
     const b = new THREE.Box3().setFromObject(obj);

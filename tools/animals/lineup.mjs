@@ -1,7 +1,7 @@
 // Render the downloaded animal models on the island, in the game's own lighting and materials,
 // next to the hand-built models they would replace. Writes PNGs to the folder given.
 //
-//   node tools/animals/lineup.mjs <out dir>
+//   node tools/animals/lineup.mjs <out dir> [row,row...]   (e.g. 5-bear)
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -13,7 +13,9 @@ const vite = spawn(process.execPath, [join(ROOT, 'node_modules', 'vite', 'bin', 
 await new Promise((res, rej) => { vite.stdout.on('data', d => { if (/ready|Local:/.test(String(d))) res(); }); vite.on('exit', c => rej(new Error('vite exited ' + c))); setTimeout(() => rej(new Error('vite did not start')), 60000); });
 
 // on the Frozen Lake (flat, no grass to hide the small ones), looking north at a row facing east
+const ONLY = process.argv[3] ? process.argv[3].split(',') : null;
 const ROWS = [
+  { file: '5-bear', names: ['old:bear', 'obj:BlackBear', 'Wolf', 'old:grizzle'], x0: 61.6, gap: 3.6, z: -138 },
   { file: '1-big-animals', names: ['old:wolf', 'Wolf', 'old:deer', 'Deer', 'Stag', 'Fox', 'Husky', 'ShibaInu', 'old:scout'], x0: 61.6, gap: 2.6, z: -138 },
   { file: '2-farm-plains', names: ['Horse', 'Horse_White', 'Donkey', 'Alpaca', 'Bull', 'Cow', 'old:goat'], x0: 61.8, gap: 3.4, z: -138 },
   { file: '3-small-critters', names: ['old:rabbit', 'Bunny', 'Frog', 'Rat', 'Spider', 'Snake', 'Crab', 'Bat', 'Pig', 'old:scorpion'], x0: 65.9, gap: 1.35, z: -138 },
@@ -28,7 +30,7 @@ try {
   await page.evaluate(() => document.getElementById('iSkip').click());
   await page.waitForFunction(() => window.__stranded.R.started === true, { timeout: 60000 });
   await wait(1500);
-  for (const row of ROWS) {
+  for (const row of ROWS.filter(r => !ONLY || ONLY.includes(r.file))) {
     const res = await page.evaluate(async r => {
       const S = window.__stranded, { G, R } = S;
       R.invuln = 1e9; S.clearCreatures(); G.hour = 11.5; G.weather = 'clear'; G.weatherHrs = 99;
