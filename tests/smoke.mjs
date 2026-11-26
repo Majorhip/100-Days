@@ -96,6 +96,31 @@ try {
     return { ok: models && rr.bit && rr.falling === 3 && left === 0 && fur >= 4 && bear, info: `${rr.mid.map(m => (m.m || 'hand-built') + ':' + m.clip).join(', ')}; bite ${rr.bit}; ${rr.falling} falling, ${left} left, +${fur} fur; bear ${bear ? 'hand-built' : 'WRONG'}` };
   }, r));
 
+  // step B: deer come as does and stags, the fox (and white arctic fox) is new, Scout is a Shiba
+  // with a red collar; a fox without its animated model falls back to a box fox
+  await step('deer, fox and Scout', async () => {
+    const r = await ev(() => {
+      const S = window.__stranded, p = S.G.p, files = {};
+      for (let i = 0; i < 30; i++) files[S.gltfAnimal('deer').file] = 1;
+      S.clearCreatures();
+      window.__f = [S.spawnCreature('fox', p.x + 9, p.z + 9), S.spawnCreature('fox', p.x - 9, p.z + 9, { model: 'arcticfox' }), S.spawnCreature('deer', p.x, p.z + 12)];
+      let collar = false; S.R.scout.g.traverse(o => { if (o.geometry && o.geometry.type === 'TorusGeometry') collar = true; });
+      const box = S.KINDS.fox.fallback();
+      return { files: Object.keys(files).sort().join('+'), scout: S.R.scout.model.gltf || 'hand-built', collar, fallback: box.legs.length === 4 && !box.gltf, models: window.__f.map(c => c.model.gltf || 'hand-built') };
+    });
+    await wait(1500);
+    r.fled = await ev(() => window.__f.filter(c => c.state === 'flee').length);
+    const meat0 = await ev(() => window.__stranded.inv('rawmeat') + '/' + window.__stranded.inv('fur'));
+    await ev(() => { for (const c of window.__f.slice(0, 2)) window.__stranded.damageCreature(c, 999); });
+    r.loot = meat0 + ' -> ' + await ev(() => window.__stranded.inv('rawmeat') + '/' + window.__stranded.inv('fur'));
+    await ev(() => window.__stranded.clearCreatures());
+    return r;
+  }, r => {
+    const [a, b] = r.loot.split(' -> ').map(x => x.split('/').map(Number));
+    return { ok: r.files === 'Deer+Stag' && r.scout === 'scout' && r.collar && r.fallback && r.models.join() === 'fox,arcticfox,deer' && r.fled >= 2 && b[0] - a[0] === 2 && b[1] - a[1] === 2,
+      info: `deer models ${r.files}; ${r.models.join(', ')}; ${r.fled} fled; foxes' loot meat/fur ${r.loot}; Scout ${r.scout}${r.collar ? ' with collar' : ''}; box fox ${r.fallback}` };
+  });
+
   // snow wolves ignore a hand-held torch; the Crystal Lantern scares them (and ordinary wolves).
   // On the Frozen Lake, far from the campfire, which would scare them anyway.
   await step('torch and crystal lantern', async () => {

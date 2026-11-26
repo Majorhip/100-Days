@@ -12,6 +12,7 @@ import './buildings.js';   // load order: runs after the previous part of the or
 const CREATURES = {
   rabbit: { n: 'Rabbit', hp: 8, spd: 6.2, flee: 7, loot: { rawmeat: 1 }, xp: 5, passive: true, r: 0.35 },
   deer: { n: 'Deer', hp: 28, spd: 7.0, flee: 10, loot: { rawmeat: 3, hide: 2 }, xp: 12, passive: true, r: 0.6 },
+  fox: { n: 'Fox', hp: 14, spd: 7.4, flee: 14, loot: { rawmeat: 1, fur: 1 }, xp: 8, passive: true, r: 0.35 },
   goat: { n: 'Mountain Goat', hp: 32, spd: 6.6, flee: 9, loot: { rawmeat: 2, hide: 1, fur: 1 }, xp: 12, passive: true, r: 0.55 },
   wolf: { n: 'Wolf', hp: 42, spd: 6.5, dmg: 9, sense: 28, atk: 2.0, loot: { fur: 1, fang: 1 }, xp: 22, fearsFire: true, r: 0.55 },
   snowwolf: { n: 'Snow Wolf', hp: 66, spd: 6.9, dmg: 13, sense: 30, atk: 2.0, loot: { fur: 2, fang: 1 }, xp: 32, fearsFire: true, onlyCrystal: true, r: 0.6 },

@@ -18,7 +18,7 @@ try {
   await page.goto(`http://localhost:${PORT}/tools/animals/blank.html`);
   for (const w of want) {
     const [name, h] = w.split('=');
-    const r = await page.evaluate(async (name, h, process_feet) => (await import('/tools/animals/measure.js')).measure('/assets/animals/game/' + name + '.glb', +h, process_feet ? { feet: new RegExp(process_feet) } : {}), name, h || 1, process.env.FEET || '');
+    const r = await page.evaluate(async (name, h, process_feet) => (await import('/tools/animals/measure.js')).measure('/assets/animals/game/' + name + '.glb', +h, Object.assign(process_feet ? { feet: new RegExp(process_feet) } : {}, /Deer|Stag/.test(name) ? { attack: 'Attack_Headbutt' } : {})), name, h || 1, process.env.FEET || '');
     console.log(name, JSON.stringify(r));
   }
 } finally { await close(); vite.kill(); }

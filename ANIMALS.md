@@ -67,8 +67,8 @@ All numbers (health, speed, damage) will be set in `src/data/creatures.js` next 
 
 | Step | What | Done when |
 |---|---|---|
-| **A. Wolf pilot** ✅ built, waiting for a play test | asset step, loader, adapter, fallback; wolf, red wolf, snow wolf | wolves look and fight right in a night with wolves and a Wolf Moon; no page errors; you've played it |
-| **B. Familiar faces** | deer/stag, fox, Ray's dog | |
+| **A. Wolf pilot** ✅ done | asset step, loader, adapter, fallback; wolf, red wolf, snow wolf | wolves look and fight right in a night with wolves and a Wolf Moon; no page errors; you've played it |
+| **B. Familiar faces** ✅ built, waiting for a play test | deer/stag, fox, Ray's dog | |
 | **C. New wildlife** | boar, snake, crab, spider, frog, bat | each spawns in its place, behaves and drops loot |
 | **D. Herds and water** | horse, donkey, alpaca; shark; fish | |
 
@@ -76,6 +76,10 @@ All numbers (health, speed, damage) will be set in `src/data/creatures.js` next 
 - The island fingerprint: its "models" part is re-recorded on purpose. Everything else (terrain, trees, nodes, sites) must stay identical.
 - The smoke test: spawn each new creature, check its clips play and it can be hit and killed, with zero page errors.
 - New reference screenshots of the line-up.
+
+## 4a. Changes along the way
+- **Snow wolves** ignore the hand-held torch; only the new **Crystal Lantern** (2 Glow Crystals, 1 iron, 1 rope at the Workbench) scares them. Campfires and torch posts still do.
+- **Bears:** the free packs had no animated bear. The user sent a static one ("Black bear" by Poly by Google, CC BY 3.0, in `assets/animals/raw/BlackBear/`). It has to serve the Grizzle and Frostclaw too, so a separate session is rigging and animating it on its own branch (`bear-models`). The bears keep their box models until that is done.
 
 ## 5. Credits
 

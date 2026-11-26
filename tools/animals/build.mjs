@@ -17,7 +17,11 @@ const RAW = join(ROOT, 'assets', 'animals', 'raw'), OUT = join(ROOT, 'assets', '
 
 /** model file -> the clips the game plays (by their bare names in the file) */
 export const MODELS = {
-  Wolf: ['Idle', 'Walk', 'Gallop', 'Attack', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating']
+  Wolf: ['Idle', 'Walk', 'Gallop', 'Attack', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
+  Fox: ['Idle', 'Walk', 'Gallop', 'Attack', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
+  ShibaInu: ['Idle', 'Walk', 'Gallop', 'Attack', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
+  Deer: ['Idle', 'Walk', 'Gallop', 'Attack_Headbutt', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
+  Stag: ['Idle', 'Walk', 'Gallop', 'Attack_Headbutt', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating']
 };
 
 const io = new NodeIO();

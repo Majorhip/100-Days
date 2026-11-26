@@ -11,6 +11,7 @@ import { SITES, heightAt } from '../world/terrain.js';
 import { collide } from '../world/collision.js';
 import { ITEMS } from '../data/items.js';
 import { ANIMALS } from '../models/animals.js';
+import { upgradeScout, scoutPose } from '../models/gltf-animals.js';   // added after the migration: Scout's animated model
 import { inv, give, take, addXP } from '../player/inventory.js';
 import { POIS } from '../player/targeting.js';
 import { damageCreature } from './creatures.js';
@@ -77,7 +78,7 @@ function scoutAlert(c) {
 }
 function compassWord(dx, dz) { const a = Math.atan2(dx, -dz), i = Math.round(a / (Math.PI / 4)); return ['NORTH', 'NORTH-EAST', 'EAST', 'SOUTH-EAST', 'SOUTH', 'SOUTH-WEST', 'WEST', 'NORTH-WEST'][(i + 8) % 8]; }
 function updateScout(dt) {
-  const s = R.scout, p = G.p; if (!s) return; s.moving = 0; if (s.barkT > 0) s.barkT -= dt; if (s.bite > 0) s.bite -= dt;
+  const s = R.scout, p = G.p; if (!s) return; upgradeScout(s); s.moving = 0; if (s.barkT > 0) s.barkT -= dt; if (s.bite > 0) s.bite -= dt;
   if (G.scout.friend) {
     const d = dist2(s.x, s.z, p.x, p.z);
     if (d > 48 || R.teleScout) { R.teleScout = false; const a = p.yaw + rnd(-0.6, 0.6); s.x = p.x + Math.sin(a) * 3; s.z = p.z + Math.cos(a) * 3; }
@@ -90,7 +91,7 @@ function updateScout(dt) {
   s.y = lerp(s.y, heightAt(s.x, s.z), Math.min(1, dt * 12)); s.g.position.set(s.x, s.y, s.z); s.g.rotation.y = s.yaw;
   const m = s.model;
   if (s.moving > 0) { s.phase += dt * s.moving * 2.6; const k = Math.sin(s.phase) * 0.7; m.legs[0].rotation.x = k; m.legs[3].rotation.x = k; m.legs[1].rotation.x = -k; m.legs[2].rotation.x = -k; } else m.legs.forEach(l => l.rotation.x *= 0.8);
-  m.tail.rotation.y = Math.sin(R.t * (G.scout.friend ? 11 : 4)) * 0.6; m.head.rotation.x = Math.sin(R.t * 1.7) * 0.07 - (s.moving ? 0 : 0.12);
+  m.tail.rotation.y = Math.sin(R.t * (G.scout.friend ? 11 : 4)) * 0.6; m.head.rotation.x = Math.sin(R.t * 1.7) * 0.07 - (s.moving ? 0 : 0.12); if (m.anim) m.anim(scoutPose(s), dt);
   R.scoutPoi.x = s.x; R.scoutPoi.y = s.y + 0.5; R.scoutPoi.z = s.z;
 }
 // @end-moved

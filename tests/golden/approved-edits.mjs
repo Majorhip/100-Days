@@ -156,5 +156,26 @@ export const EDITS = [
   {
     kind: 'replace', was: "tipOnce('wolfFear', 'The wolf is scared of the flames and runs away!');", now: "tipOnce('wolfFear', crystal && th === p ? 'The wolf is scared of the crystal light and runs away!' : 'The wolf is scared of the flames and runs away!');",
     why: 'Crystal Lantern: the first-time tip names the crystal light, not flames, when the lantern is what scared the wolf.'
+  },
+  // ---- after the migration: animals step B (deer and stags, the fox, Scout) ----
+  {
+    kind: 'replace', was: "  deer: { n: 'Deer', hp: 28, spd: 7.0, flee: 10, loot: { rawmeat: 3, hide: 2 }, xp: 12, passive: true, r: 0.6 },", now: "  deer: { n: 'Deer', hp: 28, spd: 7.0, flee: 10, loot: { rawmeat: 3, hide: 2 }, xp: 12, passive: true, r: 0.6 },\n  fox: { n: 'Fox', hp: 14, spd: 7.4, flee: 14, loot: { rawmeat: 1, fur: 1 }, xp: 8, passive: true, r: 0.35 },",
+    why: "New animal (ANIMALS.md step B): the fox. Shy (runs from 14 m, where a deer waits until 10 m) and quick; 1 raw meat and 1 fur."
+  },
+  {
+    kind: 'replace', was: "want('rabbit', night ? 1 : 3, 'forest'); if (!night) want('deer', 2, 'forest');", now: "want('rabbit', night ? 1 : 3, 'forest'); if (!night) want('deer', 2, 'forest'); want('fox', 1, 'forest');",
+    why: "The fox: one at a time in the forest, day or night."
+  },
+  {
+    kind: 'replace', was: "want('rabbit', 2, 'snow', { model: 'hare' });", now: "want('rabbit', 2, 'snow', { model: 'hare' }); want('fox', 1, 'snow', { model: 'arcticfox' });",
+    why: "The fox: a white arctic fox on Frostpeak."
+  },
+  {
+    kind: 'replace', was: "const s = R.scout, p = G.p; if (!s) return; s.moving = 0;", now: "const s = R.scout, p = G.p; if (!s) return; upgradeScout(s); s.moving = 0;",
+    why: "Scout gets the animated Shiba Inu model (red collar) once it has loaded. He is built with the island, before the models finish loading, so he starts hand-built and is swapped on his first update."
+  },
+  {
+    kind: 'replace', was: "m.head.rotation.x = Math.sin(R.t * 1.7) * 0.07 - (s.moving ? 0 : 0.12);", now: "m.head.rotation.x = Math.sin(R.t * 1.7) * 0.07 - (s.moving ? 0 : 0.12); if (m.anim) m.anim(scoutPose(s), dt);",
+    why: "Scout: play his animated model (walk and gallop matched to his speed, a bite when he bites)."
   }
 ];

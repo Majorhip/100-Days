@@ -183,6 +183,13 @@ In the original, the player was stopped where the water got 1.25 m deep, but a l
 - **Island fingerprint:** unchanged, because no creature exists until a game starts.
 - **Tests:** the `animated wolves` step in `tests/smoke.mjs` spawns all three. It checks they play clips and bite, then kills them and checks the Death clip, their removal, the loot, and that a bear keeps its hand-built model. `node tools/animals/wolves.mjs <dir>` takes the screenshots in `docs/animals/wolves/`.
 
+## Animated animals, step B: deer, fox, Scout
+- **Deer:** each one is a doe (65%) or a stag (35%), picked at random (`variants` in `src/models/gltf-animals.js`). The behaviour is unchanged.
+- **Fox (new):** `fox` in `src/data/creatures.js` is shy (runs from 14 m) and quick (7.4 m/s), with 1 raw meat and 1 fur. One spawns in the forest; on Frostpeak it's a white arctic fox (`model: 'arcticfox'`). The original had no fox, so its `fallback` is a box fox for when the model is not loaded.
+- **Scout:** the Shiba Inu, coloured like the old Scout, with a red collar (a ring on the neck bone). He is built with the island, before the models load, so `upgradeScout()` swaps the model on his first update. The island fingerprint stays the same because the title screen still shows the original.
+- **Code:** speeds scale with each model's height (`CLIP_INFO.at`). Deer use `Attack_Headbutt`. The models add about 2.1 MB to the game file, which is now 3.5 MB. There are 5 ledger entries.
+- **Tests:** the `deer, fox and Scout` smoke step checks both deer models, the foxes' models, that the foxes flee, their loot, Scout's model and collar, and the box-fox fallback. `node tools/animals/familiar.mjs docs/animals/familiar` takes the screenshots.
+
 ## Phase 6: ship
 - **`npm run ship`** builds the game, copies it to `release/Stranded-100-Days-PC.html` (the original file name, so it replaces Caspar's copy one for one; `release/` is not in git), then runs `ship.mjs`.
 - **`ship.mjs`** plays it the way Caspar will, in one browser profile. 7 out of 7 pass:

@@ -32,12 +32,12 @@ function updateSpawner() {
   for (const c of R.creatures) if (!c.dead && !c.lair && !c.boss && !c.raid) cnt[c.type] = (cnt[c.type] || 0) + 1;
   const want = (type, cap, biome, o) => { if ((cnt[type] || 0) < cap) { const s = spawnPoint(biome, 46, 72); if (s) { spawnCreature(type, s.x, s.z, o); return true; } } return false; };
   if (b === 'forest') {
-    want('rabbit', night ? 1 : 3, 'forest'); if (!night) want('deer', 2, 'forest');
+    want('rabbit', night ? 1 : 3, 'forest'); if (!night) want('deer', 2, 'forest'); want('fox', 1, 'forest');
     if (night && G.day >= 2 && !R.raid && (G.hour < 5 || G.hour > 20.5)) want('wolf', clamp(1 + Math.floor(G.day / 3), 1, 4), 'forest');
   } else if (b === 'desert') {
     want('rabbit', 2, 'desert'); want('scorpion', night ? 4 : 2, 'desert');
   } else {
-    want('goat', 3, 'snow'); want('rabbit', 2, 'snow', { model: 'hare' }); want('snowwolf', night ? 3 : (G.day >= 3 ? 2 : 1), 'snow');
+    want('goat', 3, 'snow'); want('rabbit', 2, 'snow', { model: 'hare' }); want('fox', 1, 'snow', { model: 'arcticfox' }); want('snowwolf', night ? 3 : (G.day >= 3 ? 2 : 1), 'snow');
   }
   // lairs and bosses appear when you get close
   const lair = (id, type, site, n, o) => {
