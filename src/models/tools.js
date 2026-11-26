@@ -10,6 +10,7 @@ import { vcMesh } from '../gfx/core.js';
 import { flameGroup } from '../gfx/fx.js';
 import { ITEMS, HANDS } from '../data/items.js';
 import { UNIT_BOX } from './animals.js';
+import { lanternModel } from './lantern.js';   // added after the migration: the Crystal Lantern
 
 // @moved-from: original
 
@@ -24,7 +25,8 @@ function toolModel(id) {
   if (cls === 'pick') m = vcMesh([part(box(0.045, 0.72, 0.045), WOOD, [0, 0.26, 0]), part(box(0.055, 0.08, 0.56), head, [0, 0.6, 0]), part(cone(0.04, 0.14, 4), head, [0, 0.58, -0.33], [-1.9, 0, 0]), part(cone(0.04, 0.14, 4), head, [0, 0.58, 0.33], [1.9, 0, 0]), hand, arm]);
   if (cls === 'sword') m = vcMesh([part(box(0.04, 0.18, 0.04), 0x4a3421, [0, 0.03, 0]), part(box(0.04, 0.04, 0.22), 0xb8860b, [0, 0.13, 0]), part(box(0.022, 0.72, 0.075), IRON, [0, 0.5, 0]), part(cone(0.04, 0.12, 4), IRON, [0, 0.92, 0], null, [0.55, 1, 1]), hand, arm]);
   if (cls === 'spear') { const tip = def.tool.glow || (t >= 2 ? IRON : 0x3b4046); m = vcMesh([part(box(0.04, 1.7, 0.04), WOOD, [0, 0.55, 0]), part(cone(0.055, 0.3, 4), tip, [0, 1.52, 0]), part(box(0.06, 0.07, 0.06), 0xc9b98a, [0, 1.36, 0]), hand, arm], def.tool.glow ? new THREE.MeshLambertMaterial({ vertexColors: true, emissive: def.tool.glow, emissiveIntensity: 0.25 }) : null); }
-  if (cls === 'torch') { m = vcMesh([part(box(0.05, 0.6, 0.05), WOOD, [0, 0.2, 0]), part(box(0.08, 0.14, 0.08), 0x3a2a1c, [0, 0.52, 0]), hand, arm]); const f = flameGroup(0.55); f.position.y = 0.56; m.add(f); g.userData.flame = f; }
+  if (cls === 'torch' && def.tool.crystal) m = lanternModel(hand, arm, g);
+  else if (cls === 'torch') { m = vcMesh([part(box(0.05, 0.6, 0.05), WOOD, [0, 0.2, 0]), part(box(0.08, 0.14, 0.08), 0x3a2a1c, [0, 0.52, 0]), hand, arm]); const f = flameGroup(0.55); f.position.y = 0.56; m.add(f); g.userData.flame = f; }
   if (cls === 'rod') m = vcMesh([part(box(0.03, 1.9, 0.03), 0x9a7a4a, [0, 0.75, 0]), part(box(0.07, 0.07, 0.05), 0x444444, [0, 0.12, -0.04]), hand, arm]);
   if (cls === 'bow') {
     const ps = [hand, arm]; for (let i = -3; i <= 3; i++) { const a = i * 0.22; ps.push(part(box(0.035, 0.2, 0.04), WOOD, [0, Math.sin(a) * 0.72, -0.22 + Math.cos(a) * 0.3], [-a, 0, 0])); }

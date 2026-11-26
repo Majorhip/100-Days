@@ -199,7 +199,7 @@ function craft(id, all) {
   if (d.tool) { const best = bestTool(d.tool.slot); if (best === id) { G.p.held = d.tool.slot; refreshViewModel(); } }
   if (d.wear) toast('You are now wearing the ' + d.n + '.', 'ok', 3000);
   if (id === 'axe') tipOnce('axe', 'Your axe is in hotbar slot <b>2</b>. Walk up to a tree and left click!');
-  if (id === 'torch') tipOnce('torch', 'Press <b>T</b> any time to hold your torch. Wolves hate it!');
+  if (id === 'torch') tipOnce('torch', 'Press <b>T</b> any time to hold your torch. Wolves hate it!'); if (id === 'lantern') tipOnce('lantern', 'Press <b>T</b> to hold your Crystal Lantern. Even snow wolves keep away from it!');
   if (id === 'canteen') { G.flags.canteen = G.flags.canteen || 0; tipOnce('canteen', 'Fill your canteen at any water with <b>E</b>, then drink with <b>G</b>.'); }
   renderPanel();
 }

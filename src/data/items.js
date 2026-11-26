@@ -51,6 +51,7 @@ const ITEMS = {
   bow: { n: 'Bow', e: ['🏹'], d: 'Shoots arrows. Left click to fire.', tool: { slot: 'bow', cls: 'bow', dmg: 28, tier: 1 } },
   arrow: { n: 'Arrow', e: ['🪶', '🎯'], d: 'Ammo for the bow.' },
   torch: { n: 'Torch', e: ['🔥'], d: 'Lights the dark and scares wolves away while you hold it.', tool: { slot: 'torch', cls: 'torch', dmg: 6, reach: 2.6, tier: 1 } },
+  lantern: { n: 'Crystal Lantern', e: ['🏮'], d: 'Frostpeak crystal in an iron lamp. Its blue glow scares away every wolf, even snow wolves, which laugh at torches.', tool: { slot: 'torch', cls: 'torch', dmg: 6, reach: 2.6, tier: 2, crystal: true } },
   rod: { n: 'Fishing Rod', e: ['🎣'], d: 'Aim at water and left click to cast.', tool: { slot: 'rod', cls: 'rod', dmg: 3, reach: 2.6, tier: 1 } },
   canteen: { n: 'Canteen', e: ['🧴', '🍶'], d: 'Carries 5 drinks. Fill it at any water. Press G to drink.' },
   // wearables (worn automatically)

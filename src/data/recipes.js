@@ -28,6 +28,7 @@ const RECIPES = [
   { id: 'ironpick', cost: { iron: 3, stick: 2, rope: 1 }, station: 'bench', xp: 30 },
   { id: 'sword', cost: { iron: 4, stick: 1, hide: 1 }, station: 'bench', xp: 40 },
   { id: 'crystalspear', cost: { crystal: 3, iron: 2, rope: 1 }, station: 'bench', xp: 60 },
+  { id: 'lantern', cost: { crystal: 2, iron: 1, rope: 1 }, station: 'bench', xp: 40 },
   { id: 'iron', cost: { ore: 2, wood: 1 }, station: 'furnace', xp: 6 },
   { id: 'meat', cost: { rawmeat: 1 }, station: 'fire', xp: 3 },
   { id: 'fish', cost: { rawfish: 1 }, station: 'fire', xp: 3 },

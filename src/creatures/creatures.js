@@ -79,7 +79,7 @@ function moveCreature(c, dx, dz, speed, dt) {
   c.yaw += angDiff(c.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 9);
 }
 function updateCreatures(dt) {
-  const p = G.p, torch = heldDef().tool.cls === 'torch', dawn = G.hour > 5.6 && G.hour < 8;
+  const p = G.p, torch = heldDef().tool.cls === 'torch', crystal = !!heldDef().tool.crystal, dawn = G.hour > 5.6 && G.hour < 8;
   for (let i = R.creatures.length - 1; i >= 0; i--) {
     const c = R.creatures[i], def = c.def;
     if (c.dead) { c.deadT -= dt; c.g.scale.setScalar(Math.max(0.01, c.scale * Math.min(1, c.deadT / 0.45))); if (c.model.anim) c.model.anim(c, dt); if (c.deadT <= 0) removeCreature(c); continue; }
@@ -93,8 +93,8 @@ function updateCreatures(dt) {
       // fear of flame (never during a Wolf Moon)
       if (def.fearsFire && !c.raid && c.state !== 'flee') {
         let th = null;
-        if (torch && d < 12) th = p; else { const f = nearestFlame(c.x, c.z, 9); if (f) th = f.s; }
-        if (th) { c.state = 'flee'; c.st = 4; c.fx = th.x; c.fz = th.z; if (d < 30) { sfx('whine'); tipOnce('wolfFear', 'The wolf is scared of the flames and runs away!'); } }
+        if (torch && d < 12 && (crystal || !def.onlyCrystal)) th = p; else { if (torch && d < 12 && c.state === 'chase') tipOnce('snowTorch', 'Snow wolves are not scared of your torch! Only the blue glow of a Crystal Lantern keeps them away.'); const f = nearestFlame(c.x, c.z, 9); if (f) th = f.s; }
+        if (th) { c.state = 'flee'; c.st = 4; c.fx = th.x; c.fz = th.z; if (d < 30) { sfx('whine'); tipOnce('wolfFear', crystal && th === p ? 'The wolf is scared of the crystal light and runs away!' : 'The wolf is scared of the flames and runs away!'); } }
       }
       if (def.fearsFire && !c.raid && !c.lair && dawn && c.state !== 'flee') { c.state = 'flee'; c.st = 30; c.fx = p.x; c.fz = p.z; }
       // spikes hurt

@@ -115,5 +115,46 @@ export const EDITS = [
   {
     kind: 'replace', was: "Made for Caspar · Built with three.js · '", now: "Made for Caspar · Built with three.js · Animals by Quaternius · '",
     why: 'Title screen credit for the animal models. They are CC0 (no credit required), but Quaternius deserves the thanks.'
+  },
+  // ---- after the migration: snow wolves fear only crystal light (the Crystal Lantern) ----
+  {
+    kind: 'module', file: 'src/models/lantern.js', globals: [],
+    why: 'The Crystal Lantern model in the hand: an iron lamp with a glowing crystal.'
+  },
+  {
+    kind: 'replace', was: "  torch: { n: 'Torch', e: ['🔥'], d: 'Lights the dark and scares wolves away while you hold it.', tool: { slot: 'torch', cls: 'torch', dmg: 6, reach: 2.6, tier: 1 } },", now: "  torch: { n: 'Torch', e: ['🔥'], d: 'Lights the dark and scares wolves away while you hold it.', tool: { slot: 'torch', cls: 'torch', dmg: 6, reach: 2.6, tier: 1 } },\n  lantern: { n: 'Crystal Lantern', e: ['🏮'], d: 'Frostpeak crystal in an iron lamp. Its blue glow scares away every wolf, even snow wolves, which laugh at torches.', tool: { slot: 'torch', cls: 'torch', dmg: 6, reach: 2.6, tier: 2, crystal: true } },",
+    why: "Crystal Lantern: a torch-slot tool made from Glow Crystals (cls torch, so it lights, warms and scares wolves like the torch; tier 2, so it takes the torch's place in the hotbar). Its crystal light is the only light snow wolves fear."
+  },
+  {
+    kind: 'replace', was: "  { id: 'crystalspear', cost: { crystal: 3, iron: 2, rope: 1 }, station: 'bench', xp: 60 },", now: "  { id: 'crystalspear', cost: { crystal: 3, iron: 2, rope: 1 }, station: 'bench', xp: 60 },\n  { id: 'lantern', cost: { crystal: 2, iron: 1, rope: 1 }, station: 'bench', xp: 40 },",
+    why: "Crystal Lantern recipe: 2 Glow Crystals, 1 iron, 1 rope at the Workbench."
+  },
+  {
+    kind: 'replace', was: "xp: 32, fearsFire: true, r: 0.6 },", now: "xp: 32, fearsFire: true, onlyCrystal: true, r: 0.6 },",
+    why: "Snow wolves are not scared by a hand-held torch, only by the Crystal Lantern (campfires and torch posts still scare them)."
+  },
+  {
+    kind: 'replace', was: "const p = G.p, torch = heldDef().tool.cls === 'torch', dawn", now: "const p = G.p, torch = heldDef().tool.cls === 'torch', crystal = !!heldDef().tool.crystal, dawn",
+    why: "Snow wolves: is the held light the Crystal Lantern?"
+  },
+  {
+    kind: 'replace', was: "if (torch && d < 12) th = p; else { const f = nearestFlame(c.x, c.z, 9); if (f) th = f.s; }", now: "if (torch && d < 12 && (crystal || !def.onlyCrystal)) th = p; else { if (torch && d < 12 && c.state === 'chase') tipOnce('snowTorch', 'Snow wolves are not scared of your torch! Only the blue glow of a Crystal Lantern keeps them away.'); const f = nearestFlame(c.x, c.z, 9); if (f) th = f.s; }",
+    why: "Snow wolves ignore a hand-held torch (a tip says so the first time one comes at you anyway); the Crystal Lantern scares them. Fires and torch posts still work on them as before."
+  },
+  {
+    kind: 'replace', was: "  if (cls === 'torch') { m = vcMesh(", now: "  if (cls === 'torch' && def.tool.crystal) m = lanternModel(hand, arm, g);\n  else if (cls === 'torch') { m = vcMesh(",
+    why: "Crystal Lantern: its own model in the hand (src/models/lantern.js) instead of the wooden torch with a flame."
+  },
+  {
+    kind: 'replace', was: "if (R.torchLight) R.torchLight.userData.on = R.vm.userData.cls === 'torch';", now: "if (R.torchLight) { R.torchLight.userData.on = R.vm.userData.cls === 'torch'; R.torchLight.color.setHex(R.vm.userData.crystal ? 0x7fdcff : 0xffa850); }",
+    why: "Crystal Lantern: the held light is blue instead of the torch's orange."
+  },
+  {
+    kind: 'replace', was: "if (id === 'torch') tipOnce('torch', 'Press <b>T</b> any time to hold your torch. Wolves hate it!');", now: "if (id === 'torch') tipOnce('torch', 'Press <b>T</b> any time to hold your torch. Wolves hate it!'); if (id === 'lantern') tipOnce('lantern', 'Press <b>T</b> to hold your Crystal Lantern. Even snow wolves keep away from it!');",
+    why: "Crystal Lantern: a tip when it is crafted."
+  },
+  {
+    kind: 'replace', was: "tipOnce('wolfFear', 'The wolf is scared of the flames and runs away!');", now: "tipOnce('wolfFear', crystal && th === p ? 'The wolf is scared of the crystal light and runs away!' : 'The wolf is scared of the flames and runs away!');",
+    why: 'Crystal Lantern: the first-time tip names the crystal light, not flames, when the lantern is what scared the wolf.'
   }
 ];

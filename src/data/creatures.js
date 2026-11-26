@@ -14,7 +14,7 @@ const CREATURES = {
   deer: { n: 'Deer', hp: 28, spd: 7.0, flee: 10, loot: { rawmeat: 3, hide: 2 }, xp: 12, passive: true, r: 0.6 },
   goat: { n: 'Mountain Goat', hp: 32, spd: 6.6, flee: 9, loot: { rawmeat: 2, hide: 1, fur: 1 }, xp: 12, passive: true, r: 0.55 },
   wolf: { n: 'Wolf', hp: 42, spd: 6.5, dmg: 9, sense: 28, atk: 2.0, loot: { fur: 1, fang: 1 }, xp: 22, fearsFire: true, r: 0.55 },
-  snowwolf: { n: 'Snow Wolf', hp: 66, spd: 6.9, dmg: 13, sense: 30, atk: 2.0, loot: { fur: 2, fang: 1 }, xp: 32, fearsFire: true, r: 0.6 },
+  snowwolf: { n: 'Snow Wolf', hp: 66, spd: 6.9, dmg: 13, sense: 30, atk: 2.0, loot: { fur: 2, fang: 1 }, xp: 32, fearsFire: true, onlyCrystal: true, r: 0.6 },
   scorpion: { n: 'Giant Scorpion', hp: 34, spd: 3.7, dmg: 8, sense: 14, atk: 1.9, loot: { chitin: 1 }, xp: 16, r: 0.6 },
   bear: { n: 'Bear', hp: 150, spd: 5.4, dmg: 19, sense: 15, atk: 2.4, loot: { fur: 3, rawmeat: 4 }, xp: 70, r: 0.95, leash: 40 },
   grizzle: { n: 'Old Grizzle', boss: true, hp: 340, spd: 5.6, dmg: 21, sense: 24, atk: 2.9, loot: { fur: 5, rawmeat: 5, coil: 1 }, xp: 300, r: 1.4, leash: 48 },

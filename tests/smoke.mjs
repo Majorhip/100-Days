@@ -96,6 +96,26 @@ try {
     return { ok: models && rr.bit && rr.falling === 3 && left === 0 && fur >= 4 && bear, info: `${rr.mid.map(m => (m.m || 'hand-built') + ':' + m.clip).join(', ')}; bite ${rr.bit}; ${rr.falling} falling, ${left} left, +${fur} fur; bear ${bear ? 'hand-built' : 'WRONG'}` };
   }, r));
 
+  // snow wolves ignore a hand-held torch; the Crystal Lantern scares them (and ordinary wolves).
+  // On the Frozen Lake, far from the campfire, which would scare them anyway.
+  await step('torch and crystal lantern', async () => {
+    const trial = () => ev(() => {
+      const S = window.__stranded, p = S.G.p; S.clearCreatures(); S.refreshViewModel();
+      window.__t = [S.spawnCreature('wolf', p.x + 8, p.z - 3), S.spawnCreature('snowwolf', p.x - 8, p.z - 3)];
+      for (const c of window.__t) { c.state = 'chase'; c.warned = true; }
+    }).then(() => wait(1200)).then(() => ev(() => window.__t.map(c => c.state === 'flee')));
+    await ev(() => { const S = window.__stranded, p = S.G.p; window.__home = [p.x, p.z]; p.x = 66; p.z = -130; p.y = S.groundAt(p.x, p.z); S.give('torch', 1); p.held = 'torch'; });
+    const torch = await trial();
+    await ev(() => window.__stranded.give('lantern', 1));
+    const lantern = await trial();
+    const light = await ev(() => { const R = window.__stranded.R; return { crystal: !!R.vm.userData.crystal, color: R.torchLight.color.getHex().toString(16), on: R.torchLight.userData.on }; });
+    await ev(() => { const S = window.__stranded, p = S.G.p; S.clearCreatures(); p.held = 'hands'; S.refreshViewModel(); p.x = window.__home[0]; p.z = window.__home[1]; p.y = S.groundAt(p.x, p.z); });
+    return { torch, lantern, light };
+  }, r => ({
+    ok: r.torch[0] && !r.torch[1] && r.lantern[0] && r.lantern[1] && r.light.crystal && r.light.on && r.light.color === '7fdcff',
+    info: `torch: wolf flees ${r.torch[0]}, snow wolf flees ${r.torch[1]}; lantern: ${r.lantern[0]}, ${r.lantern[1]}; blue light ${r.light.on && r.light.color === '7fdcff'}`
+  }));
+
   await step('a storm', async () => {
     await ev(() => { const { G } = window.__stranded; G.weather = 'storm'; G.weatherHrs = 99; G.hour = 14; });
     await wait(6000);

@@ -18,7 +18,7 @@ function refreshViewModel() {
   const id = heldId(); if (R.vmId === id) return;
   if (R.vm) R.camera.remove(R.vm);
   R.vm = toolModel(id); R.vmId = id; R.vm.traverse(o => { if (o.material === MAT_VC) o.material = MAT_VC_TOOL; }); R.camera.add(R.vm); uiDirty();
-  if (R.torchLight) R.torchLight.userData.on = R.vm.userData.cls === 'torch';
+  if (R.torchLight) { R.torchLight.userData.on = R.vm.userData.cls === 'torch'; R.torchLight.color.setHex(R.vm.userData.crystal ? 0x7fdcff : 0xffa850); }
 }
 function swingNow(dur) { if (R.swing <= 0) { R.swing = R.swingDur = dur; R.swingHit = true; } }
 function updateViewModel(dt) {
