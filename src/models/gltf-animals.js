@@ -14,13 +14,20 @@ import { SkeletonUtils } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { litMat } from '../gfx/core.js';
 import { R } from '../state.js';
 import { quadruped } from './animals.js';
+import { posedBox } from './posed-box.js';
 import wolfUrl from '../../assets/animals/game/Wolf.glb?url';
 import foxUrl from '../../assets/animals/game/Fox.glb?url';
 import shibaUrl from '../../assets/animals/game/ShibaInu.glb?url';
 import deerUrl from '../../assets/animals/game/Deer.glb?url';
 import stagUrl from '../../assets/animals/game/Stag.glb?url';
+import pigUrl from '../../assets/animals/game/Pig.glb?url';
+import snakeUrl from '../../assets/animals/game/Snake.glb?url';
+import crabUrl from '../../assets/animals/game/Crab.glb?url';
+import spiderUrl from '../../assets/animals/game/Spider.glb?url';
+import frogUrl from '../../assets/animals/game/Frog.glb?url';
+import batUrl from '../../assets/animals/game/Bat.glb?url';
 
-const FILES = { Wolf: wolfUrl, Fox: foxUrl, ShibaInu: shibaUrl, Deer: deerUrl, Stag: stagUrl };
+const FILES = { Wolf: wolfUrl, Fox: foxUrl, ShibaInu: shibaUrl, Deer: deerUrl, Stag: stagUrl, Pig: pigUrl, Snake: snakeUrl, Crab: crabUrl, Spider: spiderUrl, Frog: frogUrl, Bat: batUrl };
 
 /**
  * Which model each creature (or model name in spawnCreature's o.model) uses.
@@ -35,6 +42,9 @@ const FILES = { Wolf: wolfUrl, Fox: foxUrl, ShibaInu: shibaUrl, Deer: deerUrl, S
  *   fallback  builds a hand-built model for a creature the original game did not have, for
  *           when the animated one is not loaded
  *   collar  colour of a collar on the neck (Scout)
+ *   turn    the model faces backwards in its file: turn it round
+ *   fly     flies this high (m) above the ground, bobbing (bats)
+ *   colors on a textured material tint the texture (the boar is the pig, tinted brown)
  */
 const foxBox = (c, c2, c3) => () => quadruped({ c, c2, c3, body: [0.26, 0.28, 0.62], leg: 0.24, legT: 0.07, belly: true, head: [0.24, 0.22, 0.22], snout: [0.12, 0.1, 0.18], ears: 'point', tail: [0.15, 0.15, 0.45], tailC: c3, tailA: -0.4, headUp: 0.35, stride: 14 });
 const KINDS = {
@@ -44,7 +54,13 @@ const KINDS = {
   deer: { variants: [{ file: 'Deer', height: 1.55, weight: 0.65 }, { file: 'Stag', height: 2.0, weight: 0.35 }], scale: 1, colors: {} },
   fox: { file: 'Fox', height: 0.62, scale: 1, colors: {}, fallback: foxBox(0xc0652e, 0x8a4420, 0xf3e6d6) },
   arcticfox: { file: 'Fox', height: 0.62, scale: 1, colors: { Main: { c: 0xf2f4f6 }, Main_Light: { c: 0xffffff }, Grey: { c: 0xd3d9df } }, fallback: foxBox(0xf2f4f6, 0xd3d9df, 0xffffff) },
-  scout: { file: 'ShibaInu', height: 0.75, scale: 1, colors: { Main: { c: 0xc98a3c } }, collar: 0xd9342b }
+  scout: { file: 'ShibaInu', height: 0.75, scale: 1, colors: { Main: { c: 0xc98a3c } }, collar: 0xd9342b },
+  boar: { file: 'Pig', height: 0.8, scale: 1, colors: { AtlasMaterial: { c: 0x93806f } } },
+  snake: { file: 'Snake', height: 0.7, scale: 1, colors: {}, turn: true },
+  crab: { file: 'Crab', height: 0.45, scale: 1, colors: {}, turn: true },
+  spider: { file: 'Spider', height: 0.5, scale: 1, colors: {}, turn: true },
+  frog: { file: 'Frog', height: 0.22, scale: 1, colors: {} },
+  bat: { file: 'Bat', height: 0.4, scale: 1, colors: {}, fly: 1.7 }
 };
 // measured by tools/animals/measure.mjs at height 'at' (speeds scale with the model's height);
 // runAt: the speed from which it gallops; attack: the clip used for attacks
@@ -53,7 +69,14 @@ const CLIP_INFO = {
   Fox: { at: 0.62, walk: 0.62, run: 1.86, bite: 0.375, runAt: 1.3, attack: 'Attack' },
   ShibaInu: { at: 0.75, walk: 0.64, run: 1.7, bite: 0.667, runAt: 1.3, attack: 'Attack' },
   Deer: { at: 1.55, walk: 0.96, run: 4.14, bite: 0.375, runAt: 2.4, attack: 'Attack_Headbutt' },
-  Stag: { at: 2.0, walk: 0.97, run: 4.29, bite: 0.383, runAt: 2.4, attack: 'Attack_Headbutt' }
+  Stag: { at: 2.0, walk: 0.97, run: 4.29, bite: 0.383, runAt: 2.4, attack: 'Attack_Headbutt' },
+  Pig: { at: 0.8, walk: 0.59, run: 1.65, bite: 0.458, runAt: 2.0, attack: 'Attack' },
+  // no foot bones to measure (or ones that don't touch the ground): walk speeds set by eye
+  Snake: { at: 0.55, walk: 0.8, run: 0.8, bite: 0.233, runAt: 99, attack: 'Attack' },
+  Crab: { at: 0.35, walk: 0.7, run: 0.7, bite: 0.125, runAt: 99, attack: 'Attack' },
+  Spider: { at: 0.5, walk: 1.2, run: 1.2, bite: 0.333, runAt: 99, attack: 'Attack' },
+  Frog: { at: 0.22, walk: 1.4, run: 1.4, bite: 0.417, runAt: 99, attack: 'Attack' },
+  Bat: { at: 0.4, walk: 1, run: 1, bite: 0.258, runAt: 99, attack: 'Attack', noSync: true }
 };
 
 const MODELS = {};   // file -> { scene, clips: {name: AnimationClip}, fit: {s, x, y, z} }
@@ -76,21 +99,6 @@ function loadAnimalModels() {
     MODELS[name] = { scene, clips, box };
   }).catch(e => console.warn('Animal model ' + name + ' did not load; using the hand-built one.', e))));
   return loading;
-}
-
-/** bounding box of a skinned model in its current pose, from its vertices */
-function posedBox(scene) {
-  scene.updateMatrixWorld(true);
-  const box = new THREE.Box3(), v = new THREE.Vector3();
-  scene.traverse(o => {
-    if (!o.isMesh) return;
-    const pos = o.geometry.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      if (o.isSkinnedMesh) o.boneTransform(i, v); else v.fromBufferAttribute(pos, i);
-      box.expandByPoint(v.applyMatrix4(o.matrixWorld));
-    }
-  });
-  return box;
 }
 
 const isLoaded = kind => !!KINDS[kind] && (KINDS[kind].variants || [KINDS[kind]]).every(v => MODELS[v.file]);
@@ -121,6 +129,7 @@ function gltfAnimal(kind) {
       const re = k.colors[m.name], hex = re ? re.c : m.color.clone().convertLinearToSRGB().getHex();
       const g = litMat({ color: hex, emissive: re && re.glow ? hex : 0 });
       g.skinning = !!o.isSkinnedMesh; g.name = m.name;
+      if (m.map) { m.map.encoding = THREE.LinearEncoding; g.map = m.map; }   // (as the hex colours: no colour management)
       if (!(re && re.glow)) mats.push(g);   // the hit flash lights these; glowing eyes keep their glow
       return (byName[m.name] = g);
     };
@@ -129,16 +138,19 @@ function gltfAnimal(kind) {
   });
   const b = src.box, s = k.height / (b.max.y - b.min.y);
   inner.scale.multiplyScalar(s);
-  inner.position.set(-(b.min.x + b.max.x) / 2 * s, -b.min.y * s, -(b.min.z + b.max.z) / 2 * s);
+  const turn = k.turn ? -1 : 1;
+  inner.position.set(-(b.min.x + b.max.x) / 2 * s * turn, -b.min.y * s, -(b.min.z + b.max.z) / 2 * s * turn);
+  if (k.turn) inner.rotation.y = Math.PI;
+  const baseY = inner.position.y;
   const g = new THREE.Group(); g.add(inner); g.scale.setScalar(k.scale);
   if (k.collar) addCollar(inner, k.collar, k.height);
 
   const mixer = new THREE.AnimationMixer(inner), act = {};
   for (const n in src.clips) act[n] = mixer.clipAction(src.clips[n]);
   for (const n of [ATTACK, 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right']) if (act[n]) { act[n].setLoop(THREE.LoopOnce, 1); act[n].clampWhenFinished = true; }
-  let cur = null, lock = 0, lastFlash = 0, pause = 0;
+  let cur = null, lock = 0, lastFlash = 0, pause = 0, flyT = Math.random() * 9;
   const play = (name, fade = 0.2, at = 0) => {
-    const a = act[name] || act.Idle; if (a === cur) return a;
+    const a = act[name] || (name === 'Gallop' && act.Walk) || (name === 'Idle_HitReact_Right' && act.Idle_HitReact_Left) || act.Idle; if (a === cur) return a;
     a.reset(); a.time = at; a.setEffectiveTimeScale(1); a.setEffectiveWeight(1); a.play();
     if (cur) cur.crossFadeTo(a, fade, false);
     cur = a; return a;
@@ -148,7 +160,7 @@ function gltfAnimal(kind) {
   const model = {
     // legs, head and tail are stand-ins: code written for the hand-built models may still turn them
     g, legs: [new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D()], head: new THREE.Object3D(), tail: new THREE.Object3D(), body: null,
-    mats, eye: null, stride: 10, h: k.height * k.scale, gltf: kind, file: k.file,
+    mats, eye: null, stride: 10, h: (k.height + (k.fly || 0)) * k.scale, gltf: kind, file: k.file,
     deathT: (src.clips.Death ? src.clips.Death.duration : 0) + 0.45,   // play the fall, then shrink away as before
     mixer,
     /** called every frame by updateCreatures after it has moved the creature */
@@ -167,7 +179,7 @@ function gltfAnimal(kind) {
         if (v > 0.05) {
           pause = 0;
           const run = v >= info.runAt, a = play(run ? 'Gallop' : 'Walk', 0.25);
-          a.setEffectiveTimeScale(Math.min(3, Math.max(0.5, v / (run ? info.run : info.walk))));
+          a.setEffectiveTimeScale(info.noSync ? 1 : Math.min(3.5, Math.max(0.5, v / (run ? info.run : info.walk))));
         } else {
           // standing still: idle, and now and then (when calm) put the nose down to eat
           if (cur !== act.Idle && cur !== act.Eating) pause = 0;
@@ -177,6 +189,7 @@ function gltfAnimal(kind) {
         }
       }
       lastFlash = c.flash;
+      if (k.fly) { flyT += dt; inner.position.y = c.dead ? Math.max(baseY, inner.position.y - dt * 4) : baseY + k.fly + Math.sin(flyT * 2.3) * 0.2; }
       mixer.update(dt);
     }
   };

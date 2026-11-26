@@ -68,8 +68,8 @@ All numbers (health, speed, damage) will be set in `src/data/creatures.js` next 
 | Step | What | Done when |
 |---|---|---|
 | **A. Wolf pilot** ✅ done | asset step, loader, adapter, fallback; wolf, red wolf, snow wolf | wolves look and fight right in a night with wolves and a Wolf Moon; no page errors; you've played it |
-| **B. Familiar faces** ✅ built, waiting for a play test | deer/stag, fox, Ray's dog | |
-| **C. New wildlife** | boar, snake, crab, spider, frog, bat | each spawns in its place, behaves and drops loot |
+| **B. Familiar faces** ✅ done | deer/stag, fox, Ray's dog | |
+| **C. New wildlife** ✅ built, waiting for a play test | boar, snake, crab, spider, frog, bat | each spawns in its place, behaves and drops loot |
 | **D. Herds and water** | horse, donkey, alpaca; shark; fish | |
 
 **Tests for every step:**

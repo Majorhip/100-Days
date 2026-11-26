@@ -1,8 +1,9 @@
 // Measures the animal models' clips (facing, bite moment, walk and gallop ground speed) for
 // CLIP_INFO in src/models/gltf-animals.js. Runs tools/animals/measure.js in the Vite dev server.
 //
-//   node tools/animals/measure.mjs [Name=height ...]     (default: Wolf=1.05)
-//   FEET=<regex> picks other foot bones (default: the FF/FFB foot bones of the Ultimate pack)
+//   node tools/animals/measure.mjs [Name=height[@feet] ...]     (default: Wolf=1.05)
+//   feet: a regex for the foot bones, as three.js names them (no dots), e.g. Spider=0.6@Foot
+//   (default: the FF/FFB foot bones of the Ultimate pack; FEET=<regex> sets it for all)
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { launch, ROOT } from '../../tests/golden/browser.mjs';
@@ -17,8 +18,8 @@ try {
   page.on('pageerror', e => console.error('page error:', e.message));
   await page.goto(`http://localhost:${PORT}/tools/animals/blank.html`);
   for (const w of want) {
-    const [name, h] = w.split('=');
-    const r = await page.evaluate(async (name, h, process_feet) => (await import('/tools/animals/measure.js')).measure('/assets/animals/game/' + name + '.glb', +h, Object.assign(process_feet ? { feet: new RegExp(process_feet) } : {}, /Deer|Stag/.test(name) ? { attack: 'Attack_Headbutt' } : {})), name, h || 1, process.env.FEET || '');
+    const [name, rest] = w.split('='), [h, feet] = (rest || '').split('@');
+    const r = await page.evaluate(async (name, h, process_feet) => (await import('/tools/animals/measure.js')).measure('/assets/animals/game/' + name + '.glb', +h, Object.assign(process_feet ? { feet: new RegExp(process_feet) } : {}, /Deer|Stag/.test(name) ? { attack: 'Attack_Headbutt' } : {})), name, h || 1, feet || process.env.FEET || '');
     console.log(name, JSON.stringify(r));
   }
 } finally { await close(); vite.kill(); }

@@ -121,6 +121,49 @@ try {
       info: `deer models ${r.files}; ${r.models.join(', ')}; ${r.fled} fled; foxes' loot meat/fur ${r.loot}; Scout ${r.scout}${r.collar ? ' with collar' : ''}; box fox ${r.fallback}` };
   });
 
+  // step C: the new wildlife. Calm ones (boar, snake, crab) don't stop you sleeping; a boar
+  // charges once hit; spiders live in the grotto, bats there at night; crabs and frogs find
+  // beaches and lake banks
+  await step('new wildlife', async () => {
+    const r = await ev(() => {
+      const S = window.__stranded, { G, R } = S, p = G.p, out = {};
+      S.clearCreatures(); G.hour = 12;
+      const T = ['boar', 'snake', 'crab', 'spider', 'frog', 'bat'];
+      window.__c = T.map((t, i) => S.spawnCreature(t, p.x + Math.cos(i) * 7, p.z + Math.sin(i) * 7));
+      out.models = window.__c.map(c => c.model.gltf || 'HAND-BUILT');
+      window.__c[3].x += 60;   // the spider would rightly stop you sleeping; move it away
+      out.calmOk = !S.nearestHostile(24);
+      return out;
+    });
+    await wait(1200);
+    Object.assign(r, await ev(() => {
+      const S = window.__stranded, c = window.__c, out = {};
+      out.boarCalm = c[0].state === 'idle';
+      S.damageCreature(c[0], 5); out.boarAngry = c[0].state === 'chase';
+      const inv0 = ['rawmeat', 'hide', 'chitin', 'fibre'].map(k => S.inv(k));
+      for (const x of c.slice(0, 4)) S.damageCreature(x, 999);
+      out.loot = ['rawmeat', 'hide', 'chitin', 'fibre'].map((k, i) => S.inv(k) - inv0[i]).join('/');
+      S.clearCreatures();
+      // places
+      const p = S.G.p, home = [p.x, p.z], g = S.SITES.grotto, lake = S.LAKES[0];
+      const tries = n => { let k = 0; for (let i = 0; i < n; i++) if (S.beachPoint()) k++; return k; };
+      p.x = lake.x + lake.r + 20; p.z = lake.z; const lp = S.lakeEdgePoint();
+      out.lakeEdge = !!lp && Math.hypot(lp.x - lake.x, lp.z - lake.z) < lake.r + 20 && S.heightAt(lp.x, lp.z) > 0.3;
+      p.x = S.R.start.x; p.z = S.R.start.z; out.beach = tries(10);
+      p.x = g.x + 20; p.z = g.z; S.G.hour = 23;
+      S.updateWildlife({}, true);
+      out.grotto = ['spider', 'bat'].map(t => S.R.creatures.filter(c => c.type === t && c.lair).length).join('/');
+      S.updateWildlife({}, false);
+      out.batsGone = !S.R.creatures.some(c => c.type === 'bat');
+      S.clearCreatures(); p.x = home[0]; p.z = home[1]; p.y = S.groundAt(p.x, p.z); S.G.hour = 12;
+      return out;
+    }));
+    return r;
+  }, r => ({
+    ok: r.models.every(m => m !== 'HAND-BUILT') && r.calmOk && r.boarCalm && r.boarAngry && r.loot === '4/2/1/2' && r.lakeEdge && r.beach > 0 && r.grotto === '2/3' && r.batsGone,
+    info: `models ${r.models.join(',')}; calm ok ${r.calmOk}; boar calm ${r.boarCalm}, angry when hit ${r.boarAngry}; loot meat/hide/chitin/fibre ${r.loot}; lake bank ${r.lakeEdge}; beach spots ${r.beach}/10; spiders/bats near the grotto at night ${r.grotto}; bats gone by day ${r.batsGone}`
+  }));
+
   // snow wolves ignore a hand-held torch; the Crystal Lantern scares them (and ordinary wolves).
   // On the Frozen Lake, far from the campfire, which would scare them anyway.
   await step('torch and crystal lantern', async () => {

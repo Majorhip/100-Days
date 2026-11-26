@@ -6,7 +6,7 @@
 //           while it is on the ground, which is how fast the body must move for it not to slide
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { posedBox } from '/src/models/gltf-animals.js';
+import { posedBox } from '/src/models/posed-box.js';
 
 export async function measure(file, height, { attack = 'Attack', walk = 'Walk', run = 'Gallop', head = 'Head', feet: feetRe = /^FFB?[LR]$/ } = {}) {
   const gltf = await new GLTFLoader().loadAsync(file), scene = gltf.scene;

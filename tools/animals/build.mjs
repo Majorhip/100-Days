@@ -15,18 +15,27 @@ import { join, resolve } from 'node:path';
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const RAW = join(ROOT, 'assets', 'animals', 'raw'), OUT = join(ROOT, 'assets', 'animals', 'game');
 
-/** model file -> the clips the game plays (by their bare names in the file) */
+/** model file -> the clips the game plays: a list of names in the file, or { name in the file:
+ *  name the game uses } for models whose clips are named differently (the game expects Idle,
+ *  Walk, Gallop, Attack, Death, Idle_HitReact_Left/Right, Eating; missing ones fall back) */
 export const MODELS = {
   Wolf: ['Idle', 'Walk', 'Gallop', 'Attack', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
   Fox: ['Idle', 'Walk', 'Gallop', 'Attack', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
   ShibaInu: ['Idle', 'Walk', 'Gallop', 'Attack', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
   Deer: ['Idle', 'Walk', 'Gallop', 'Attack_Headbutt', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
-  Stag: ['Idle', 'Walk', 'Gallop', 'Attack_Headbutt', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating']
+  Stag: ['Idle', 'Walk', 'Gallop', 'Attack_Headbutt', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
+  Pig: Object.fromEntries([['Idle', 'Idle'], ['Walk', 'Walk'], ['Run', 'Gallop'], ['Headbutt', 'Attack'], ['Death', 'Death'], ['Idle_Eating', 'Eating']].map(([a, b]) => ['AnimalArmature|AnimalArmature|AnimalArmature|' + a, b])),
+  Snake: { 'SnakeArmature|Snake_Idle': 'Idle', 'SnakeArmature|Snake_Walk': 'Walk', 'SnakeArmature|Snake_Attack': 'Attack' },
+  Crab: { 'MonsterArmature|Idle': 'Idle', 'MonsterArmature|Walk': 'Walk', 'MonsterArmature|Bite_Front': 'Attack', 'MonsterArmature|Death': 'Death', 'MonsterArmature|HitRecieve': 'Idle_HitReact_Left' },
+  Spider: { 'SpiderArmature|Spider_Idle': 'Idle', 'SpiderArmature|Spider_Walk': 'Walk', 'SpiderArmature|Spider_Attack': 'Attack', 'SpiderArmature|Spider_Death': 'Death' },
+  Frog: { 'FrogArmature|Frog_Idle': 'Idle', 'FrogArmature|Frog_Jump': 'Walk', 'FrogArmature|Frog_Attack': 'Attack', 'FrogArmature|Frog_Death': 'Death' },
+  Bat: { 'BatArmature|Bat_Flying': 'Idle', 'BatArmature|Bat_Attack': 'Attack', 'BatArmature|Bat_Death': 'Death', 'BatArmature|Bat_Hit': 'Idle_HitReact_Left' }
 };
 
 const io = new NodeIO();
 mkdirSync(OUT, { recursive: true });
-for (const [name, keep] of Object.entries(MODELS)) {
+for (const [name, list] of Object.entries(MODELS)) {
+  const rename = Array.isArray(list) ? Object.fromEntries(list.map(k => [k, k])) : list, keep = Object.keys(rename);
   const src = join(RAW, name + '.glb'), dst = join(OUT, name + '.glb');
   const doc = await io.read(src), root = doc.getRoot();
   const missing = keep.filter(k => !root.listAnimations().some(a => a.getName() === k));
@@ -38,6 +47,7 @@ for (const [name, keep] of Object.entries(MODELS)) {
     for (const c of a.listChannels()) c.dispose();
     a.dispose();
   }
+  for (const a of root.listAnimations()) a.setName(rename[a.getName()]);
   await doc.transform(resample(), dedup(), prune());
   await io.write(dst, doc);
   const kb = f => (statSync(f).size / 1024).toFixed(0) + ' KB';

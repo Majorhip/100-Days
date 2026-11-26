@@ -89,6 +89,10 @@ export const EDITS = [
     why: 'Animated animal models (Quaternius, CC0), embedded in the game file. Each creature gets its own copy shaped like the hand-built models (g, legs, mats, h...) plus anim(c, dt), which plays the clip for its state. A model that is not loaded falls back to the hand-built one.'
   },
   {
+    kind: 'module', file: 'src/models/posed-box.js', globals: ['isFinite'],
+    why: 'The posed size of an animated model, from its vertices (shared by src/models/gltf-animals.js and tools/animals/measure.js).'
+  },
+  {
     kind: 'module', file: 'src/models/gltf-load.js', globals: [],
     why: 'Starts parsing the animal models when the file opens. Imported by src/main.js after the whole game has loaded, so the original start-up order is untouched.'
   },
@@ -177,5 +181,30 @@ export const EDITS = [
   {
     kind: 'replace', was: "m.head.rotation.x = Math.sin(R.t * 1.7) * 0.07 - (s.moving ? 0 : 0.12);", now: "m.head.rotation.x = Math.sin(R.t * 1.7) * 0.07 - (s.moving ? 0 : 0.12); if (m.anim) m.anim(scoutPose(s), dt);",
     why: "Scout: play his animated model (walk and gallop matched to his speed, a bite when he bites)."
+  },
+  // ---- after the migration: animals step C (boar, snake, crab, spider, frog, bat) ----
+  {
+    kind: 'module', file: 'src/creatures/wildlife.js', globals: [],
+    why: 'Where the step C animals live: places them by kind of place (beach, lake edge, cave) rather than by biome. Called from updateSpawner().'
+  },
+  {
+    kind: 'replace', was: "  goat: { n: 'Mountain Goat', hp: 32, spd: 6.6, flee: 9, loot: { rawmeat: 2, hide: 1, fur: 1 }, xp: 12, passive: true, r: 0.55 },", now: "  // step C. calm: ignores you until you come close or hit it (does not stop you sleeping); lose: how far a chase goes\n  boar: { n: 'Wild Boar', hp: 45, spd: 6.0, dmg: 10, sense: 0, lose: 30, atk: 1.8, loot: { rawmeat: 3, hide: 1 }, xp: 18, calm: true, r: 0.5 },\n  snake: { n: 'Snake', hp: 16, spd: 3.0, dmg: 7, sense: 4, atk: 1.4, loot: { hide: 1 }, xp: 10, calm: true, hiss: true, r: 0.3 },\n  crab: { n: 'Crab', hp: 12, spd: 2.4, dmg: 4, sense: 2.5, atk: 1.1, loot: { rawmeat: 1, chitin: 1 }, xp: 6, calm: true, hiss: true, r: 0.35 },\n  spider: { n: 'Cave Spider', hp: 26, spd: 3.6, dmg: 7, sense: 12, atk: 1.5, loot: { fibre: 2 }, xp: 14, hiss: true, r: 0.55, leash: 18 },\n  frog: { n: 'Frog', hp: 4, spd: 3.2, flee: 4, loot: {}, xp: 2, passive: true, r: 0.2 },\n  bat: { n: 'Bat', hp: 4, spd: 3.0, flee: 3, loot: {}, xp: 1, passive: true, r: 0.25 },\n  goat: { n: 'Mountain Goat', hp: 32, spd: 6.6, flee: 9, loot: { rawmeat: 2, hide: 1, fur: 1 }, xp: 12, passive: true, r: 0.55 },",
+    why: "New animals (ANIMALS.md step C): wild boar (peaceful until hit, then charges), snake (bites if you come within 4 m), crab (pinches if cornered), cave spider (hostile, stays near its cave), frog and bat (harmless). New fields: calm, lose, hiss."
+  },
+  {
+    kind: 'replace', was: "if (c.dead || c.def.passive || c.state === 'flee' || c.state === 'home') continue; const dd = dist2(c.x, c.z, G.p.x, G.p.z);", now: "if (c.dead || c.def.passive || c.state === 'flee' || c.state === 'home' || (c.def.calm && c.state === 'idle')) continue; const dd = dist2(c.x, c.z, G.p.x, G.p.z);",
+    why: "Calm animals (boar, snake, crab) minding their own business do not count as danger: they do not stop you sleeping or using things."
+  },
+  {
+    kind: 'replace', was: "if (!c.raid && !c.boss && d > def.sense * 2.2) { c.state = 'idle'; break; }", now: "if (!c.raid && !c.boss && d > (def.lose || def.sense * 2.2)) { c.state = 'idle'; break; }",
+    why: "A boar notices nothing (sense 0) but, once hit, chases you up to 30 m (lose), instead of giving up at once."
+  },
+  {
+    kind: 'replace', was: "sfx(c.boss ? 'roar' : c.type === 'scorpion' ? 'hiss' : 'growl');", now: "sfx(c.boss ? 'roar' : c.type === 'scorpion' || def.hiss ? 'hiss' : 'growl');",
+    why: "Snakes, crabs and spiders hiss instead of growling when they come for you."
+  },
+  {
+    kind: 'replace', was: "  // lairs and bosses appear when you get close\n", now: "  updateWildlife(cnt, night);   // boars, snakes, crabs, frogs, spiders and bats: src/creatures/wildlife.js\n  // lairs and bosses appear when you get close\n",
+    why: "Step C animals are placed by src/creatures/wildlife.js: boars in the forest, snakes in the desert, crabs on beaches, frogs at lake edges, spiders in the grotto and mine, bats there (and at the bear cave) at night."
   }
 ];

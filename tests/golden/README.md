@@ -190,6 +190,40 @@ In the original, the player was stopped where the water got 1.25 m deep, but a l
 - **Code:** speeds scale with each model's height (`CLIP_INFO.at`). Deer use `Attack_Headbutt`. The models add about 2.1 MB to the game file, which is now 3.5 MB. There are 5 ledger entries.
 - **Tests:** the `deer, fox and Scout` smoke step checks both deer models, the foxes' models, that the foxes flee, their loot, Scout's model and collar, and the box-fox fallback. `node tools/animals/familiar.mjs docs/animals/familiar` takes the screenshots.
 
+## Animated animals, step C: new wildlife
+- **Creatures** (`src/data/creatures.js`):
+  - **Wild boar** (the Pig, tinted): peaceful until hit, then charges for up to 30 m. 3 raw meat, 1 hide.
+  - **Snake:** bites if you come within 4 m. 1 hide.
+  - **Crab:** pinches if you come within 2.5 m. 1 raw meat, 1 chitin.
+  - **Cave spider:** hostile and stays near its cave. 2 fibre.
+  - **Frog** and **bat:** harmless.
+  - **New data fields:** `calm` (an idle one doesn't stop you sleeping), `lose` (how far a chase goes) and `hiss`.
+- **Places** (`src/creatures/wildlife.js`, called from `updateSpawner()`):
+  - **Forest:** 1 boar.
+  - **Desert:** up to 2 snakes (1 at night).
+  - **Beaches:** up to 3 crabs, on sand away from the lakes and not in the snow.
+  - **Lake banks:** up to 3 frogs.
+  - **Grotto and mine:** 2 spiders each, as lairs that come back 5 days after they're killed.
+  - **Grotto, mine and bear cave:** 3 bats each at night, which leave by day.
+- **Models** (`tools/animals/build.mjs`): the build renames these models' clips to the game's names (Idle, Walk, Attack, Death...). Missing clips fall back: no Gallop plays Walk, and no Death just shrinks.
+  - **Turned round:** the snake, crab and spider face backwards in their files (`turn`).
+  - **Bats:** fly 1.7 m up, bobbing (`fly`).
+  - **Boar:** a textured model, tinted brown.
+  - **Speeds:** these models' foot bones don't measure reliably, so their walk speeds are set by eye.
+- **Checks:**
+  - `posedBox` now lives in `src/models/posed-box.js` (three.js only), so `tools/animals/measure.mjs` can load it without the game. It skips the Crab's few vertices with broken weights.
+  - Ledger: the creature data entry is anchored on the goat line, because step B's fox entry already replaces the deer line.
+  - Size: the game file is 5.8 MB.
+- **Tests:** the `new wildlife` smoke step checks:
+  - every model loads
+  - calm animals don't block sleep
+  - the boar ignores you until hit, then chases
+  - the loot is right
+  - lake banks and beaches are found
+  - spiders and bats appear at the grotto at night, and the bats leave by day
+
+  `node tools/animals/wildlife.mjs docs/animals/wildlife` takes the screenshots.
+
 ## Phase 6: ship
 - **`npm run ship`** builds the game, copies it to `release/Stranded-100-Days-PC.html` (the original file name, so it replaces Caspar's copy one for one; `release/` is not in git), then runs `ship.mjs`.
 - **`ship.mjs`** plays it the way Caspar will, in one browser profile. 7 out of 7 pass:

@@ -11,6 +11,7 @@ import { SITES, biomeAt, heightAt, slopeAt, inSite } from '../world/terrain.js';
 import { nightAmount } from '../world/sky.js';
 import { give, addXP } from '../player/inventory.js';
 import { spawnCreature, removeCreature } from './creatures.js';
+import { updateWildlife } from './wildlife.js';   // added after the migration: step C animals
 import { badge } from '../story/quests.js';
 import { toast, banner } from '../ui/hud.js';
 
@@ -39,6 +40,7 @@ function updateSpawner() {
   } else {
     want('goat', 3, 'snow'); want('rabbit', 2, 'snow', { model: 'hare' }); want('fox', 1, 'snow', { model: 'arcticfox' }); want('snowwolf', night ? 3 : (G.day >= 3 ? 2 : 1), 'snow');
   }
+  updateWildlife(cnt, night);   // boars, snakes, crabs, frogs, spiders and bats: src/creatures/wildlife.js
   // lairs and bosses appear when you get close
   const lair = (id, type, site, n, o) => {
     const s = SITES[site], d = dist2(p.x, p.z, s.x, s.z), alive = R.creatures.some(c => c.lair === id && !c.dead);

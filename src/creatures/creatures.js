@@ -40,7 +40,7 @@ function removeCreature(c) { R.scene.remove(c.g); c.g.traverse(o => { if (o.mate
 function clearCreatures() { for (const c of R.creatures.slice()) removeCreature(c); }
 function nearestHostile(d) {
   let best = null;
-  for (const c of R.creatures) { if (c.dead || c.def.passive || c.state === 'flee' || c.state === 'home') continue; const dd = dist2(c.x, c.z, G.p.x, G.p.z); if (dd < d) { d = dd; best = c; } }
+  for (const c of R.creatures) { if (c.dead || c.def.passive || c.state === 'flee' || c.state === 'home' || (c.def.calm && c.state === 'idle')) continue; const dd = dist2(c.x, c.z, G.p.x, G.p.z); if (dd < d) { d = dd; best = c; } }
   return best;
 }
 function damageCreature(c, dmg, tool) {
@@ -109,14 +109,14 @@ function updateCreatures(dt) {
         }
         case 'idle':
           if (def.leash && hd > 6) { moveCreature(c, c.home.x - c.x, c.home.z - c.z, def.spd * 0.5, dt); } else wander(c, dt, 1.6);
-          if (d < def.sense * (c.raid ? 6 : 1)) { c.state = 'chase'; if (!c.warned) { c.warned = true; sfx(c.boss ? 'roar' : c.type === 'scorpion' ? 'hiss' : 'growl'); scoutAlert(c); } }
+          if (d < def.sense * (c.raid ? 6 : 1)) { c.state = 'chase'; if (!c.warned) { c.warned = true; sfx(c.boss ? 'roar' : c.type === 'scorpion' || def.hiss ? 'hiss' : 'growl'); scoutAlert(c); } }
           break;
         case 'home':
           moveCreature(c, c.home.x - c.x, c.home.z - c.z, def.spd, dt); c.hp = Math.min(c.maxHp, c.hp + c.maxHp * 0.04 * dt);
           if (hd < 4) c.state = 'idle'; break;
         case 'chase': {
           if (def.leash && hd > def.leash) { c.state = 'home'; if (c.boss) hint(def.n + ' loses interest and heads home.'); break; }
-          if (!c.raid && !c.boss && d > def.sense * 2.2) { c.state = 'idle'; break; }
+          if (!c.raid && !c.boss && d > (def.lose || def.sense * 2.2)) { c.state = 'idle'; break; }
           const reach = def.atk * (0.75 + 0.25 * c.scale);
           if (c.boss) {
             c.spec -= dt;
