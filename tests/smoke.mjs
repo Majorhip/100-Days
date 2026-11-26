@@ -164,6 +164,45 @@ try {
     info: `models ${r.models.join(',')}; calm ok ${r.calmOk}; boar calm ${r.boarCalm}, angry when hit ${r.boarAngry}; loot meat/hide/chitin/fibre ${r.loot}; lake bank ${r.lakeEdge}; beach spots ${r.beach}/10; spiders/bats near the grotto at night ${r.grotto}; bats gone by day ${r.batsGone}`
   }));
 
+  // step D: herds (stay together, no loot), the shark (comes for a swimmer in the deep sea,
+  // bites, gives up in the shallows) and fish in the lakes
+  await step('herds, shark and fish', async () => {
+    const r = await ev(() => {
+      const S = window.__stranded, p = S.G.p, out = {}, files = {};
+      S.clearCreatures(); S.G.hour = 11;
+      for (let i = 0; i < 20; i++) files[S.gltfAnimal('horse').file] = 1;
+      out.horses = Object.keys(files).sort().join('+');
+      const h = ['horse', 'donkey', 'alpaca'].map((t, i) => { const c = S.spawnCreature(t, p.x + 30 + i * 2, p.z + 30); c.herd = 'test'; return c; });
+      out.models = h.map(c => c.model.gltf || 'HAND-BUILT').join(',');
+      h[2].x += 25; S.keepHerds(); out.regroup = h[2].tx !== null && Math.hypot(h[2].tx - h[0].x, h[2].tz - h[0].z) < Math.hypot(h[2].x - h[0].x, h[2].z - h[0].z) - 8;   // heads back towards the others
+      const inv0 = JSON.stringify(S.G.inv); for (const c of h) S.damageCreature(c, 999); out.noLoot = JSON.stringify(S.G.inv) === inv0;
+      S.clearCreatures();
+      // out from the cove into deep sea water
+      const l = Math.hypot(S.R.start.x, S.R.start.z), ux = S.R.start.x / l, uz = S.R.start.z / l;
+      window.__home = [p.x, p.z];
+      for (let d = 0; d < 80; d += 0.5) { const x = S.R.start.x + ux * d, z = S.R.start.z + uz * d, hh = S.heightAt(x, z); if (hh < -3.2 && hh > -4.3) { p.x = x; p.z = z; p.y = -1.2; p.vy = 0; break; } }
+      out.deep = S.deepSea(p.x, p.z);
+      return out;
+    });
+    let shark = null;
+    for (let i = 0; i < 60 && !shark; i++) { await wait(250); shark = await ev(() => { const c = window.__stranded.R.creatures.find(c => c.type === 'shark'); return c ? c.model.gltf || 'HAND-BUILT' : null; }); }
+    r.shark = shark;
+    let bit = false; for (let i = 0; i < 200 && !bit && shark; i++) { await wait(100); bit = await ev(() => window.__stranded.R.creatures.some(c => c.type === 'shark' && c.state === 'wind')); }
+    r.bit = bit;
+    await ev(() => { const S = window.__stranded, p = S.G.p; p.x = window.__home[0]; p.z = window.__home[1]; p.y = S.groundAt(p.x, p.z); });
+    await wait(1000);
+    r.gaveUp = await ev(() => window.__stranded.R.creatures.filter(c => c.type === 'shark').every(c => c.state === 'leave'));
+    // the lakes: a school near Mirror Lake
+    await ev(() => { const S = window.__stranded, p = S.G.p, l = S.LAKES[0]; S.clearCreatures(); p.x = l.x + l.r + 10; p.z = l.z; p.y = S.groundAt(p.x, p.z); });
+    await wait(1500);
+    r.fish = await ev(() => window.__stranded.fishCount());
+    await ev(() => { const S = window.__stranded, p = S.G.p; p.x = window.__home[0]; p.z = window.__home[1]; p.y = S.groundAt(p.x, p.z); });
+    return r;
+  }, r => ({
+    ok: r.horses === 'Horse+Horse_White' && r.models === 'horse,donkey,alpaca' && r.regroup && r.noLoot && r.deep && r.shark === 'shark' && r.bit && r.gaveUp && r.fish >= 5,
+    info: `horse models: ${r.horses}; ${r.models}; regroups ${r.regroup}; no loot ${r.noLoot}; deep sea ${r.deep}; shark ${r.shark}, bit ${r.bit}, gave up ${r.gaveUp}; ${r.fish} fish in Mirror Lake`
+  }));
+
   // snow wolves ignore a hand-held torch; the Crystal Lantern scares them (and ordinary wolves).
   // On the Frozen Lake, far from the campfire, which would scare them anyway.
   await step('torch and crystal lantern', async () => {

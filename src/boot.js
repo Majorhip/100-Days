@@ -46,6 +46,7 @@ import { helpHTML, settingsHTML, bindSettingsInputs } from './ui/settings.js';
 import { loadSettings, saveGame, readSave, mergeSave, applyWorldState } from './save.js';
 import { advanceTime } from './game/time.js';
 import { initTouch, goFullscreen, updateTouch } from './input/touch.js';
+import { updateSea } from './creatures/sea.js';   // added after the migration: the shark and the lake fish
 
 // @moved-from: original
 
@@ -158,7 +159,7 @@ function frame(now) {
     }
   } else R.acc = 0;
   if (live) {
-    updatePlayer(dt); updateCreatures(dt); updateScout(dt); updateArrows(dt); updateFishing(dt); updateBuildGhost();
+    updatePlayer(dt); updateCreatures(dt); updateSea(dt); updateScout(dt); updateArrows(dt); updateFishing(dt); updateBuildGhost();
     _secT -= dt; if (_secT <= 0) { _secT = 1; slowTick(); }
     R.target = R.build ? null : findTarget();
     // falling trees and pop-in effects

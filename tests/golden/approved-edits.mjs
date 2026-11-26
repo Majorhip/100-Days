@@ -206,5 +206,22 @@ export const EDITS = [
   {
     kind: 'replace', was: "  // lairs and bosses appear when you get close\n", now: "  updateWildlife(cnt, night);   // boars, snakes, crabs, frogs, spiders and bats: src/creatures/wildlife.js\n  // lairs and bosses appear when you get close\n",
     why: "Step C animals are placed by src/creatures/wildlife.js: boars in the forest, snakes in the desert, crabs on beaches, frogs at lake edges, spiders in the grotto and mine, bats there (and at the bear cave) at night."
+  },
+  // ---- after the migration: animals step D (herds, shark, fish) ----
+  {
+    kind: 'module', file: 'src/creatures/sea.js', globals: [],
+    why: 'Life in the water: the shark (circles a swimmer in the deep sea, then bites; gives up in the shallows) and schools of fish in the lakes.'
+  },
+  {
+    kind: 'replace', was: "  wolf: { n: 'Wolf', hp: 42, spd: 6.5, dmg: 9, sense: 28, atk: 2.0, loot: { fur: 1, fang: 1 }, xp: 22, fearsFire: true, r: 0.55 },", now: "  // step D. herds: wild and shy, not for hunting (no loot); sea: swims (src/creatures/sea.js)\n  horse: { n: 'Wild Horse', hp: 60, spd: 8.5, flee: 12, loot: {}, xp: 2, passive: true, r: 0.8 },\n  donkey: { n: 'Wild Donkey', hp: 45, spd: 6.8, flee: 10, loot: {}, xp: 2, passive: true, r: 0.6 },\n  alpaca: { n: 'Alpaca', hp: 40, spd: 6.6, flee: 10, loot: {}, xp: 2, passive: true, r: 0.55 },\n  shark: { n: 'Shark', hp: 90, spd: 5, dmg: 12, sense: 0, atk: 2.2, loot: { rawfish: 3 }, xp: 40, sea: true, r: 0.9 },\n  wolf: { n: 'Wolf', hp: 42, spd: 6.5, dmg: 9, sense: 28, atk: 2.0, loot: { fur: 1, fang: 1 }, xp: 22, fearsFire: true, r: 0.55 },",
+    why: "New animals (ANIMALS.md step D): herds of wild horses, donkeys and alpacas (shy, not for hunting) and the shark (swims; moved by src/creatures/sea.js). Inserted before the wolf: the lines above it are already anchors of other entries."
+  },
+  {
+    kind: 'replace', was: "    const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz); c.moving = 0; c.st -= dt; if (c.atkCd > 0) c.atkCd -= dt;", now: "    if (def.sea) { updateShark(c, dt); continue; }   // swims: src/creatures/sea.js\n    const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz); c.moving = 0; c.st -= dt; if (c.atkCd > 0) c.atkCd -= dt;",
+    why: "The shark: land creatures refuse to enter water, so a creature that swims is moved by updateShark() in src/creatures/sea.js."
+  },
+  {
+    kind: 'replace', was: "updatePlayer(dt); updateCreatures(dt); updateScout(dt);", now: "updatePlayer(dt); updateCreatures(dt); updateSea(dt); updateScout(dt);",
+    why: "Life in the water (src/creatures/sea.js): the shark appears for swimmers in the deep sea; fish swim in the lakes."
   }
 ];

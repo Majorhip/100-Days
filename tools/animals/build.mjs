@@ -29,7 +29,13 @@ export const MODELS = {
   Crab: { 'MonsterArmature|Idle': 'Idle', 'MonsterArmature|Walk': 'Walk', 'MonsterArmature|Bite_Front': 'Attack', 'MonsterArmature|Death': 'Death', 'MonsterArmature|HitRecieve': 'Idle_HitReact_Left' },
   Spider: { 'SpiderArmature|Spider_Idle': 'Idle', 'SpiderArmature|Spider_Walk': 'Walk', 'SpiderArmature|Spider_Attack': 'Attack', 'SpiderArmature|Spider_Death': 'Death' },
   Frog: { 'FrogArmature|Frog_Idle': 'Idle', 'FrogArmature|Frog_Jump': 'Walk', 'FrogArmature|Frog_Attack': 'Attack', 'FrogArmature|Frog_Death': 'Death' },
-  Bat: { 'BatArmature|Bat_Flying': 'Idle', 'BatArmature|Bat_Attack': 'Attack', 'BatArmature|Bat_Death': 'Death', 'BatArmature|Bat_Hit': 'Idle_HitReact_Left' }
+  Bat: { 'BatArmature|Bat_Flying': 'Idle', 'BatArmature|Bat_Attack': 'Attack', 'BatArmature|Bat_Death': 'Death', 'BatArmature|Bat_Hit': 'Idle_HitReact_Left' },
+  Horse: ['Idle', 'Walk', 'Gallop', 'Attack_Kick', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
+  Horse_White: ['Idle', 'Walk', 'Gallop', 'Attack_Kick', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
+  Donkey: ['Idle', 'Walk', 'Gallop', 'Attack_Kick', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
+  Alpaca: ['Idle', 'Walk', 'Gallop', 'Attack_Kick', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
+  Shark: { 'SharkArmature|SharkArmature|SharkArmature|Swim|SharkArmature|Swim': 'Idle', 'SharkArmature|SharkArmature|SharkArmature|Swim_Fast|SharkArmature|Swim_Fast': 'Gallop', 'SharkArmature|SharkArmature|SharkArmature|Swim_Bite|SharkArmature|Swim_Bite': 'Attack' },
+  Fish: { 'Armature|Swim': 'Idle' }
 };
 
 const io = new NodeIO();

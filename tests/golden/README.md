@@ -224,6 +224,26 @@ In the original, the player was stopped where the water got 1.25 m deep, but a l
 
   `node tools/animals/wildlife.mjs docs/animals/wildlife` takes the screenshots.
 
+## Animated animals, step D: herds and water
+- **Herds** (`src/creatures/wildlife.js`): 2–4 wild horses in the forest by day (brown or white, at random), donkeys in the desert, and alpacas on Frostpeak by day.
+  - **Behaviour:** they're shy and not for hunting: no loot.
+  - **Staying together:** a member more than 9 m from the rest of its herd heads back (`keepHerds`).
+- **The shark** (`src/creatures/sea.js`):
+  - **When it comes:** after 5 s of swimming in deep sea water (ground below −2.6 m, away from the lakes), a shark appears about 22 m further out to sea, with a tip.
+  - **How it attacks:** it circles closer, charges and bites for 12, then circles again.
+  - **When it leaves:** it gives up when you reach water shallower than 1.6 m or the land, and it swims off when badly hurt.
+  - **Fighting back:** it can be hit and shot, and drops 3 raw fish.
+  - **How it moves:** land creatures refuse water, so `updateCreatures()` hands it to `updateShark()` (`def.sea`).
+- **Fish** (`src/creatures/sea.js`): a school of 5–8 swims in each lake near the player, just under the surface in water about 1.5 m deep. The lake water is nearly opaque over deeper water, so they keep to where you can see them. Every 4–9 s one leaps out with a splash. They are only scenery.
+- **Code:** `updateSea(dt)` runs in the game loop. There are 3 ledger entries plus the new module. The creature data is anchored on the wolf line, because the lines above it are other entries' anchors. The game file is 8.7 MB.
+- **Tests:** the `herds, shark and fish` smoke step checks:
+  - both horse models and the herd models
+  - that a stray rejoins its herd and that herds drop no loot
+  - that the shark comes in deep sea water, bites, and gives up when you're back on land
+  - that the fish swim in Mirror Lake
+
+  `node tools/animals/water.mjs docs/animals/water` takes the screenshots.
+
 ## Phase 6: ship
 - **`npm run ship`** builds the game, copies it to `release/Stranded-100-Days-PC.html` (the original file name, so it replaces Caspar's copy one for one; `release/` is not in git), then runs `ship.mjs`.
 - **`ship.mjs`** plays it the way Caspar will, in one browser profile. 7 out of 7 pass:

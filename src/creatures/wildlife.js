@@ -1,7 +1,8 @@
 // Where the new wildlife lives (ANIMALS.md step C), added after the migration. Called from
 // updateSpawner() in src/creatures/spawner.js, which places the original creatures by biome.
 // These go by place instead: boars in the forest, snakes in the desert, crabs on the beaches,
-// frogs at the lake edges, spiders in the grotto and the mine, and bats there at night.
+// frogs at the lake edges, spiders in the grotto and the mine, and bats there at night; and
+// (step D) herds: wild horses in the forest, donkeys in the desert, alpacas on Frostpeak.
 import { TAU, dist2, rnd } from '../core/math.js';
 import { G, R } from '../state.js';
 import { LAKES, SITES, biomeAt, heightAt, inSite } from '../world/terrain.js';
@@ -48,6 +49,12 @@ function updateWildlife(cnt, night) {
   if (b === 'forest') want('boar', 1, () => spawnPoint('forest', 46, 72));
   if (b === 'desert') want('snake', night ? 1 : 2, () => spawnPoint('desert', 30, 60));
   if (b !== 'snow') want('crab', 3, beachPoint);
+  // a herd of 2–4 in its biome, far enough off to watch; herds stay together (keepHerds)
+  const herd = (type, biome) => { if (cnt[type]) return; const s = spawnPoint(biome, 50, 75); if (!s) return; const n = 2 + Math.floor(rnd(3)), id = type + Math.floor(rnd(1e6)); for (let i = 0; i < n; i++) { const c = spawnCreature(type, s.x + rnd(-4, 4), s.z + rnd(-4, 4)); c.herd = id; } };
+  if (b === 'forest' && !night) herd('horse', 'forest');
+  if (b === 'desert') herd('donkey', 'desert');
+  if (b === 'snow' && !night) herd('alpaca', 'snow');
+  keepHerds();
   want('frog', 3, lakeEdgePoint);
   // spiders in the grotto and the mine; bats there and at the bear's cave, at night only
   const den = (id, type, site, n, ok, ring) => {
@@ -59,4 +66,14 @@ function updateWildlife(cnt, night) {
   den('batGrotto', 'bat', 'grotto', 3, night, 3); den('batMine', 'bat', 'mine', 3, night, 4); den('batCave', 'bat', 'cave2', 3, night, 4);
 }
 
-export { beachPoint, lakeEdgePoint, updateWildlife };
+/** a member that has wandered more than 9 m from its herd heads back to the others */
+function keepHerds() {
+  const herds = {};
+  for (const c of R.creatures) if (c.herd && !c.dead) (herds[c.herd] = herds[c.herd] || []).push(c);
+  for (const id in herds) {
+    const h = herds[id], cx = h.reduce((a, c) => a + c.x, 0) / h.length, cz = h.reduce((a, c) => a + c.z, 0) / h.length;
+    for (const c of h) if (c.state === 'idle' && dist2(c.x, c.z, cx, cz) > 9) { c.tx = cx + rnd(-3, 3); c.tz = cz + rnd(-3, 3); c.st = 4; }
+  }
+}
+
+export { beachPoint, lakeEdgePoint, updateWildlife, keepHerds };

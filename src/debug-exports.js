@@ -68,3 +68,4 @@ export * from './ui/savefile.js';
 export * from './player/swim.js';
 export * from './models/gltf-animals.js';
 export * from './creatures/wildlife.js';
+export * from './creatures/sea.js';

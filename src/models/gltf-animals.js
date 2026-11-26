@@ -26,8 +26,14 @@ import crabUrl from '../../assets/animals/game/Crab.glb?url';
 import spiderUrl from '../../assets/animals/game/Spider.glb?url';
 import frogUrl from '../../assets/animals/game/Frog.glb?url';
 import batUrl from '../../assets/animals/game/Bat.glb?url';
+import horseUrl from '../../assets/animals/game/Horse.glb?url';
+import horseWhiteUrl from '../../assets/animals/game/Horse_White.glb?url';
+import donkeyUrl from '../../assets/animals/game/Donkey.glb?url';
+import alpacaUrl from '../../assets/animals/game/Alpaca.glb?url';
+import sharkUrl from '../../assets/animals/game/Shark.glb?url';
+import fishUrl from '../../assets/animals/game/Fish.glb?url';
 
-const FILES = { Wolf: wolfUrl, Fox: foxUrl, ShibaInu: shibaUrl, Deer: deerUrl, Stag: stagUrl, Pig: pigUrl, Snake: snakeUrl, Crab: crabUrl, Spider: spiderUrl, Frog: frogUrl, Bat: batUrl };
+const FILES = { Wolf: wolfUrl, Fox: foxUrl, ShibaInu: shibaUrl, Deer: deerUrl, Stag: stagUrl, Pig: pigUrl, Snake: snakeUrl, Crab: crabUrl, Spider: spiderUrl, Frog: frogUrl, Bat: batUrl, Horse: horseUrl, Horse_White: horseWhiteUrl, Donkey: donkeyUrl, Alpaca: alpacaUrl, Shark: sharkUrl, Fish: fishUrl };
 
 /**
  * Which model each creature (or model name in spawnCreature's o.model) uses.
@@ -60,7 +66,12 @@ const KINDS = {
   crab: { file: 'Crab', height: 0.45, scale: 1, colors: {}, turn: true },
   spider: { file: 'Spider', height: 0.5, scale: 1, colors: {}, turn: true },
   frog: { file: 'Frog', height: 0.22, scale: 1, colors: {} },
-  bat: { file: 'Bat', height: 0.4, scale: 1, colors: {}, fly: 1.7 }
+  bat: { file: 'Bat', height: 0.4, scale: 1, colors: {}, fly: 1.7 },
+  horse: { variants: [{ file: 'Horse', height: 2.1, weight: 0.6 }, { file: 'Horse_White', height: 2.1, weight: 0.4 }], scale: 1, colors: {} },
+  donkey: { file: 'Donkey', height: 1.55, scale: 1, colors: {} },
+  alpaca: { file: 'Alpaca', height: 1.85, scale: 1, colors: {} },
+  shark: { file: 'Shark', height: 1.1, scale: 1, colors: {} },
+  fish: { file: 'Fish', height: 0.14, scale: 1, colors: {} }
 };
 // measured by tools/animals/measure.mjs at height 'at' (speeds scale with the model's height);
 // runAt: the speed from which it gallops; attack: the clip used for attacks
@@ -76,7 +87,14 @@ const CLIP_INFO = {
   Crab: { at: 0.35, walk: 0.7, run: 0.7, bite: 0.125, runAt: 99, attack: 'Attack' },
   Spider: { at: 0.5, walk: 1.2, run: 1.2, bite: 0.333, runAt: 99, attack: 'Attack' },
   Frog: { at: 0.22, walk: 1.4, run: 1.4, bite: 0.417, runAt: 99, attack: 'Attack' },
-  Bat: { at: 0.4, walk: 1, run: 1, bite: 0.258, runAt: 99, attack: 'Attack', noSync: true }
+  Bat: { at: 0.4, walk: 1, run: 1, bite: 0.258, runAt: 99, attack: 'Attack', noSync: true },
+  Horse: { at: 2.1, walk: 1.15, run: 4.29, bite: 0.3, runAt: 2.6, attack: 'Attack_Kick' },
+  Horse_White: { at: 2.1, walk: 1.15, run: 4.29, bite: 0.3, runAt: 2.6, attack: 'Attack_Kick' },
+  Donkey: { at: 1.55, walk: 1.04, run: 4.43, bite: 0.3, runAt: 2.4, attack: 'Attack_Kick' },
+  Alpaca: { at: 1.85, walk: 0.73, run: 3.37, bite: 0.3, runAt: 2.0, attack: 'Attack_Kick' },
+  // swimming: Swim (as Idle and Walk), Swim_Fast (as Gallop); speeds by eye
+  Shark: { at: 1.1, walk: 3, run: 6, bite: 0.25, runAt: 6.5, attack: 'Attack' },
+  Fish: { at: 0.14, walk: 1, run: 1, bite: 0, runAt: 99, attack: 'Attack', noSync: true }
 };
 
 const MODELS = {};   // file -> { scene, clips: {name: AnimationClip}, fit: {s, x, y, z} }

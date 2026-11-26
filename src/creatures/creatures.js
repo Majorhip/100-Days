@@ -13,6 +13,7 @@ import { puff } from '../world/sky.js';
 import { CREATURES } from '../data/creatures.js';
 import { UNIT_BOX, ANIMALS } from '../models/animals.js';
 import { gltfAnimal } from '../models/gltf-animals.js';   // added after the migration: animated animal models
+import { updateShark } from './sea.js';   // added after the migration: the shark swims
 import { give, heldDef, addXP } from '../player/inventory.js';
 import { hurtPlayer } from '../player/health.js';
 import { nearestFlame } from '../build/update.js';
@@ -83,6 +84,7 @@ function updateCreatures(dt) {
   for (let i = R.creatures.length - 1; i >= 0; i--) {
     const c = R.creatures[i], def = c.def;
     if (c.dead) { c.deadT -= dt; c.g.scale.setScalar(Math.max(0.01, c.scale * Math.min(1, c.deadT / 0.45))); if (c.model.anim) c.model.anim(c, dt); if (c.deadT <= 0) removeCreature(c); continue; }
+    if (def.sea) { updateShark(c, dt); continue; }   // swims: src/creatures/sea.js
     const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz); c.moving = 0; c.st -= dt; if (c.atkCd > 0) c.atkCd -= dt;
     if (d > 150 && !c.raid) { removeCreature(c); continue; }
     if (def.passive) {

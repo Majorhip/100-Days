@@ -21,6 +21,11 @@ const CREATURES = {
   frog: { n: 'Frog', hp: 4, spd: 3.2, flee: 4, loot: {}, xp: 2, passive: true, r: 0.2 },
   bat: { n: 'Bat', hp: 4, spd: 3.0, flee: 3, loot: {}, xp: 1, passive: true, r: 0.25 },
   goat: { n: 'Mountain Goat', hp: 32, spd: 6.6, flee: 9, loot: { rawmeat: 2, hide: 1, fur: 1 }, xp: 12, passive: true, r: 0.55 },
+  // step D. herds: wild and shy, not for hunting (no loot); sea: swims (src/creatures/sea.js)
+  horse: { n: 'Wild Horse', hp: 60, spd: 8.5, flee: 12, loot: {}, xp: 2, passive: true, r: 0.8 },
+  donkey: { n: 'Wild Donkey', hp: 45, spd: 6.8, flee: 10, loot: {}, xp: 2, passive: true, r: 0.6 },
+  alpaca: { n: 'Alpaca', hp: 40, spd: 6.6, flee: 10, loot: {}, xp: 2, passive: true, r: 0.55 },
+  shark: { n: 'Shark', hp: 90, spd: 5, dmg: 12, sense: 0, atk: 2.2, loot: { rawfish: 3 }, xp: 40, sea: true, r: 0.9 },
   wolf: { n: 'Wolf', hp: 42, spd: 6.5, dmg: 9, sense: 28, atk: 2.0, loot: { fur: 1, fang: 1 }, xp: 22, fearsFire: true, r: 0.55 },
   snowwolf: { n: 'Snow Wolf', hp: 66, spd: 6.9, dmg: 13, sense: 30, atk: 2.0, loot: { fur: 2, fang: 1 }, xp: 32, fearsFire: true, onlyCrystal: true, r: 0.6 },
   scorpion: { n: 'Giant Scorpion', hp: 34, spd: 3.7, dmg: 8, sense: 14, atk: 1.9, loot: { chitin: 1 }, xp: 16, r: 0.6 },
