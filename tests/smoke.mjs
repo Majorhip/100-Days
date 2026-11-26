@@ -73,6 +73,29 @@ try {
     return seen;
   }, seen => ev(n => ({ ok: n >= 1 && window.__stranded.nightAmount() > 0.9, info: `${n} wolves active at ${window.__stranded.G.hour.toFixed(1)} h` }), seen));
 
+  // the wolves have animated models (src/models/gltf-animals.js): they play clips, bite, fall and
+  // go away; the creatures without one keep the hand-built model. (Raid wolves: the campfire from
+  // the steps above would scare ordinary ones away.)
+  await step('animated wolves', async () => {
+    await ev(() => {
+      const S = window.__stranded, p = S.G.p; S.clearCreatures();
+      window.__w = ['wolf', 'redwolf', 'snowwolf'].map((m, i) => { const c = S.spawnCreature(m === 'snowwolf' ? 'snowwolf' : 'wolf', p.x + 6 + i, p.z + 4, { model: m, raid: true }); c.state = 'chase'; c.warned = true; return c; });
+      window.__bear = S.spawnCreature('bear', p.x - 30, p.z - 30);
+    });
+    let bit = false; for (let i = 0; i < 40 && !bit; i++) { await wait(100); bit = await ev(() => window.__w.some(c => c.state === 'wind')); }
+    const mid = await ev(() => window.__w.map(c => ({ m: c.model.gltf || null, clip: c.model.mixer ? c.model.mixer._actions.filter(a => a.isRunning()).map(a => a.getClip().name).join('+') : '' })));
+    const loot0 = await ev(() => window.__stranded.inv('fur'));
+    await ev(() => { for (const c of window.__w) window.__stranded.damageCreature(c, 999); });
+    await wait(400);
+    const falling = await ev(() => window.__w.filter(c => window.__stranded.R.creatures.includes(c) && c.model.mixer._actions.some(a => a.isRunning() && a.getClip().name === 'Death')).length);
+    await wait(2500);
+    return { mid, bit, loot0, falling };
+  }, r => ev(rr => {
+    const S = window.__stranded, left = window.__w.filter(c => S.R.creatures.includes(c)).length, bear = !window.__bear.model.gltf && window.__bear.model.legs.length === 4;
+    const models = rr.mid.every(m => m.m), fur = S.inv('fur') - rr.loot0;
+    return { ok: models && rr.bit && rr.falling === 3 && left === 0 && fur >= 4 && bear, info: `${rr.mid.map(m => (m.m || 'hand-built') + ':' + m.clip).join(', ')}; bite ${rr.bit}; ${rr.falling} falling, ${left} left, +${fur} fur; bear ${bear ? 'hand-built' : 'WRONG'}` };
+  }, r));
+
   await step('a storm', async () => {
     await ev(() => { const { G } = window.__stranded; G.weather = 'storm'; G.weatherHrs = 99; G.hour = 14; });
     await wait(6000);

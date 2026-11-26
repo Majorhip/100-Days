@@ -82,5 +82,38 @@ export const EDITS = [
   {
     kind: 'replace', was: 'G.pack = { x: p.x, z: p.z, items }; }', now: 'G.pack = Object.assign(packSpot(p.x, p.z), { items }); }',
     why: 'A blackout in deep water drops the backpack on the nearest shore instead of the lake bed, where it could not be seen or reached (packSpot in src/player/swim.js).'
+  },
+  // ---- after the migration: animated animal models (ANIMALS.md, step A: the wolves) ----
+  {
+    kind: 'module', file: 'src/models/gltf-animals.js', globals: ['Promise', 'Array'],
+    why: 'Animated animal models (Quaternius, CC0), embedded in the game file. Each creature gets its own copy shaped like the hand-built models (g, legs, mats, h...) plus anim(c, dt), which plays the clip for its state. A model that is not loaded falls back to the hand-built one.'
+  },
+  {
+    kind: 'module', file: 'src/models/gltf-load.js', globals: [],
+    why: 'Starts parsing the animal models when the file opens. Imported by src/main.js after the whole game has loaded, so the original start-up order is untouched.'
+  },
+  {
+    kind: 'replace', was: 'model = ANIMALS[o.model || type]();', now: 'model = gltfAnimal(o.model || type) || ANIMALS[o.model || type]();',
+    why: 'Animal models: a creature gets the animated model when there is one for it (the wolves, for now), otherwise the hand-built one.'
+  },
+  {
+    kind: 'replace', was: 'if (o.geometry && o.geometry !== UNIT_BOX) o.geometry.dispose();', now: 'if (o.geometry && o.geometry !== UNIT_BOX && !o.geometry.userData.shared) o.geometry.dispose();',
+    why: 'Animal models: every copy of an animated model shares its geometry, like the hand-built models share UNIT_BOX, so removing one creature must not dispose it.'
+  },
+  {
+    kind: 'replace', was: 'c.dead = true; c.deadT = 0.45;', now: 'c.dead = true; c.deadT = c.model.deathT || 0.45;',
+    why: 'Animal models: an animated creature plays its fall before it shrinks away (the hand-built ones shrink at once, as before). Loot, XP and the kill count still come at the moment of the kill.'
+  },
+  {
+    kind: 'replace', was: 'if (c.dead) { c.deadT -= dt; c.g.scale.setScalar(Math.max(0.01, c.scale * c.deadT / 0.45)); if (c.deadT <= 0)', now: 'if (c.dead) { c.deadT -= dt; c.g.scale.setScalar(Math.max(0.01, c.scale * Math.min(1, c.deadT / 0.45))); if (c.model.anim) c.model.anim(c, dt); if (c.deadT <= 0)',
+    why: 'Animal models: the shrink takes the last 0.45 s as before, and the death clip plays until then.'
+  },
+  {
+    kind: 'replace', was: "c.g.rotation.z = c.state === 'stun' ? Math.sin(R.t * 9) * 0.06 : 0;", now: "c.g.rotation.z = c.state === 'stun' ? Math.sin(R.t * 9) * 0.06 : 0; if (m.anim) m.anim(c, dt);",
+    why: "Animal models: play the animated model for each creature's state after it has moved (walk and gallop speed matched to how fast it goes; the bite timed to land when the game deals the damage)."
+  },
+  {
+    kind: 'replace', was: "Made for Caspar · Built with three.js · '", now: "Made for Caspar · Built with three.js · Animals by Quaternius · '",
+    why: 'Title screen credit for the animal models. They are CC0 (no credit required), but Quaternius deserves the thanks.'
   }
 ];

@@ -12,6 +12,7 @@ import { collide } from '../world/collision.js';
 import { puff } from '../world/sky.js';
 import { CREATURES } from '../data/creatures.js';
 import { UNIT_BOX, ANIMALS } from '../models/animals.js';
+import { gltfAnimal } from '../models/gltf-animals.js';   // added after the migration: animated animal models
 import { give, heldDef, addXP } from '../player/inventory.js';
 import { hurtPlayer } from '../player/health.js';
 import { nearestFlame } from '../build/update.js';
@@ -27,7 +28,7 @@ import { hint, banner, uiFlash, dmgNumber } from '../ui/hud.js';
    08_creatures: animals, predators, bosses, Wolf Moon raids, Scout the dog
    ========================================================================= */
 function spawnCreature(type, x, z, o = {}) {
-  const def = CREATURES[type], model = ANIMALS[o.model || type]();
+  const def = CREATURES[type], model = gltfAnimal(o.model || type) || ANIMALS[o.model || type]();
   const c = {
     type, def, model, g: model.g, x, z, y: heightAt(x, z), yaw: rnd(TAU), hp: def.hp * (o.hpMul || 1), maxHp: def.hp * (o.hpMul || 1), scale: model.g.scale.x,
     state: 'idle', st: rnd(1, 3), tx: x, tz: z, home: { x, z }, phase: rnd(TAU), moving: 0, flash: 0, atkCd: 0, spec: rnd(4, 7), lunge: 0,
@@ -35,7 +36,7 @@ function spawnCreature(type, x, z, o = {}) {
   };
   c.g.position.set(x, c.y, z); R.scene.add(c.g); R.creatures.push(c); return c;
 }
-function removeCreature(c) { R.scene.remove(c.g); c.g.traverse(o => { if (o.material && o.material.dispose) o.material.dispose(); if (o.geometry && o.geometry !== UNIT_BOX) o.geometry.dispose(); }); const i = R.creatures.indexOf(c); if (i >= 0) R.creatures.splice(i, 1); if (R.focus === c) R.focus = null; if (R.boss === c) R.boss = null; }
+function removeCreature(c) { R.scene.remove(c.g); c.g.traverse(o => { if (o.material && o.material.dispose) o.material.dispose(); if (o.geometry && o.geometry !== UNIT_BOX && !o.geometry.userData.shared) o.geometry.dispose(); }); const i = R.creatures.indexOf(c); if (i >= 0) R.creatures.splice(i, 1); if (R.focus === c) R.focus = null; if (R.boss === c) R.boss = null; }
 function clearCreatures() { for (const c of R.creatures.slice()) removeCreature(c); }
 function nearestHostile(d) {
   let best = null;
@@ -56,7 +57,7 @@ function damageCreature(c, dmg, tool) {
   else if (c.state === 'idle' || c.state === 'home' || (c.state === 'flee' && !c.def.fearsFire)) { c.state = 'chase'; c.st = 0; }
 }
 function killCreature(c) {
-  c.dead = true; c.deadT = 0.45; G.stats.kills++;
+  c.dead = true; c.deadT = c.model.deathT || 0.45; G.stats.kills++;
   puff(c.x, c.y + c.model.h * 0.5, c.z, 0xd8ccb4, c.boss ? 30 : 12, { size: c.boss ? 0.7 : 0.4, speed: c.boss ? 5 : 2.5 });
   const loot = c.def.loot; for (const k in loot) give(k, loot[k]);
   addXP(c.def.xp); if (G.stats.kills >= 10) badge('hunter');
@@ -81,7 +82,7 @@ function updateCreatures(dt) {
   const p = G.p, torch = heldDef().tool.cls === 'torch', dawn = G.hour > 5.6 && G.hour < 8;
   for (let i = R.creatures.length - 1; i >= 0; i--) {
     const c = R.creatures[i], def = c.def;
-    if (c.dead) { c.deadT -= dt; c.g.scale.setScalar(Math.max(0.01, c.scale * c.deadT / 0.45)); if (c.deadT <= 0) removeCreature(c); continue; }
+    if (c.dead) { c.deadT -= dt; c.g.scale.setScalar(Math.max(0.01, c.scale * Math.min(1, c.deadT / 0.45))); if (c.model.anim) c.model.anim(c, dt); if (c.deadT <= 0) removeCreature(c); continue; }
     const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz); c.moving = 0; c.st -= dt; if (c.atkCd > 0) c.atkCd -= dt;
     if (d > 150 && !c.raid) { removeCreature(c); continue; }
     if (def.passive) {
@@ -165,7 +166,7 @@ function updateCreatures(dt) {
     else if (!m.scorp) m.legs.forEach(l => l.rotation.x *= 0.85);
     if (m.head) m.head.rotation.x = c.state === 'wind' ? -0.5 : c.state === 'stun' ? 0.5 + Math.sin(R.t * 12) * 0.1 : Math.sin(R.t * 1.3 + c.phase) * 0.06;
     if (m.scorp && m.tail) m.tail.rotation.x = c.state === 'wind' || c.state === 'tele' ? 0.5 : Math.sin(R.t * 2 + c.phase) * 0.08;
-    c.g.rotation.z = c.state === 'stun' ? Math.sin(R.t * 9) * 0.06 : 0;
+    c.g.rotation.z = c.state === 'stun' ? Math.sin(R.t * 9) * 0.06 : 0; if (m.anim) m.anim(c, dt);
     if (c.flash > 0) { c.flash -= dt; const on = c.flash > 0; for (const mt of m.mats) mt.emissive.setHex(on ? (c.state === 'tele' ? 0xaa3300 : 0x999999) : 0); }
   }
   if (R.focusT > 0) { R.focusT -= dt; if (R.focusT <= 0) R.focus = null; }

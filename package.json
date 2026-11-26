@@ -21,6 +21,8 @@
     "ship": "vite build && node tools/ship.mjs && node tests/golden/ship.mjs"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
     "acorn": "^8.19.0",
     "eslint-scope": "^9.1.2",
     "puppeteer-core": "^25.18.1",

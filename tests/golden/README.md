@@ -174,6 +174,15 @@ In the original, the player was stopped where the water got 1.25 m deep, but a l
 - **Code:** `src/player/swim.js` (new module), called from `updatePlayer()`; 7 ledger entries.
 - **Tests:** the three swim steps in `tests/smoke.mjs`.
 
+## Animated animals (ANIMALS.md), step A: the wolves
+- **Models:** Quaternius's Wolf (CC0), slimmed by `node tools/animals/build.mjs` from `assets/animals/raw/` to `assets/animals/game/Wolf.glb` (964 KB to 378 KB: the 8 clips used, no duplicates). Vite embeds it in the game file (about +0.5 MB).
+- **Code:** `src/models/gltf-animals.js` (new module) makes each creature's model and plays its clips; `src/models/gltf-load.js` starts parsing at file open. 6 ledger entries in `src/creatures/creatures.js` hook it in, and 1 adds the credit on the title screen.
+- **Recolours:** the red wolf (Wolf Moon) and the snow wolf use the same model with their old colours and glowing eyes (yellow, red, blue), and keep their old sizes, so reach and collision are unchanged.
+- **Animation:** walk and gallop are sped up or slowed to the creature's speed. The numbers come from `node tools/animals/measure.mjs` (feet: 1.04 m/s walking, 3.15 m/s galloping at the clip's own pace). The Attack clip starts so that the head is furthest forward when the game deals the bite: the bite timing itself is unchanged. Then come a hit react when struck while standing or walking, and the Death clip before the old 0.45 s shrink.
+- **Fallback:** if the model is not loaded yet, or fails, `gltfAnimal()` returns null and the creature gets its hand-built model.
+- **Island fingerprint:** unchanged, because no creature exists until a game starts.
+- **Tests:** the `animated wolves` step in `tests/smoke.mjs` spawns all three. It checks they play clips and bite, then kills them and checks the Death clip, their removal, the loot, and that a bear keeps its hand-built model. `node tools/animals/wolves.mjs <dir>` takes the screenshots in `docs/animals/wolves/`.
+
 ## Phase 6: ship
 - **`npm run ship`** builds the game, copies it to `release/Stranded-100-Days-PC.html` (the original file name, so it replaces Caspar's copy one for one; `release/` is not in git), then runs `ship.mjs`.
 - **`ship.mjs`** plays it the way Caspar will, in one browser profile. 7 out of 7 pass:

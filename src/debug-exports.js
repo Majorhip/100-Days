@@ -66,3 +66,4 @@ export * from './boot.js';
 export * from './input/touch.js';
 export * from './ui/savefile.js';
 export * from './player/swim.js';
+export * from './models/gltf-animals.js';
