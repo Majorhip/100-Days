@@ -244,6 +244,17 @@ In the original, the player was stopped where the water got 1.25 m deep, but a l
 
   `node tools/animals/water.mjs docs/animals/water` takes the screenshots.
 
+## The bears
+- **Models:** `Bear`, `Grizzle` and `Frostclaw.glb` were rigged and animated from "Black bear" by Poly by Google (CC BY 3.0) by `tools/animals/rig-bear.mjs`. The README in `docs/animals/bears/` covers the clips and numbers.
+- **Credit:** CC BY needs one, so the title screen credits the model, with a link and a note that it was changed. This is a change to the existing Quaternius credit entry in the ledger.
+- **Clips:** `src/models/gltf-animals.js` plays extra clips for the bosses:
+  - their 0.95 s wind-up ('tele') plays Roar before a charge, or Slam before Frostclaw's jump; Slam starts so its paws land when the wind-up ends
+  - 'charge' plays Gallop
+  - a dizzy boss ('stun') lets the slam finish
+  - the red-orange glow during the wind-up is the original's warning
+- **Code:** no ledger entries apart from the credit; all the changes are in the module.
+- **Tests:** the `bears and boss moves` smoke step checks the three models, Grizzle's roar then gallop, and Frostclaw's slam. The wolf step now uses a goat as the creature that is still hand-built. `node tools/animals/bosses.mjs docs/animals/bosses` takes the screenshots.
+
 ## After the animals: loading bar, rarer finds and animals
 - **Loading bar** (`src/ui/loading.js`): the original built the island and then compiled all 37 shaders on the first frame. That was one freeze of 10–20 s, and Chrome could offer to kill the "unresponsive" page.
   - `initWorld()` now pauses between its steps (`loadStep`), so the bar moves.

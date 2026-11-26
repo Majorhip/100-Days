@@ -80,7 +80,7 @@ try {
     await ev(() => {
       const S = window.__stranded, p = S.G.p; S.clearCreatures();
       window.__w = ['wolf', 'redwolf', 'snowwolf'].map((m, i) => { const c = S.spawnCreature(m === 'snowwolf' ? 'snowwolf' : 'wolf', p.x + 6 + i, p.z + 4, { model: m, raid: true }); c.state = 'chase'; c.warned = true; return c; });
-      window.__bear = S.spawnCreature('bear', p.x - 30, p.z - 30);
+      window.__bear = S.spawnCreature('goat', p.x - 30, p.z - 30);   // a kind that is still hand-built
     });
     let bit = false; for (let i = 0; i < 40 && !bit; i++) { await wait(100); bit = await ev(() => window.__w.some(c => c.state === 'wind')); }
     const mid = await ev(() => window.__w.map(c => ({ m: c.model.gltf || null, clip: c.model.mixer ? c.model.mixer._actions.filter(a => a.isRunning()).map(a => a.getClip().name).join('+') : '' })));
@@ -93,7 +93,7 @@ try {
   }, r => ev(rr => {
     const S = window.__stranded, left = window.__w.filter(c => S.R.creatures.includes(c)).length, bear = !window.__bear.model.gltf && window.__bear.model.legs.length === 4;
     const models = rr.mid.every(m => m.m), fur = S.inv('fur') - rr.loot0;
-    return { ok: models && rr.bit && rr.falling === 3 && left === 0 && fur >= 4 && bear, info: `${rr.mid.map(m => (m.m || 'hand-built') + ':' + m.clip).join(', ')}; bite ${rr.bit}; ${rr.falling} falling, ${left} left, +${fur} fur; bear ${bear ? 'hand-built' : 'WRONG'}` };
+    return { ok: models && rr.bit && rr.falling === 3 && left === 0 && fur >= 4 && bear, info: `${rr.mid.map(m => (m.m || 'hand-built') + ':' + m.clip).join(', ')}; bite ${rr.bit}; ${rr.falling} falling, ${left} left, +${fur} fur; goat ${bear ? 'hand-built' : 'WRONG'}` };
   }, r));
 
   // step B: deer come as does and stags, the fox (and white arctic fox) is new, Scout is a Shiba
@@ -221,6 +221,47 @@ try {
   }, r => ({
     ok: r.torch[0] && !r.torch[1] && r.lantern[0] && r.lantern[1] && r.light.crystal && r.light.on && r.light.color === '7fdcff',
     info: `torch: wolf flees ${r.torch[0]}, snow wolf flees ${r.torch[1]}; lantern: ${r.lantern[0]}, ${r.lantern[1]}; blue light ${r.light.on && r.light.color === '7fdcff'}`
+  }));
+
+  // the bears: the animated bear, Grizzle and Frostclaw; the bosses' wind-up plays Roar (then
+  // a galloping charge) or, for Frostclaw's jump, Slam
+  await step('bears and boss moves', async () => {
+    const clips = () => ev(() => window.__b.map(c => c.model.mixer ? c.model.mixer._actions.filter(a => a.isRunning() && a.getEffectiveWeight() > 0.5).map(a => a.getClip().name).join('+') : 'HAND-BUILT'));
+    await ev(() => {
+      const S = window.__stranded, p = S.G.p; S.clearCreatures(); window.__home = [p.x, p.z];
+      p.x = 66; p.z = -130; p.y = S.groundAt(p.x, p.z);
+      window.__b = [S.spawnCreature('bear', p.x + 10, p.z - 10), S.spawnCreature('grizzle', p.x, p.z - 14), S.spawnCreature('frostclaw', p.x - 6, p.z - 8)];
+      for (const c of window.__b) { c.state = 'idle'; c.st = 99; c.tx = null; c.def = Object.assign({}, c.def, { sense: 0 }); }
+    });
+    await wait(600);
+    const files = await ev(() => window.__b.map(c => c.model.file || 'HAND-BUILT').join('/'));
+    await ev(() => { const [, g, f] = window.__b; g.state = 'tele'; g.st = 0.95; g.mode = 'charge'; f.state = 'tele'; f.st = 0.95; f.mode = 'slam'; });
+    await wait(400); const tele = await clips();
+    await page.waitForFunction(() => window.__b[1].state === 'charge', { timeout: 8000, polling: 50 }).catch(() => { });
+    await wait(150); const after = await clips();
+    const states = await ev(() => window.__b.map(c => c.state).join('/'));
+    await ev(() => { const S = window.__stranded, p = S.G.p; S.clearCreatures(); p.x = window.__home[0]; p.z = window.__home[1]; p.y = S.groundAt(p.x, p.z); });
+    return { files, tele, after, states };
+  }, r => ({
+    ok: r.files === 'Bear/Grizzle/Frostclaw' && /Roar/.test(r.tele[1]) && /Slam/.test(r.tele[2]) && /Gallop/.test(r.after[1]),
+    info: `${r.files}; wind-up: Grizzle ${r.tele[1]}, Frostclaw ${r.tele[2]}; then Grizzle ${r.after[1]}, Frostclaw ${r.after[2]} (${r.states})`
+  }));
+
+  // the credits: an About button at the bottom of the pause menu's settings
+  await step('about and credits', async () => {
+    await ev(() => window.__stranded.openPanel('pause'));
+    await wait(500);
+    const r = await ev(() => {
+      const b = document.querySelector('[data-a="about"]'); if (!b) return { button: false };
+      b.click(); const box = document.querySelector('.about'), text = box ? box.textContent : '';
+      b.click(); const closed = !document.querySelector('.about');
+      return { button: true, open: !!window.__stranded.R.panel, text, closed };
+    });
+    await ev(() => window.__stranded.closePanel && window.__stranded.closePanel());
+    return r;
+  }, r => ({
+    ok: r.button && r.open && /Quaternius/.test(r.text) && /Black bear/.test(r.text) && /CC BY 3\.0/.test(r.text) && r.closed,
+    info: r.button ? `About shows the credits ${/CC BY 3\.0/.test(r.text)}, panel still open ${r.open}, closes again ${r.closed}` : 'no About button'
   }));
 
   // rarer finds: about half the small finds are not there (hidden, cannot be picked, never

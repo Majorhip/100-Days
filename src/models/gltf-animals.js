@@ -32,8 +32,13 @@ import donkeyUrl from '../../assets/animals/game/Donkey.glb?url';
 import alpacaUrl from '../../assets/animals/game/Alpaca.glb?url';
 import sharkUrl from '../../assets/animals/game/Shark.glb?url';
 import fishUrl from '../../assets/animals/game/Fish.glb?url';
+// the bears: 'Black bear' by Poly by Google (CC BY 3.0), rigged, animated and retextured here
+// (tools/animals/rig-bear.mjs, docs/animals/bears/README.md)
+import bearUrl from '../../assets/animals/game/Bear.glb?url';
+import grizzleUrl from '../../assets/animals/game/Grizzle.glb?url';
+import frostclawUrl from '../../assets/animals/game/Frostclaw.glb?url';
 
-const FILES = { Wolf: wolfUrl, Fox: foxUrl, ShibaInu: shibaUrl, Deer: deerUrl, Stag: stagUrl, Pig: pigUrl, Snake: snakeUrl, Crab: crabUrl, Spider: spiderUrl, Frog: frogUrl, Bat: batUrl, Horse: horseUrl, Horse_White: horseWhiteUrl, Donkey: donkeyUrl, Alpaca: alpacaUrl, Shark: sharkUrl, Fish: fishUrl };
+const FILES = { Wolf: wolfUrl, Fox: foxUrl, ShibaInu: shibaUrl, Deer: deerUrl, Stag: stagUrl, Pig: pigUrl, Snake: snakeUrl, Crab: crabUrl, Spider: spiderUrl, Frog: frogUrl, Bat: batUrl, Horse: horseUrl, Horse_White: horseWhiteUrl, Donkey: donkeyUrl, Alpaca: alpacaUrl, Shark: sharkUrl, Fish: fishUrl, Bear: bearUrl, Grizzle: grizzleUrl, Frostclaw: frostclawUrl };
 
 /**
  * Which model each creature (or model name in spawnCreature's o.model) uses.
@@ -71,7 +76,11 @@ const KINDS = {
   donkey: { file: 'Donkey', height: 1.55, scale: 1, colors: {} },
   alpaca: { file: 'Alpaca', height: 1.85, scale: 1, colors: {} },
   shark: { file: 'Shark', height: 1.1, scale: 1, colors: {} },
-  fish: { file: 'Fish', height: 0.14, scale: 1, colors: {} }
+  fish: { file: 'Fish', height: 0.14, scale: 1, colors: {} },
+  // the bears. Frostclaw's height includes the ice on its back, so its body matches the others
+  bear: { file: 'Bear', height: 1.5, scale: 1, colors: {} },
+  grizzle: { file: 'Grizzle', height: 1.5, scale: 1.55, colors: { Eyes: { c: 0xff9a2a, glow: true } } },
+  frostclaw: { file: 'Frostclaw', height: 1.82, scale: 1.7, colors: { Eyes: { c: 0x39d0ff, glow: true }, Ice: { c: 0x8fdcff, glow: true } } }
 };
 // measured by tools/animals/measure.mjs at height 'at' (speeds scale with the model's height);
 // runAt: the speed from which it gallops; attack: the clip used for attacks
@@ -94,7 +103,11 @@ const CLIP_INFO = {
   Alpaca: { at: 1.85, walk: 0.73, run: 3.37, bite: 0.3, runAt: 2.0, attack: 'Attack_Kick' },
   // swimming: Swim (as Idle and Walk), Swim_Fast (as Gallop); speeds by eye
   Shark: { at: 1.1, walk: 3, run: 6, bite: 0.25, runAt: 6.5, attack: 'Attack' },
-  Fish: { at: 0.14, walk: 1, run: 1, bite: 0, runAt: 99, attack: 'Attack', noSync: true }
+  Fish: { at: 0.14, walk: 1, run: 1, bite: 0, runAt: 99, attack: 'Attack', noSync: true },
+  // the bears (measured with feet Toe[LR]$); extra clips Roar and Slam for the bosses' specials
+  Bear: { at: 1.5, walk: 0.92, run: 3.58, bite: 0.517, runAt: 2.4, attack: 'Attack' },
+  Grizzle: { at: 1.5, walk: 0.92, run: 3.58, bite: 0.517, runAt: 2.4, attack: 'Attack' },
+  Frostclaw: { at: 1.82, walk: 0.92, run: 3.58, bite: 0.517, runAt: 2.4, attack: 'Attack' }
 };
 
 const MODELS = {};   // file -> { scene, clips: {name: AnimationClip}, fit: {s, x, y, z} }
@@ -165,7 +178,7 @@ function gltfAnimal(kind) {
 
   const mixer = new THREE.AnimationMixer(inner), act = {};
   for (const n in src.clips) act[n] = mixer.clipAction(src.clips[n]);
-  for (const n of [ATTACK, 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right']) if (act[n]) { act[n].setLoop(THREE.LoopOnce, 1); act[n].clampWhenFinished = true; }
+  for (const n of [ATTACK, 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Roar', 'Slam']) if (act[n]) { act[n].setLoop(THREE.LoopOnce, 1); act[n].clampWhenFinished = true; }
   let cur = null, lock = 0, lastFlash = 0, pause = 0, flyT = Math.random() * 9;
   const play = (name, fade = 0.2, at = 0) => {
     const a = act[name] || (name === 'Gallop' && act.Walk) || (name === 'Idle_HitReact_Right' && act.Idle_HitReact_Left) || act.Idle; if (a === cur) return a;
@@ -190,6 +203,16 @@ function gltfAnimal(kind) {
         // clip where its head reaches furthest forward exactly then
         if (cur !== act[ATTACK]) { play(ATTACK, 0.1, Math.max(0, info.bite - Math.max(0, c.st))); lock = 0; }
         lock = Math.max(lock, act[ATTACK] ? act[ATTACK].getClip().duration - act[ATTACK].time : 0);
+      } else if (c.state === 'tele' && (act.Roar || act.Slam)) {
+        // a boss winds up its special (0.95 s). Slam: rear up and crash down, landing when the
+        // wind-up runs out (when the game shakes the ground); otherwise roar, then charge
+        const name = c.mode === 'slam' && act.Slam ? 'Slam' : 'Roar';
+        if (cur !== act[name]) play(name, 0.12, name === 'Slam' ? Math.max(0, 0.95 - Math.max(0, c.st)) : 0);
+        lock = 0;
+      } else if (c.state === 'charge' && act.Gallop) {
+        play('Gallop', 0.12).setEffectiveTimeScale(Math.min(3.5, Math.max(1, c.moving / k.scale * speedK / info.run)));
+      } else if (c.state === 'stun' && (cur === act.Slam || cur === act.Roar) && cur.time < cur.getClip().duration - 0.1) {
+        // let the slam finish stepping back (the game wobbles a dizzy boss as before)
       } else if (c.flash > lastFlash + 0.05 && c.moving < info.runAt && lock <= 0) {
         play(Math.random() < 0.5 ? 'Idle_HitReact_Left' : 'Idle_HitReact_Right', 0.08); lock = 0.4;
       } else if (lock <= 0) {

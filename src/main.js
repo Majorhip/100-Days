@@ -6,6 +6,7 @@
 import './input/touch.js';   // the last part of the chain: loading it runs the whole game in original order
 import * as ALL from './debug-exports.js';
 import './ui/savefile.js';   // Export / Import save (added after the migration; runs after the game has loaded)
+import './ui/about.js';   // the About button in the settings: credits (added after the migration)
 import './models/gltf-load.js';   // animated animal models (added after the migration): start parsing them now
 
 // Read-only view for the parity checks in tests/golden. A module namespace cannot be

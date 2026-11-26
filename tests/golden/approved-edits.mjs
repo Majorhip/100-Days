@@ -117,8 +117,12 @@ export const EDITS = [
     why: "Animal models: play the animated model for each creature's state after it has moved (walk and gallop speed matched to how fast it goes; the bite timed to land when the game deals the damage)."
   },
   {
-    kind: 'replace', was: "Made for Caspar · Built with three.js · '", now: "Made for Caspar · Built with three.js · Animals by Quaternius · '",
-    why: 'Title screen credit for the animal models. They are CC0 (no credit required), but Quaternius deserves the thanks.'
+    kind: 'module', file: 'src/ui/about.js', globals: [],
+    why: 'About: the credits (Quaternius\'s animals, CC0; the bears, made from "Black bear" by Poly by Google, CC BY 3.0, which requires a credit with a link and a note that it was changed). Shown under an About button in the settings; handles clicks on its own button, like src/ui/savefile.js.'
+  },
+  {
+    kind: 'replace', was: "'>Click and drag to look</option></select></label>') + '</div>';", now: "'>Click and drag to look</option></select></label>') + '<button data-a=\"about\">ℹ️ About</button></div>';",
+    why: 'Settings (pause menu and the title screen\'s How to play box): an About button that shows the credits (src/ui/about.js).'
   },
   // ---- after the migration: snow wolves fear only crystal light (the Crystal Lantern) ----
   {

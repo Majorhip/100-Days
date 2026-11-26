@@ -22,7 +22,7 @@ function settingsHTML() {
     '<label>🔊 Volume <input type="range" min="0" max="1" step="0.05" value="' + R.vol + '" data-a="set" data-id="vol"></label>' +
     '<label>🎵 Music <input type="checkbox" ' + (R.music ? 'checked' : '') + ' data-a="set" data-id="music"></label>' +
     '<label>🖥️ Graphics <select data-a="set" data-id="quality">' + [1, 2, 3, 4].map(q => '<option value="' + q + '" ' + (R.quality === q ? 'selected' : '') + '>' + GFXQ[q].n + '</option>').join('') + '</select></label>' +
-    (R.touch ? '' : '<label>👀 Look mode <select data-a="set" data-id="look"><option value="lock" ' + (!R.dragLook ? 'selected' : '') + '>Mouse look (click to lock)</option><option value="drag" ' + (R.dragLook ? 'selected' : '') + '>Click and drag to look</option></select></label>') + '</div>';
+    (R.touch ? '' : '<label>👀 Look mode <select data-a="set" data-id="look"><option value="lock" ' + (!R.dragLook ? 'selected' : '') + '>Mouse look (click to lock)</option><option value="drag" ' + (R.dragLook ? 'selected' : '') + '>Click and drag to look</option></select></label>') + '<button data-a="about">ℹ️ About</button></div>';
 }
 function bindSetting(el) {
   const id = el.dataset.id; el.onclick = e => e.stopPropagation();

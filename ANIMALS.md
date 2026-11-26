@@ -19,7 +19,7 @@ The next stage after the migration (MIGRATION.md §8, item 2), widened by Caspar
 | Shark, Fish | Swim, Swim_Fast, Swim_Bite | ✅ |
 | Bunny | Wave, Punch, Yes/No… | ❌ a standing cartoon character, not an animal. **Dropped**: the rabbit and hare keep their box models. |
 
-**No animated match** for the bear (and the Grizzle and Frostclaw bosses), the goat, or the scorpion (and the Dune King). They keep their hand-built models.
+**No animated match** (until the bears were made, see 4a) for the bear (and the Grizzle and Frostclaw bosses), the goat, or the scorpion (and the Dune King). They keep their hand-built models.
 
 Two notes from the inspection:
 - Every Ultimate-pack model stores each animation twice (`Walk` and `AnimalArmature|Walk`). Dropping the copies and the unused clips roughly halves the size.
@@ -79,7 +79,7 @@ All numbers (health, speed, damage) will be set in `src/data/creatures.js` next 
 
 ## 4a. Changes along the way
 - **Snow wolves** ignore the hand-held torch; only the new **Crystal Lantern** (2 Glow Crystals, 1 iron, 1 rope at the Workbench) scares them. Campfires and torch posts still do.
-- **Bears:** the free packs had no animated bear. The user sent a static one ("Black bear" by Poly by Google, CC BY 3.0, in `assets/animals/raw/BlackBear/`). It has to serve the Grizzle and Frostclaw too, so a separate session is rigging and animating it on its own branch (`bear-models`). The bears keep their box models until that is done.
+- **Bears:** the free packs had no animated bear. The user sent a static one ("Black bear" by Poly by Google, CC BY 3.0, in `assets/animals/raw/BlackBear/`). It has to serve the Grizzle and Frostclaw too, so it was rigged and animated in Node (`tools/animals/rig-bear.mjs`; see `docs/animals/bears/README.md`), with a dark grizzled Grizzle (orange eyes, a scar) and a white Frostclaw with ice shards. **Done:** all three are in the game. The bosses roar before a charge (and gallop into it), and Frostclaw rears up and crashes down for its jump. The title screen carries the CC BY credit. Screenshots: `docs/animals/bosses/`.
 
 ## 5. Credits
 
