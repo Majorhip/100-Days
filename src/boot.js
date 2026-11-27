@@ -48,6 +48,7 @@ import { advanceTime } from './world/days.js';
 import { initTouch, goFullscreen, updateTouch } from './input/touch.js';
 import { updateSea } from './creatures/sea.js';   // added after the migration: the shark and the lake fish
 import { loadStep, warmUp } from './ui/loading.js';   // added after the migration: start-up with a progress bar
+import { listBackups, clearBackups, markBroken, isBroken, restoreBackup, nudgeDue } from './backups.js';   // added after the migration: backup saves
 
 // @moved-from: original
 
@@ -88,18 +89,35 @@ async function initWorld() {
 }
 
 /* ---------- title screen + intro ---------- */
+/** the main save's text as stored (or this session's copy) */
+function mainSaveText() { let raw = null; try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { } return raw || R.memSave || null; }
 function showTitle() {
-  const s = readSave(), t = $('title');
+  const raw = mainSaveText(), s = isBroken(raw) ? null : readSave(), t = $('title');
+  // the save is missing, unreadable or failed to load: offer the newest backup that reads
+  const bak = s ? null : listBackups()[0];
   t.innerHTML = '<div class="logo"><div class="l1">STRANDED</div><div class="l2">100 DAYS ON KESTREL ISLAND</div></div>' +
     '<div class="menu">' + (s ? '<button class="big" id="tContinue">▶ Continue <small>— Day ' + s.day + ', Level ' + s.p.level + '</small></button>' : '') +
+    (bak ? '<button class="big" id="tBackup">⏪ Load your backup <small>— Day ' + bak.day + ', Level ' + bak.level + '</small></button>' : '') +
     '<button class="' + (s ? '' : 'big') + '" id="tNew">🏝️ New Adventure</button><button id="tHelp">❓ How to play</button><button id="tLoad">📂 Load a save file</button></div>' +
     '<div id="tExtra"></div><div class="credit">Made for Caspar · Built with three.js · ' + (R.touch ? 'Touch controls on · play with your phone sideways' : 'Best with a mouse and keyboard') + '</div>';
   t.style.display = '';
-  if (s) $('tContinue').onclick = () => { audioInit(); goFullscreen(); setG(mergeSave(s)); applyWorldState(); startGame(false); };
+  if (s) $('tContinue').onclick = () => {
+    audioInit(); goFullscreen();
+    try { setG(mergeSave(s)); applyWorldState(); startGame(false); }
+    catch (e) {   // a save that reads but won't load: start again from the title, which offers the backup
+      console.warn('This save could not be loaded.', e); markBroken(raw); setG(newGameState());   // (nothing draws the half-loaded save meanwhile)
+      alert('Sorry, this saved game could not be loaded.' + (listBackups().length ? ' You can load your backup from the day before instead.' : '')); location.reload();
+    }
+  };
+  if (bak) $('tBackup').onclick = () => {
+    audioInit();
+    if (!confirm((raw ? 'Your saved game could not be loaded. ' : '') + 'Load your backup from Day ' + bak.day + '?')) return;
+    restoreBackup(bak, raw); R.memSave = bak.raw; showTitle();
+  };
   $('tNew').onclick = () => {
     audioInit(); goFullscreen();
-    if (s && !confirm('Start a brand new adventure? Your saved game will be replaced.')) return;
-    if (s) { try { localStorage.removeItem(SAVE_KEY); } catch (e) { } location.reload(); return; }
+    if ((s || bak) && !confirm('Start a brand new adventure? Your saved game will be replaced.')) return;
+    if (s || bak) { try { localStorage.removeItem(SAVE_KEY); } catch (e) { } clearBackups(); location.reload(); return; }
     playIntro(0);
   };
   $('tHelp').onclick = () => { audioInit(); $('tExtra').innerHTML = '<div class="tbox">' + helpHTML() + settingsHTML() + '</div>'; bindSettingsInputs($('tExtra')); };
@@ -140,6 +158,7 @@ function slowTick() {
   if (G.p.food < 20) tipOnce('hungry', 'You are getting hungry! Press <b>F</b> to eat. Cooked food is best.');
   if (G.p.water < 20) tipOnce('thirsty', 'You are thirsty! Look at a lake or the sea and press <b>E</b> to drink.');
   if (R.t - R.lastSave > 60 && !R.panel && !R.cinematic) saveGame();
+  if (nudgeDue(G) && !R.panel && !R.sleeping && !R.cinematic) { G.flags.exportNudge = G.day; toast('📤 Day ' + G.day + '! A good moment to keep a copy of your game: pause menu → <b>Export save</b>.', 'tip', 10000); }
   if (R.pendingEnding && !R.panel && !R.sleeping && !R.cinematic) { const k = R.pendingEnding; R.pendingEnding = null; showEnding(k); }
 }
 

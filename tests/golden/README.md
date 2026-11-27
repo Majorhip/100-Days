@@ -342,3 +342,36 @@ share the material "Main".
   Frostclaw, look the same by eye, except that the bat now flaps properly.
 - **Start-up:** time to the title screen went from 10.5 s to 9.6 s on this PC. The models load in the
   background, so the world and shader warm-up still take most of the start-up time.
+
+## Step 3: backup saves (27 Nov 2026)
+**How backups are kept:** `src/backups.js`.
+- **Each new day:** when a save starts a new day, `saveGame()` first keeps the last save of the
+  day before as a backup.
+- **Three kept:** `stranded100_v3_bak1` (newest), `_bak2` and `_bak3`.
+- **The main save key is unchanged.**
+
+**Recovering a game:**
+- **The title offers the newest backup** that reads (⏪ Load your backup), whenever:
+  - there is no main save that reads, or
+  - Continue failed to load it in this browser tab.
+- **A save that reads but won't load:** Continue catches the error, says so and reloads. The
+  title then offers the backup. The failed save's text is remembered in `sessionStorage`, so
+  only that save is treated as broken.
+- **Loading a backup asks first.** The save it replaces is kept as `stranded100_v3_broken`.
+- **New Adventure:** after confirming, it clears the backups too.
+
+**The Export reminder:** on every 10th day, a tip says to Export a copy. It shows once per day,
+and only when no panel is open, nobody is asleep and no cutscene is playing.
+
+**Check:** `tests/golden/backups.mjs` (part of `npm run parity`, 6 steps):
+1. Days 11–14 keep 10, then 11,10, then 12,11,10, then 13,12,11; a same-day save changes nothing.
+2. The Day 20 tip shows.
+3. An unreadable save: the title offers the Day 14 backup, asks first, and Continue then loads
+   Day 14. The broken save is kept aside.
+4. A save whose structures can't be rebuilt: the message shows, and the title offers the backup.
+5. New Adventure clears the backups.
+6. No page errors.
+
+**Fixed along the way:** `src/debug-exports.js` was missing `player/climate.js` and
+`world/days.js`, which step 1 added, so `window.__stranded.advanceTime` was missing. Nothing had
+used it until this check.

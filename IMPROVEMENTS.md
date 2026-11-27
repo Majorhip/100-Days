@@ -104,6 +104,9 @@ The single-file build stores them as text, which adds a third, so they make up a
 
 ## Step 3 — Backup saves (item 3)
 
+**Status: done 27 Nov 2026.** `src/backups.js`; checked by `tests/golden/backups.mjs`. See the
+last section of `tests/golden/README.md`.
+
 **Problem:** a 100-day game lives in one browser save.
 
 **Plan:**

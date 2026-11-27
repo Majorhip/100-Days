@@ -35,6 +35,7 @@ if (!quick) {
   ok = run('touch', 'touchcheck.mjs', [target]) && ok;
   ok = run('round trip', 'roundtrip.mjs', [target]) && ok;
   ok = run('save files', 'savefile.mjs', [target]) && ok;
+  ok = run('backups', 'backups.mjs', [target]) && ok;
 }
 ok = run('smoke', '../smoke.mjs', quick ? [target, '--quick'] : [target]) && ok;
 if (argv.includes('--shots') && !quick) ok = run('screenshots', 'screenshots.mjs', [target]) && ok;

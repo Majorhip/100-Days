@@ -107,6 +107,8 @@ ledger (`tests/golden/approved-edits.mjs`). That part is retired.
 - **Saves:** they store only changed nodes (`nodeState`), and the format is version 3.
   - The save key `stranded100_v3` must never change, or Caspar's save disappears.
   - Every `localStorage` call is wrapped in try/catch.
+  - Backups (`src/backups.js`): each new day keeps the day before as `stranded100_v3_bak1`–`3`.
+    The title offers the newest one if the save can't be loaded.
 - **Rules code stays pure:** `src/game/` and `src/data/` never import three.js, touch the page or
   use `R`. The build check enforces it.
 - **Touch controls:** the phone and tablet code (`src/input/touch.js`) stays in the build, and

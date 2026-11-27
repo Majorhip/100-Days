@@ -12,6 +12,7 @@ import { rebuildStructures } from './build/structures.js';
 import { CHESTS } from './story/props.js';
 import { refreshPack, spawnPackNote, placeRay } from './story/ray.js';
 import { fogArr, fogSave } from './ui/map.js';
+import { keepBackup } from './backups.js';   // added after the migration: backup saves
 
 // @moved-from: original #settings
 function saveSettings() { try { localStorage.setItem(SAVE_KEY + '_set', JSON.stringify({ sens: R.sens, vol: R.vol, music: R.music, quality: R.quality, drag: R.dragLook, gfxV: 2, gfxManual: !!R.gfxManual })); } catch (e) { } }
@@ -26,7 +27,7 @@ function saveGame() {
   fogSave(); G.p.y = Math.max(G.p.y, groundAt(G.p.x, G.p.z));
   const json = JSON.stringify(G, (k, v) => k[0] === '_' ? undefined : v);
   R.memSave = json;
-  try { localStorage.setItem(SAVE_KEY, json); } catch (e) { }
+  try { keepBackup(localStorage.getItem(SAVE_KEY), G.day); localStorage.setItem(SAVE_KEY, json); } catch (e) { }
   R.lastSave = R.t;
 }
 function readSave() {
