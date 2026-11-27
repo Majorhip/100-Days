@@ -171,6 +171,10 @@ level is never changed.
 
 ## Step 6 — Animal journal (item 7)
 
+**Status: done 27 Nov 2026.** It's a new **🐾 Animals** tab in the existing journal (J), not a new
+panel. There are three badges instead of one per biome and one per rare animal: Keen Eye (10
+kinds), Lucky Spot (a rare one) and Naturalist (every animal), which keeps the Badges tab short.
+
 **Plan:**
 1. **A journal page** in the pause menu, with one card per kind of animal.
    - An animal Caspar hasn't met is a dark silhouette with "???".

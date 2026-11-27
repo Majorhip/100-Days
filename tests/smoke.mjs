@@ -305,6 +305,19 @@ try {
   }), r => ({ ok: r.easy < r.normal * 0.5 && r.hard > r.normal && r.back === r.normal && r.same && r.capEasy === 2 && r.capNormal === 1 && r.hurtNormal === 10 && r.hurtHard === 13,
     info: `missing finds: easy ${r.easy}, normal ${r.normal}, hard ${r.hard}, back to ${r.back} (same ones ${r.same}); deer cap of 2: easy ${r.capEasy}, normal ${r.capNormal}; a 10 bite: normal ${r.hurtNormal}, hard ${r.hurtHard}` }));
 
+  // the animal journal (step 6): a deer in front is written in; a wolf behind is not
+  await step('animal journal', async () => {
+    await ev(() => {
+      const S = window.__stranded, { G } = S, p = G.p; S.clearCreatures(); delete G.seen;
+      const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw);
+      S.spawnCreature('deer', p.x + fx * 12, p.z + fz * 12); S.spawnCreature('wolf', p.x - fx * 12, p.z - fz * 12);
+      S.slowTick();
+      S.openPanel('journal'); S.R.jTab = 'animals'; S.renderPanel();
+    });
+    await wait(600);
+    return ev(() => { const S = window.__stranded, html = document.getElementById('panel').textContent, toast = document.getElementById('toasts').textContent; S.closePanel(); S.clearCreatures(); return { seen: Object.keys(S.G.seen || {}).join(), day: (S.G.seen || {}).deer === S.G.day, card: /Deer/.test(html) && html.includes('???'), count: (html.match(/spotted: (\d+ \/ \d+)/) || [])[1], toast: /New animal: Deer/.test(toast) }; });
+  }, r => ({ ok: r.seen === 'deer' && r.day && r.card && r.toast && r.count === '1 / 21', info: `spotted: ${r.seen} (wolf behind not), card shown ${r.card}, tip ${r.toast}, journal ${r.count}` }));
+
   await step('a storm', async () => {
     await ev(() => { const { G } = window.__stranded; G.weather = 'storm'; G.weatherHrs = 99; G.hour = 14; });
     await wait(6000);

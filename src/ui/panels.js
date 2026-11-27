@@ -26,6 +26,7 @@ import { renderMap } from './map.js';
 import { helpHTML, settingsHTML, bindSetting } from './settings.js';
 import { saveGame } from '../save.js';
 import { tx, goFullscreen } from '../input/touch.js';
+import { animalsHTML } from '../creatures/sightings.js';   // added after the migration: the animal journal
 
 // @moved-from: original
 /* ---------- panels ---------- */
@@ -119,8 +120,9 @@ function renderPanel() {
     h += '<div class="col"><h3>In the chest <button class="mini" data-a="takeall">⬅ Take all</button></h3><div class="grid">' + (stored.map(id => itemSlot(id, ci[id], 'get')).join('') || '<p class="dim">Empty</p>') + '</div></div></div><p class="foot">Click an item to move it. Things in chests are safe if you black out.</p>';
   } else if (P === 'journal') {
     const tab = R.jTab || 'notes';
-    h += closeBtn + '<h2>📓 Sam\'s Journal</h2><div class="tabs">' + [['notes', '📜 Notes'], ['badges', '🏅 Badges'], ['stats', '📊 Stats'], ['help', '❓ How to play']].map(t => '<button class="tab ' + (tab === t[0] ? 'sel' : '') + '" data-a="jtab" data-id="' + t[0] + '">' + t[1] + '</button>').join('') + '</div><div class="jbody">';
+    h += closeBtn + '<h2>📓 Sam\'s Journal</h2><div class="tabs">' + [['notes', '📜 Notes'], ['animals', '🐾 Animals'], ['badges', '🏅 Badges'], ['stats', '📊 Stats'], ['help', '❓ How to play']].map(t => '<button class="tab ' + (tab === t[0] ? 'sel' : '') + '" data-a="jtab" data-id="' + t[0] + '">' + t[1] + '</button>').join('') + '</div><div class="jbody">';
     if (tab === 'notes') h += G.notes.length ? G.notes.map(id => '<div class="noteln" data-a="note" data-id="' + id + '">📜 ' + NOTES[id].t + '</div>').join('') : '<p class="dim">No notes found yet. Explore the island!</p>';
+    if (tab === 'animals') h += animalsHTML();
     if (tab === 'badges') { h += '<div class="badges">' + Object.keys(BADGES).map(k => { const b = BADGES[k], got = G.badges[k]; return '<div class="badge ' + (got ? 'got' : '') + '"><span>' + (got ? b[0] : '🔒') + '</span><b>' + b[1] + '</b><small>' + b[2] + '</small></div>'; }).join('') + '</div>'; }
     if (tab === 'stats') { const st = G.stats; h += '<table class="stats">' + [['📅 Day', G.day + ' / 100'], ['⭐ Level', p.level], ['🗺️ Places found', Object.keys(G.found).length + ' / ' + LANDMARKS.length], ['💰 Treasure chests', st.chests + ' / 10'], ['🌳 Trees chopped', st.wood], ['⚔️ Creatures defeated', st.kills], ['👑 Bosses defeated', st.bosses + ' / 3'], ['🐟 Fish caught', st.fish], ['🔨 Things built', st.built], ['🛠️ Things crafted', st.crafted], ['👣 Distance walked', (st.dist / 1000).toFixed(1) + ' km'], ['💫 Blackouts', st.blackouts]].map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') + '</table>'; }
     if (tab === 'help') h += helpHTML();

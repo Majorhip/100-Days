@@ -51,6 +51,7 @@ import { loadStep, warmUp } from './ui/loading.js';   // added after the migrati
 import { listBackups, clearBackups, markBroken, isBroken, restoreBackup, nudgeDue } from './backups.js';   // added after the migration: backup saves
 import { DIFFICULTY, levelOf, diffOf } from './data/difficulty.js';   // added after the migration: difficulty
 import { setFinds } from './world/rarity.js';
+import { checkSightings } from './creatures/sightings.js';   // added after the migration: the animal journal
 
 // @moved-from: original
 
@@ -168,7 +169,7 @@ function slowTick() {
     if (b === 'desert') tipOnce('desert', 'The Dust Flats. The sun makes you thirsty twice as fast. Cactus fruit is food <i>and</i> water!');
   }
   R.stepKind = p.y < -0.2 ? 'water' : groundAt(p.x, p.z) > heightAt(p.x, p.z) + 0.08 ? 'wood' : b === 'snow' ? 'snow' : b === 'desert' ? 'sand' : 'grass';
-  updateSpawner(); checkLandmarks(); updateQuests(); revealFog(); scoutHungerCheck();
+  updateSpawner(); checkLandmarks(); updateQuests(); revealFog(); scoutHungerCheck(); checkSightings();
   if (G.day === 1 && G.hour > 17.5 && G.hour < 19) tipOnce('dusk', 'The sun is setting! Build a <b>Campfire</b> and a <b>Lean-to Shelter</b> (press <b>B</b>) before dark.');
   if (G.p.food < 20) tipOnce('hungry', 'You are getting hungry! Press <b>F</b> to eat. Cooked food is best.');
   if (G.p.water < 20) tipOnce('thirsty', 'You are thirsty! Look at a lake or the sea and press <b>E</b> to drink.');

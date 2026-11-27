@@ -429,3 +429,24 @@ used it until this check.
 **Check:** the smoke step "auto graphics" fakes slow frames three times. The level goes from High
 to Medium to Low and stays at Low, and the tip says Low. A level picked by hand is left alone, and
 Settings offers Auto.
+
+## Step 6: the animal journal (27 Nov 2026)
+**Spotting:** `src/creatures/sightings.js`.
+- **When an animal counts:** once a second, any living animal within 32 m and roughly in front of
+  the player is spotted (within about 57° of straight ahead, or within 3 m).
+- **The first time:** `G.seen[type]` records the day, and a tip says "New animal: Fox! It's in
+  your journal (J)."
+- **Saves:** `G.seen` only appears in a save once something has been spotted.
+
+**The Animals tab:** J → 🐾 Animals has one card per kind (21 of them).
+- **Spotted:** its icon, its name and the day it was spotted. Rare ones say ✨ Rare, bosses say
+  👑 Boss.
+- **Not spotted yet:** "???". Bosses say "A legend of the island".
+
+**Badges:**
+- 🔭 Keen Eye: spot 10 kinds.
+- ✨ Lucky Spot: spot a fox, boar, horse, donkey, alpaca or shark.
+- 🐾 Naturalist: spot every animal, not counting the bosses.
+
+**Check:** the smoke step "animal journal" puts a deer 12 m in front and a wolf 12 m behind. Only
+the deer is spotted, the tip shows, and the journal shows the Deer card, "???" cards and "1 / 21".
