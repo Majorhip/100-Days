@@ -21,7 +21,7 @@ import { join, relative } from 'node:path';
 import { ROOT, ORIGINAL } from './browser.mjs';
 
 /** browser globals the code may use that the original script never did */
-const EXTRA_GLOBALS = ['window', 'Blob', 'URL', 'FileReader', 'alert', 'Date', 'Promise', 'Array', 'isFinite'];
+const EXTRA_GLOBALS = ['window', 'Blob', 'URL', 'FileReader', 'alert', 'Date', 'Promise', 'Array', 'isFinite', 'Int8Array', 'Int16Array', 'Uint16Array'];
 
 const built = process.argv[2] || join(ROOT, 'dist', 'index.html');
 const A = readFileSync(ORIGINAL, 'utf8');

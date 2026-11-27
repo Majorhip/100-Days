@@ -1,7 +1,7 @@
 // Animated animal models (glTF, by Quaternius, CC0), added after the migration (ANIMALS.md).
 //
-// The models are embedded in the game file (assets/animals/game/*.glb, made by
-// tools/animals/build.mjs). loadAnimalModels() parses them once, while the title screen is up;
+// The models are embedded in the game file, compressed (assets/animals/packed/*.glb, packed by
+// tools/animals/pack.mjs from assets/animals/game/, made by tools/animals/build.mjs). loadAnimalModels() parses them once, while the title screen is up;
 // gltfAnimal(kind) then gives each new creature its own copy, shaped like the hand-built models
 // in src/models/animals.js ({ g, legs, head, mats, h, stride, ... }) so the creature code can
 // use either, plus anim(c, dt), which picks and plays the clip for the creature's state.
@@ -11,33 +11,34 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { SkeletonUtils } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { litMat } from '../gfx/core.js';
 import { R } from '../state.js';
 import { quadruped } from './animals.js';
 import { scorpion } from './scorpion.js';
 import { posedBox } from './posed-box.js';
-import wolfUrl from '../../assets/animals/game/Wolf.glb?url';
-import foxUrl from '../../assets/animals/game/Fox.glb?url';
-import shibaUrl from '../../assets/animals/game/ShibaInu.glb?url';
-import deerUrl from '../../assets/animals/game/Deer.glb?url';
-import stagUrl from '../../assets/animals/game/Stag.glb?url';
-import pigUrl from '../../assets/animals/game/Pig.glb?url';
-import snakeUrl from '../../assets/animals/game/Snake.glb?url';
-import crabUrl from '../../assets/animals/game/Crab.glb?url';
-import spiderUrl from '../../assets/animals/game/Spider.glb?url';
-import frogUrl from '../../assets/animals/game/Frog.glb?url';
-import batUrl from '../../assets/animals/game/Bat.glb?url';
-import horseUrl from '../../assets/animals/game/Horse.glb?url';
-import horseWhiteUrl from '../../assets/animals/game/Horse_White.glb?url';
-import donkeyUrl from '../../assets/animals/game/Donkey.glb?url';
-import alpacaUrl from '../../assets/animals/game/Alpaca.glb?url';
-import sharkUrl from '../../assets/animals/game/Shark.glb?url';
-import fishUrl from '../../assets/animals/game/Fish.glb?url';
+import wolfUrl from '../../assets/animals/packed/Wolf.glb?url';
+import foxUrl from '../../assets/animals/packed/Fox.glb?url';
+import shibaUrl from '../../assets/animals/packed/ShibaInu.glb?url';
+import deerUrl from '../../assets/animals/packed/Deer.glb?url';
+import stagUrl from '../../assets/animals/packed/Stag.glb?url';
+import pigUrl from '../../assets/animals/packed/Pig.glb?url';
+import snakeUrl from '../../assets/animals/packed/Snake.glb?url';
+import crabUrl from '../../assets/animals/packed/Crab.glb?url';
+import spiderUrl from '../../assets/animals/packed/Spider.glb?url';
+import frogUrl from '../../assets/animals/packed/Frog.glb?url';
+import batUrl from '../../assets/animals/packed/Bat.glb?url';
+import horseUrl from '../../assets/animals/packed/Horse.glb?url';
+import horseWhiteUrl from '../../assets/animals/packed/Horse_White.glb?url';
+import donkeyUrl from '../../assets/animals/packed/Donkey.glb?url';
+import alpacaUrl from '../../assets/animals/packed/Alpaca.glb?url';
+import sharkUrl from '../../assets/animals/packed/Shark.glb?url';
+import fishUrl from '../../assets/animals/packed/Fish.glb?url';
 // the bears: 'Black bear' by Poly by Google (CC BY 3.0), rigged, animated and retextured here
 // (tools/animals/rig-bear.mjs, docs/animals/bears/README.md)
-import bearUrl from '../../assets/animals/game/Bear.glb?url';
-import grizzleUrl from '../../assets/animals/game/Grizzle.glb?url';
-import frostclawUrl from '../../assets/animals/game/Frostclaw.glb?url';
+import bearUrl from '../../assets/animals/packed/Bear.glb?url';
+import grizzleUrl from '../../assets/animals/packed/Grizzle.glb?url';
+import frostclawUrl from '../../assets/animals/packed/Frostclaw.glb?url';
 
 const FILES = { Wolf: wolfUrl, Fox: foxUrl, ShibaInu: shibaUrl, Deer: deerUrl, Stag: stagUrl, Pig: pigUrl, Snake: snakeUrl, Crab: crabUrl, Spider: spiderUrl, Frog: frogUrl, Bat: batUrl, Horse: horseUrl, Horse_White: horseWhiteUrl, Donkey: donkeyUrl, Alpaca: alpacaUrl, Shark: sharkUrl, Fish: fishUrl, Bear: bearUrl, Grizzle: grizzleUrl, Frostclaw: frostclawUrl };
 
@@ -114,12 +115,30 @@ const CLIP_INFO = {
 const MODELS = {};   // file -> { scene, clips: {name: AnimationClip}, fit: {s, x, y, z} }
 let loading = null;
 
+/**
+ * The packed models store vertex data as scaled whole numbers (KHR_mesh_quantization). The GPU
+ * reads them correctly, but in r128 the CPU-side reads (getX, boneTransform: posedBox sizes the
+ * models with them) return the raw numbers. Turn them back into ordinary floats once, at load.
+ */
+const NORM = [[Int8Array, 127], [Uint8Array, 255], [Int16Array, 32767], [Uint16Array, 65535]];
+function unquantize(geo) {
+  for (const name in geo.attributes) {
+    const a = geo.attributes[name], arr = a.isInterleavedBufferAttribute ? a.data.array : a.array;
+    if (!a.normalized) continue;
+    const n = NORM.find(([T]) => arr instanceof T); if (!n) continue;
+    const out = new Float32Array(a.count * a.itemSize), get = ['getX', 'getY', 'getZ', 'getW'];
+    for (let i = 0; i < a.count; i++) for (let k = 0; k < a.itemSize; k++) out[i * a.itemSize + k] = Math.max(a[get[k]](i) / n[1], -1);
+    geo.setAttribute(name, new THREE.BufferAttribute(out, a.itemSize));
+  }
+}
+
 /** parse every embedded model; resolves when done (a model that fails is just left out) */
 function loadAnimalModels() {
   if (loading) return loading;
-  const loader = new GLTFLoader();
+  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   loading = Promise.all(Object.entries(FILES).map(([name, url]) => loader.loadAsync(url).then(gltf => {
     const scene = gltf.scene, clips = {};
+    scene.traverse(o => { if (o.isMesh) unquantize(o.geometry); });
     for (const a of gltf.animations) clips[a.name] = a;
     // size in the Idle pose (the meshes are stored tiny and sized by the skin)
     const mixer = new THREE.AnimationMixer(scene);
@@ -157,18 +176,21 @@ function gltfAnimal(kind) {
   const info = CLIP_INFO[k.file], ATTACK = info.attack, speedK = info.at / k.height;
   const inner = SkeletonUtils.clone(src.scene);
   // the game's own lit material, one per material name, coloured as the artist chose (glTF
-  // colours are linear; the game uses its colours as they are, so convert back to sRGB)
+  // colours are linear; the game uses its colours as they are, so convert back to sRGB).
+  // Skinned and plain meshes get separate copies: the bat's eyes (plain) and body (skinned) share
+  // the material "Main", and a skinned mesh drawn with a plain material ignores its skeleton.
   const byName = {}, mats = [];
   inner.traverse(o => {
     if (!o.isMesh) return;
     const conv = m => {
-      if (byName[m.name]) return byName[m.name];
+      const key = m.name + (o.isSkinnedMesh ? '|skinned' : '');
+      if (byName[key]) return byName[key];
       const re = k.colors[m.name], hex = re ? re.c : m.color.clone().convertLinearToSRGB().getHex();
       const g = litMat({ color: hex, emissive: re && re.glow ? hex : 0 });
       g.skinning = !!o.isSkinnedMesh; g.name = m.name;
       if (m.map) { m.map.encoding = THREE.LinearEncoding; g.map = m.map; }   // (as the hex colours: no colour management)
       if (!(re && re.glow)) mats.push(g);   // the hit flash lights these; glowing eyes keep their glow
-      return (byName[m.name] = g);
+      return (byName[key] = g);
     };
     o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
     o.castShadow = true; o.frustumCulled = false;   // skinned: the bind-pose bounds don't follow the animation

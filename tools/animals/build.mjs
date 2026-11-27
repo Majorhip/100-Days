@@ -1,7 +1,8 @@
 // Asset step for the animal models: from the downloaded files in assets/animals/raw/, keep only
 // the animations the game uses, drop the duplicate copy of each clip that the Ultimate-pack
 // files carry ("AnimalArmature|Walk" next to "Walk"), drop everything unused, and write compact
-// .glb files to assets/animals/game/, which the game embeds (src/models/gltf-animals.js).
+// .glb files to assets/animals/game/. tools/animals/pack.mjs then packs them small into
+// assets/animals/packed/, which the game embeds (src/models/gltf-animals.js).
 //
 //   node tools/animals/build.mjs
 //

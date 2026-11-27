@@ -68,6 +68,11 @@ but it's your call.
 
 ## Step 2 — Smaller, faster file (item 4)
 
+**Status: done 27 Nov 2026.** The game file went from 11.26 MB to 4.46 MB, and the models from 7.44 MB
+to 2.57 MB. Time to the title screen on this PC went from 10.5 s to 9.6 s; the models load in the
+background, so most of the start-up time is building the world and warming up shaders. One bear
+instead of three wasn't needed. See the last section of `tests/golden/README.md`.
+
 **Measured:** the 20 animal model files total 7.8 MB:
 - about 5.3 MB of meshes and skins
 - 1.65 MB of animation

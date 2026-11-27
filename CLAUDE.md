@@ -43,6 +43,8 @@ into one file. The migration is finished (MIGRATION.md). Since then, new feature
     `creatures/`, `story/`, `ui/`, `input/`
   - `src/world/rarity.js`: how often finds and animals appear
   - `src/models/gltf-animals.js`: the animated animal models
+  - `assets/animals/game/`: the working models. `assets/animals/packed/`: what the game embeds.
+    After changing a model, run `node tools/animals/pack.mjs`.
   - `src/ui/about.js`: the credits
 
 ## Build check and the old ledger
@@ -90,7 +92,7 @@ ledger (`tests/golden/approved-edits.mjs`). That part is retired.
   - If Git asks for a sign-in, push from the Terminal panel.
 - **Downloads and size:**
   - Ask before downloading anything; give the file, the source and the size.
-  - File size is not a limit. The built game is about 11 MB with the animal models.
+  - File size is not a limit. The built game is about 4.5 MB, with the animal models compressed.
 - **Credits:** third-party assets need credits in `src/ui/about.js` (the Poly bear is CC BY 3.0).
 
 ## Technical rules (from the original game)
@@ -126,6 +128,13 @@ ledger (`tests/golden/approved-edits.mjs`). That part is retired.
   `build.mjs` must dispose samplers and channels before `prune()`.
 - **Bone names:** three.js drops dots from node names, so `FF.L` becomes `FFL`.
 - **Model sizes:** `_end` bones get pruned, so size models from the posed vertices, not the bones.
+- **Animal materials:** `gltfAnimal()` makes one game material per material name, with separate
+  copies for skinned and plain meshes. The bat's eyes and body share "Main", and a skinned mesh
+  drawn with a plain material ignores its skeleton. Packed models make that mistake show up huge.
+- **Packed models:** they store vertex data as scaled whole numbers. `unquantize()` in
+  `gltf-animals.js` turns them back into floats at load, because r128's CPU-side reads (`getX`,
+  `boneTransform`) don't scale them. `pack.mjs` must not `dedup()`, because it would merge
+  materials the game looks up by name.
 - **Start-up stalls:** r128 compiles shaders on first use and blocks the page. New materials are
   warmed up behind the loading bar (`warmUp` in `src/ui/loading.js`).
 - **New buttons in panels:** handle them with a capture-phase document click listener that calls

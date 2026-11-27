@@ -315,3 +315,30 @@ In the original, the player was stopped where the water got 1.25 m deep, but a l
 - **`npm run check` is new.** It's `parity.mjs --quick` plus the rules tests. The quick smoke run
   covers: new game, chop, fire, rarer finds, storm, sleep, desert.
 
+## Step 2: smaller game file (27 Nov 2026)
+**The packing:** `tools/animals/pack.mjs` packs `assets/animals/game/*.glb` into
+`assets/animals/packed/*.glb`, which the game embeds.
+- **Compression:** meshopt (`EXT_meshopt_compression` with `KHR_mesh_quantization`).
+- **Textures:** WebP, still 1024 px.
+- **Sizes:** the models went from 7.44 MB to 2.57 MB, and the game file from 11.26 MB to 4.46 MB.
+- **Decoding:** three.js r128 decodes the models with the meshopt decoder that ships with three. The
+  encoder (npm `meshoptimizer`, MIT) is a dev tool only.
+- **The game side:** `gltf-animals.js` turns the quantised vertex data back into floats at load
+  (`unquantize`), so `posedBox` still sizes the models from their vertices.
+- **The name guard:** the pack fails if any material, mesh, node or clip name changes. It does not
+  use `dedup()`.
+
+**A bug it exposed, now fixed:** the bat's eyes (a plain mesh) and part of its body (a skinned mesh)
+share the material "Main".
+- **Before:** the game made one material per name, so that part of the body was drawn without its
+  skeleton. In the old files that only froze it in place.
+- **With packing:** the mesh's size moves into the skeleton, so the same mistake drew a giant bat.
+- **The fix:** skinned and plain meshes now get separate copies. The bat's whole body flaps again.
+
+**Checked:**
+- **Sizes:** the posed size of all 21 animal kinds, both variants each (42), matches the old build
+  to within 1 mm.
+- **Screenshots:** two rows of 16 animals, plus close-ups of the bat, spider, frog, Grizzle and
+  Frostclaw, look the same by eye, except that the bat now flaps properly.
+- **Start-up:** time to the title screen went from 10.5 s to 9.6 s on this PC. The models load in the
+  background, so the world and shader warm-up still take most of the start-up time.
