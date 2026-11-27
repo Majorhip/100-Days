@@ -1,12 +1,13 @@
 // Run every parity check against one build and print a one-line summary per check.
 //
-//   node tests/golden/parity.mjs [target] [--shots]
+//   node tests/golden/parity.mjs [target] [--shots | --quick]
 //
 // target   a game file path or URL (default: dist/index.html)
 // --shots  also take the six screenshots and compare them with golden (slower)
+// --quick  the quick set for npm run check: build, island, save and the core smoke steps
 //
-// For dist/index.html it first checks that the built file matches the sources
-// (compare-build.mjs). Exits 1 if any check fails.
+// For dist/index.html it first runs the build check (compare-build.mjs). Exits 1 if any
+// check fails.
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ROOT } from './browser.mjs';
@@ -24,15 +25,18 @@ const run = (label, script, args = []) => {
   for (const l of (pass ? key.filter(l => /^\s+\d-|^after |steps passed|\d+\/\d+ passed/.test(l)) : key.length ? key : out.slice(-15))) console.log('      ' + l.trim());
   return pass;
 };
+const quick = argv.includes('--quick');
 let ok = true;
 if (/dist[\\/]index\.html$/.test(target)) ok = run('build', 'compare-build.mjs') && ok;
 ok = run('island', 'fingerprint.mjs', [target]) && ok;
 ok = run('save', 'savecheck.mjs', [target]) && ok;
-ok = run('new game', 'newgame.mjs', [target]) && ok;
-ok = run('touch', 'touchcheck.mjs', [target]) && ok;
-ok = run('round trip', 'roundtrip.mjs', [target]) && ok;
-ok = run('save files', 'savefile.mjs', [target]) && ok;
-ok = run('smoke', '../smoke.mjs', [target]) && ok;
-if (argv.includes('--shots')) ok = run('screenshots', 'screenshots.mjs', [target]) && ok;
-console.log(ok ? `\nALL PASS (${target})` : `\nSOME CHECKS FAILED (${target})`);
+if (!quick) {
+  ok = run('new game', 'newgame.mjs', [target]) && ok;
+  ok = run('touch', 'touchcheck.mjs', [target]) && ok;
+  ok = run('round trip', 'roundtrip.mjs', [target]) && ok;
+  ok = run('save files', 'savefile.mjs', [target]) && ok;
+}
+ok = run('smoke', '../smoke.mjs', quick ? [target, '--quick'] : [target]) && ok;
+if (argv.includes('--shots') && !quick) ok = run('screenshots', 'screenshots.mjs', [target]) && ok;
+console.log(ok ? `\n${quick ? 'QUICK CHECK' : 'ALL'} PASS (${target})` : `\nSOME CHECKS FAILED (${target})`);
 process.exit(ok ? 0 : 1);

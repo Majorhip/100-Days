@@ -2,7 +2,9 @@
 // card, with zero page errors allowed (shader compile errors included: three.js reports them
 // on the console).
 //
-//   node tests/smoke.mjs [target]     (default: dist/index.html)
+//   node tests/smoke.mjs [target] [--quick]     (default: dist/index.html)
+//
+// --quick runs only the core steps (QUICK below), for npm run check.
 //
 // new game -> chop a tree -> build and light a campfire -> a night with wolves -> a storm ->
 // sleep until morning -> swim (float, cross the lake, in from the shore and out) -> visit all three biomes -> switch through all four graphics
@@ -13,6 +15,7 @@ import { launch, openGame, prepPage, SAVE_KEY, HIGH_SETTINGS } from './golden/br
 const target = process.argv.slice(2).find(a => !a.startsWith('--')) || 'dist/index.html';
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const results = [];
+const QUICK = process.argv.includes('--quick') && new Set(['new game', 'chop a tree', 'build and light a fire', 'rarer finds and animals', 'a storm', 'sleep until morning', 'visit desert']);
 
 const { browser, close } = await launch({ gpu: true });
 let errors = [];
@@ -22,6 +25,7 @@ try {
   page.on('dialog', d => { errors.push('unexpected dialog: ' + d.message()); d.dismiss().catch(() => { }); });
   const ev = (fn, arg) => page.evaluate(fn, arg);
   async function step(name, run, check) {
+    if (QUICK && !QUICK.has(name)) return;
     const before = errors.length;
     let ok = false, info = '';
     try { const r = await run(); const c = await check(r); ok = c.ok; info = c.info || ''; } catch (e) { info = 'threw: ' + e.message; }

@@ -8,7 +8,6 @@ for the middle of the game) waits for Caspar's picks; see the end.
 **Every step works the same way:**
 - one step per session, with a written plan before any code
 - `npm test` and `npm run parity` before each commit
-- a ledger entry for each change to original code, until step 1 changes that rule
 - a smoke step for each new feature
 - Caspar plays it before the next step starts
 
@@ -30,6 +29,8 @@ Steps 2 and 3 touch different files, so they could run side by side in separate 
 ---
 
 ## Step 1 — Faster checks, and lighter ledger rules (items 12 and 11)
+
+**Status: done 27 Nov 2026.** See the last section of `tests/golden/README.md`.
 
 **Problem:** the full checks take about 7 minutes. Also, every gameplay tweak needs a ledger entry
 that matches the original byte for byte, which made sense for the migration but slows down new

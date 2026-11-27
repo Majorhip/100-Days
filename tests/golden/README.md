@@ -4,11 +4,13 @@ What "the same game" means, recorded from `original/Stranded-100-Days-PC.html` (
 
 The scripts drive the Chrome installed on this PC through `puppeteer-core`, with a throwaway browser profile, so real saves are never touched.
 
+**Quick set:** `npm run check` (about 1–2 minutes): build, the build check, the rules tests, island, save and the core smoke steps. Use it while working.
+
 **Everything at once:** `npm run parity` builds the game and runs every check below against `dist/index.html`, screenshots included (about 3–4 minutes). `node tests/golden/parity.mjs <target>` runs them against any build, for example the dev server.
 
 | Check | Command | Pass |
 |---|---|---|
-| Built file | `npm run build`, then `node tests/golden/compare-build.mjs` | prints `PASS`: the modules put back together give the original script byte for byte, apart from the ledger's listed edits; every name resolves; standing rule kept; markup and CSS same |
+| Built file | `npm run build`, then `node tests/golden/compare-build.mjs` | prints `PASS`: LF line endings, every name resolves, the rules code is pure, three.js r128, one self-contained page. (Until 27 Nov 2026 it also rebuilt the original script byte for byte; see the end.) |
 | Island | `node tests/golden/fingerprint.mjs [target]` | prints `PASS` (hash identical, models included) |
 | Save | `node tests/golden/savecheck.mjs [target]` | prints `PASS` (fixture loads; day, inventory, structures match) |
 | New game | `node tests/golden/newgame.mjs [target]` | prints `PASS` (starts at the cove, walks, clock runs, zero page errors incl. shader errors) |
@@ -282,6 +284,34 @@ In the original, the player was stopped where the water got 1.25 m deep, but a l
 
 ### From here on
 - **The migration is over.** `tools/split/split.mjs` now refuses to run, because `src/` holds code added after the migration and regenerating it from the original would delete that code.
-- **Edit modules directly.** For each change to original code, add a ledger entry with its reason, or a `module` entry for new files.
-- **When the ledger gets unwieldy,** retire the byte-for-byte part of `compare-build.mjs`; it remains the record of what the migration did.
+- **Edit modules directly.** Until 27 Nov 2026 each change to original code also needed a ledger entry; that rule is retired (see the last section).
 - **The other checks keep their value:** island, save, round trip, save files, new game, touch, smoke and screenshots.
+
+## After the migration: lighter checks (27 Nov 2026)
+**What changed:**
+- **The byte-for-byte rebuild is retired.** `compare-build.mjs` no longer puts the original script
+  back together from `src/`. That proved the migration was a pure move, but it made every
+  gameplay tweak need a ledger entry.
+- **What the build check still does:** it checks names, the standing rule (now with no exceptions)
+  and three.js, checks that the page is self-contained, and rejects CRLF and BOMs.
+- **What it no longer compares:** the markup and CSS with the original.
+- **The ledger is frozen:** `approved-edits.mjs` stays as the record of what the migration
+  changed. Nothing reads it any more.
+- **The rules code is untangled.** The 11 `TODO(split)` lines are gone.
+  - `src/game/survival.js`: `ambientTempRule(c)` takes the conditions where the player stands
+    and returns `{ T, heat }`. `survivalStepRule(gh, ctx)` takes the temperature and returns the
+    blackout cause.
+  - `src/game/time.js`: `advanceClock(gh, quiet, on)` and `rollWeather(quiet, on)` change only
+    `G` and report a new day or a weather change through the `on` handlers, at the moment it
+    happens.
+  - **The bridges:** `src/player/climate.js` and `src/world/days.js` keep the old calls,
+    `ambientTemp()`, `survivalStep()`, `advanceTime()`, `nextWeather()` and `onNewDay()`,
+    with the same effects, so the game loop, sleeping and blackouts are unchanged.
+- **Tests:**
+  - `tests/survival.test.js` tests the rules straight, with no stand-ins for the world or the
+    gear. It has 26 tests; the old test that `R.temp` was set moved to the bridge.
+  - `tests/time.test.js` is new: the clock, the day roll-over, the weather chain and when a change
+    is reported.
+- **`npm run check` is new.** It's `parity.mjs --quick` plus the rules tests. The quick smoke run
+  covers: new game, chop, fire, rarer finds, storm, sleep, desert.
+

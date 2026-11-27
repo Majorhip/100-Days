@@ -11,12 +11,14 @@ into one file. The migration is finished (MIGRATION.md). Since then, new feature
 | Command | What it does |
 |---|---|
 | `npm run dev` | Dev server |
-| `npm test` | Build, then Vitest: survival rules, island fingerprint, save. Takes about 3 min. |
+| `npm run check` | The quick set: build, build check, rules tests, island, save, core smoke steps. About 1–2 min. |
+| `npm test` | Build, then Vitest: survival and time rules, island fingerprint, save. Takes about 3 min. |
 | `npm run parity` | Build, then every browser check, screenshots included. Takes about 7 min. |
 | `npm run smoke` | Headless Chrome play-through of `dist/index.html` (24 steps, zero page errors) |
 | `npm run ship` | Build, copy to `release/Stranded-100-Days-PC.html`, prove a save from the original shows up |
 
-- **After any change:** run `npm test` and `npm run parity`. Read `tests/golden/README.md` before
+- **While working:** run `npm run check` after each change.
+- **Before each commit:** run `npm test` and `npm run parity`. Read `tests/golden/README.md` before
   changing any check.
 - **Before handing over:** run `npm run ship`.
 - **Slow commands:** run anything over ~2 minutes in the background.
@@ -43,23 +45,31 @@ into one file. The migration is finished (MIGRATION.md). Since then, new feature
   - `src/models/gltf-animals.js`: the animated animal models
   - `src/ui/about.js`: the credits
 
-## The ledger (most important rule)
+## Build check and the old ledger
 
-`tests/golden/compare-build.mjs` rebuilds the original script from the `@moved-to` map. It requires
-the result to match the original byte for byte, except for changes listed in
-`tests/golden/approved-edits.mjs`.
+`tests/golden/compare-build.mjs` checks four things on every build:
+- **LF only:** every source file has LF line endings and no byte-order mark.
+- **Names resolve:** every name is declared, imported or a known browser global. A new browser
+  global goes in its `EXTRA_GLOBALS` list.
+- **The rules code is pure:** `src/game/` and `src/data/` never import three.js, never touch the
+  page and never use `R`. There are no exceptions.
+- **The page:** three.js is r128 from npm, and the page is one self-contained file.
 
-- **Changing original code:** every change needs a ledger entry with its reason, or the build
-  check fails.
-- **New files:** need a `module` entry that lists the browser globals they use, such as `Promise`
-  or `Date`.
-- **Overlapping entries:** two `replace` entries can't overlap. Anchor a new one on a line no other
-  entry touches.
-- **No CRLF or BOM in `src/`:** they are rejected. Don't write source files with PowerShell
-  `Set-Content` or `Add-Content`. Use the editor tools, or `[IO.File]::WriteAllText` with UTF-8
-  and no BOM.
-- **Don't regenerate `src/`:** `tools/split/split.mjs` refuses to run on purpose, because it would
-  delete everything added after the migration.
+Until 27 Nov 2026 the check also rebuilt the original script from `src/` byte for byte, using the
+ledger (`tests/golden/approved-edits.mjs`). That part is retired.
+
+- **The ledger is frozen** as the record of what the migration changed. Don't add entries.
+- **Edit modules directly.** The tests, the island fingerprint, the save checks, the smoke test
+  and the screenshots guard the game now.
+- **No CRLF or BOM in `src/`.** Don't write source files with PowerShell `Set-Content` or
+  `Add-Content`. Use the editor tools, or `[IO.File]::WriteAllText` with UTF-8 and no BOM.
+- **Don't regenerate `src/`.** `tools/split/split.mjs` refuses to run on purpose.
+- **Rules and bridges:** pure rules live in `src/game/`. Modules elsewhere connect them to the
+  game:
+  - `src/player/climate.js` for survival
+  - `src/world/days.js` for time and weather
+
+  Keep new rules pure the same way: plain values in, results out.
 
 ## Ways of working
 
@@ -95,8 +105,8 @@ the result to match the original byte for byte, except for changes listed in
 - **Saves:** they store only changed nodes (`nodeState`), and the format is version 3.
   - The save key `stranded100_v3` must never change, or Caspar's save disappears.
   - Every `localStorage` call is wrapped in try/catch.
-- **Rules code stays pure:** `src/game/` and `src/data/` never import three.js or touch the page.
-  The `// TODO(split)` notes mark the 11 places that still reach into `R`.
+- **Rules code stays pure:** `src/game/` and `src/data/` never import three.js, touch the page or
+  use `R`. The build check enforces it.
 - **Touch controls:** the phone and tablet code (`src/input/touch.js`) stays in the build, and
   `touchcheck.mjs` covers it.
 
@@ -105,7 +115,7 @@ the result to match the original byte for byte, except for changes listed in
 | Check | How | Pass |
 |---|---|---|
 | Island | World fingerprint (`tests/world.test.js`) | Hash identical to the original |
-| Balance | `tests/survival.test.js` | Rates pinned. The four MIGRATION.md energy targets are a `todo` until the original "typical day" model turns up. |
+| Balance | `tests/survival.test.js`, `tests/time.test.js` | Rates and the weather chain pinned. The four MIGRATION.md energy targets are a `todo` until the original "typical day" model turns up. |
 | Saves | `tests/fixtures/save-v3.json` loads and round-trips; Export / Import (`savefile.mjs`) | Inventory, structures and day match |
 | Graphics | Smoke test and reference screenshots | No shader errors. The screenshot score is noisy with frame rate (storm ~3.5–4.7), so compare against a control run of the original. |
 | Feel | Play the original and the new file side by side for 10 minutes | Same movement, day length and difficulty. Not done by a person yet. |
