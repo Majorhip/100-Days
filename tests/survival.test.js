@@ -19,6 +19,7 @@ vi.mock('../src/gfx/update.js', () => ({}));
 
 const { ambientTempRule, survivalStepRule, SURV } = await import('../src/game/survival.js');
 const { ITEMS } = await import('../src/data/items.js');
+const { DIFFICULTY, levelOf } = await import('../src/data/difficulty.js');
 const { HOUR_SECONDS, TICK, DAY_LENGTH_SECONDS } = await import('../src/core/constants.js');
 
 /** a fresh player; ctx holds what the step is given (temperature 20°, no heat, no fire) */
@@ -63,6 +64,22 @@ describe('survivalStep: hunger and thirst (per game hour)', () => {
     const af = a.food, aw = a.water;
     const b = fresh({ food: 100, water: 100 }); survivalStep(24, {});
     expect(af).toBeCloseTo(b.food, 6); expect(aw).toBeCloseTo(b.water, 6);
+  });
+});
+
+describe('difficulty', () => {
+  it('Normal is the game as it was; Easy and Hard scale hunger and thirst', () => {
+    expect(DIFFICULTY.normal.hunger).toBe(1);
+    let p = fresh(); survivalStep(1, { rate: DIFFICULTY.easy.hunger }); close(p.food, 80 - 2.4); close(p.water, 80 - 3.04);
+    p = fresh(); survivalStep(1, { rate: DIFFICULTY.hard.hunger }); close(p.food, 80 - 3.6); close(p.water, 80 - 4.56);
+  });
+  it('the levels: finds, animals, damage', () => {
+    const k = 0.55;
+    expect([DIFFICULTY.easy.finds(k), DIFFICULTY.normal.finds(k), DIFFICULTY.hard.finds(k)].map(v => +v.toFixed(4))).toEqual([0.865, 0.55, 0.4125]);
+    expect([DIFFICULTY.easy.animals, DIFFICULTY.hard.animals, DIFFICULTY.easy.hurt, DIFFICULTY.hard.hurt]).toEqual([1.5, 0.7, 0.7, 1.3]);
+  });
+  it('a save without a level (older saves, Normal games) is Normal', () => {
+    expect(levelOf({})).toBe('normal'); expect(levelOf({ diff: 'hard' })).toBe('hard'); expect(levelOf({ diff: 'silly' })).toBe('normal');
   });
 });
 

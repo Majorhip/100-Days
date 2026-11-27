@@ -124,6 +124,10 @@ last section of `tests/golden/README.md`.
 
 ## Step 4 — Difficulty setting (item 2)
 
+**Status: done 27 Nov 2026.** `src/data/difficulty.js`; the picker sits under the title menu. With
+Easy about 11% of the small finds are missing, with Normal 37%, with Hard 52%. See the last
+section of `tests/golden/README.md`.
+
 **Plan:** Easy, Normal and Hard.
 - **Normal is today's game**, with today's numbers.
 - **Chosen with each New Adventure, and stored in the save**, so a game keeps its difficulty. Old

@@ -35,7 +35,9 @@ export const VIEWS = [
 ];
 const SETTLE_MS = 9000;
 
-const raw = readFileSync(FIXTURE, 'utf8');
+// The fixture is a Day 10 save, and since step 3 a 10th day shows an Export tip that the golden
+// shots (taken from the original) don't have: mark it as already shown. The original ignores it.
+const raw = (s => { s.flags.exportNudge = s.day; return JSON.stringify(s); })(JSON.parse(readFileSync(FIXTURE, 'utf8')));
 const { browser, close } = await launch({ gpu: true });
 const meta = { target, date: new Date().toISOString().slice(0, 10), views: [] };
 try {

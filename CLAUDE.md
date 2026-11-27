@@ -42,6 +42,8 @@ into one file. The migration is finished (MIGRATION.md). Since then, new feature
   - `core/`, `gfx/`, `audio/`, `world/`, `data/`, `models/`, `player/`, `game/`, `build/`,
     `creatures/`, `story/`, `ui/`, `input/`
   - `src/world/rarity.js`: how often finds and animals appear
+  - `src/data/difficulty.js`: Easy, Normal and Hard. Saved as `G.diff` only when it isn't Normal,
+    so Normal saves are exactly as before.
   - `src/models/gltf-animals.js`: the animated animal models
   - `assets/animals/game/`: the working models. `assets/animals/packed/`: what the game embeds.
     After changing a model, run `node tools/animals/pack.mjs`.

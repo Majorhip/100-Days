@@ -15,7 +15,7 @@ import { launch, openGame, prepPage, SAVE_KEY, HIGH_SETTINGS } from './golden/br
 const target = process.argv.slice(2).find(a => !a.startsWith('--')) || 'dist/index.html';
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const results = [];
-const QUICK = process.argv.includes('--quick') && new Set(['new game', 'chop a tree', 'build and light a fire', 'rarer finds and animals', 'a storm', 'sleep until morning', 'visit desert']);
+const QUICK = process.argv.includes('--quick') && new Set(['new game', 'chop a tree', 'build and light a fire', 'rarer finds and animals', 'difficulty levels', 'a storm', 'sleep until morning', 'visit desert']);
 
 const { browser, close } = await launch({ gpu: true });
 let errors = [];
@@ -289,6 +289,21 @@ try {
     const thinned = Object.values(r.kinds).every(([n, gone]) => gone > n * 0.2 && gone < n * 0.6);
     return { ok: thinned && !r.other && r.nearStart === 0 && r.hiddenOk && r.unpickable && !r.regrow && r.caps === '1/1/2/1', info: `${share}; near start missing ${r.nearStart}; caps of 2: ${r.caps}` };
   });
+
+  // difficulty (step 4): finds come and go in a fixed order; animals and damage scale
+  await step('difficulty levels', () => ev(() => {
+    const S = window.__stranded, { NODES, PICKUP_KEEP, DIFFICULTY, G, R } = S;
+    const absent = () => NODES.filter(n => PICKUP_KEEP[n.t] !== undefined && n.absent).length;
+    const normal = absent(), ids = NODES.filter(n => n.absent).map(n => n.idx).join();
+    S.setFinds(DIFFICULTY.easy); const easy = absent();
+    S.setFinds(DIFFICULTY.hard); const hard = absent();
+    S.setFinds(DIFFICULTY.normal); const back = absent(), same = NODES.filter(n => n.absent).map(n => n.idx).join() === ids;
+    G.diff = 'easy'; const capEasy = S.rareCap('deer', 2); G.diff = 'hard'; const pHard = S.rareRoll.length;
+    const inv0 = R.invuln, hp0 = G.p.hp, arm = S.armorValue(); R.invuln = 0; G.p.hp = 100; S.hurtPlayer(10, 'hurt'); const hurtHard = 100 - G.p.hp;
+    delete G.diff; G.p.hp = 100; S.hurtPlayer(10, 'hurt'); const hurtNormal = 100 - G.p.hp; G.p.hp = hp0; R.invuln = inv0;
+    return { normal, easy, hard, back, same, capEasy, capNormal: S.rareCap('deer', 2), hurtHard, hurtNormal, arm };
+  }), r => ({ ok: r.easy < r.normal * 0.5 && r.hard > r.normal && r.back === r.normal && r.same && r.capEasy === 2 && r.capNormal === 1 && r.hurtNormal === 10 && r.hurtHard === 13,
+    info: `missing finds: easy ${r.easy}, normal ${r.normal}, hard ${r.hard}, back to ${r.back} (same ones ${r.same}); deer cap of 2: easy ${r.capEasy}, normal ${r.capNormal}; a 10 bite: normal ${r.hurtNormal}, hard ${r.hurtHard}` }));
 
   await step('a storm', async () => {
     await ev(() => { const { G } = window.__stranded; G.weather = 'storm'; G.weatherHrs = 99; G.hour = 14; });

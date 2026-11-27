@@ -49,6 +49,8 @@ import { initTouch, goFullscreen, updateTouch } from './input/touch.js';
 import { updateSea } from './creatures/sea.js';   // added after the migration: the shark and the lake fish
 import { loadStep, warmUp } from './ui/loading.js';   // added after the migration: start-up with a progress bar
 import { listBackups, clearBackups, markBroken, isBroken, restoreBackup, nudgeDue } from './backups.js';   // added after the migration: backup saves
+import { DIFFICULTY, levelOf, diffOf } from './data/difficulty.js';   // added after the migration: difficulty
+import { setFinds } from './world/rarity.js';
 
 // @moved-from: original
 
@@ -91,14 +93,20 @@ async function initWorld() {
 /* ---------- title screen + intro ---------- */
 /** the main save's text as stored (or this session's copy) */
 function mainSaveText() { let raw = null; try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { } return raw || R.memSave || null; }
+/** the difficulty picked for the next New Adventure (remembered in this browser) */
+function diffPick() { let d = null; try { d = localStorage.getItem(SAVE_KEY + '_diff'); } catch (e) { } return DIFFICULTY[d] ? d : 'normal'; }
+function diffRow() {
+  const d = diffPick();
+  return '<div class="diffpick">Difficulty for a new adventure: ' + Object.keys(DIFFICULTY).map(k => '<button data-d="' + k + '"' + (k === d ? ' class="on"' : '') + '>' + DIFFICULTY[k].n + '</button>').join('') + '<div class="dnote">' + DIFFICULTY[d].d + '</div></div>';
+}
 function showTitle() {
   const raw = mainSaveText(), s = isBroken(raw) ? null : readSave(), t = $('title');
   // the save is missing, unreadable or failed to load: offer the newest backup that reads
   const bak = s ? null : listBackups()[0];
   t.innerHTML = '<div class="logo"><div class="l1">STRANDED</div><div class="l2">100 DAYS ON KESTREL ISLAND</div></div>' +
-    '<div class="menu">' + (s ? '<button class="big" id="tContinue">▶ Continue <small>— Day ' + s.day + ', Level ' + s.p.level + '</small></button>' : '') +
+    '<div class="menu">' + (s ? '<button class="big" id="tContinue">▶ Continue <small>— Day ' + s.day + ', Level ' + s.p.level + (levelOf(s) !== 'normal' ? ' · ' + diffOf(s).n : '') + '</small></button>' : '') +
     (bak ? '<button class="big" id="tBackup">⏪ Load your backup <small>— Day ' + bak.day + ', Level ' + bak.level + '</small></button>' : '') +
-    '<button class="' + (s ? '' : 'big') + '" id="tNew">🏝️ New Adventure</button><button id="tHelp">❓ How to play</button><button id="tLoad">📂 Load a save file</button></div>' +
+    '<button class="' + (s ? '' : 'big') + '" id="tNew">🏝️ New Adventure</button><button id="tHelp">❓ How to play</button><button id="tLoad">📂 Load a save file</button></div>' + diffRow() +
     '<div id="tExtra"></div><div class="credit">Made for Caspar · Built with three.js · ' + (R.touch ? 'Touch controls on · play with your phone sideways' : 'Best with a mouse and keyboard') + '</div>';
   t.style.display = '';
   if (s) $('tContinue').onclick = () => {
@@ -120,6 +128,11 @@ function showTitle() {
     if (s || bak) { try { localStorage.removeItem(SAVE_KEY); } catch (e) { } clearBackups(); location.reload(); return; }
     playIntro(0);
   };
+  t.querySelectorAll('.diffpick button').forEach(b => b.onclick = () => {
+    try { localStorage.setItem(SAVE_KEY + '_diff', b.dataset.d); } catch (e) { }
+    t.querySelectorAll('.diffpick button').forEach(q => q.classList.toggle('on', q === b));
+    t.querySelector('.dnote').textContent = DIFFICULTY[b.dataset.d].d; sfx('click');
+  });
   $('tHelp').onclick = () => { audioInit(); $('tExtra').innerHTML = '<div class="tbox">' + helpHTML() + settingsHTML() + '</div>'; bindSettingsInputs($('tExtra')); };
   if (new URLSearchParams(location.search).has('fresh') || sessionStorage.getItem('stranded_new')) { sessionStorage.removeItem('stranded_new'); }
 }
@@ -135,6 +148,8 @@ function startGame(isNew) {
   $('title').style.display = 'none'; $('hud').style.display = '';
   if (isNew) {
     setG(newGameState()); G.p.x = R.start.x; G.p.z = R.start.z; G.p.yaw = 0.15;
+    const d = diffPick(); if (d !== 'normal') G.diff = d;   // (Normal games save exactly as before)
+    setFinds(diffOf(G));
   }
   G.p.y = groundAt(G.p.x, G.p.z); R.ground = G.p.y; G.p.vy = 0;
   R.started = true; R.paused = false; R.acc = 0;

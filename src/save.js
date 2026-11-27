@@ -13,6 +13,8 @@ import { CHESTS } from './story/props.js';
 import { refreshPack, spawnPackNote, placeRay } from './story/ray.js';
 import { fogArr, fogSave } from './ui/map.js';
 import { keepBackup } from './backups.js';   // added after the migration: backup saves
+import { setFinds } from './world/rarity.js';   // added after the migration: difficulty
+import { diffOf } from './data/difficulty.js';
 
 // @moved-from: original #settings
 function saveSettings() { try { localStorage.setItem(SAVE_KEY + '_set', JSON.stringify({ sens: R.sens, vol: R.vol, music: R.music, quality: R.quality, drag: R.dragLook, gfxV: 2, gfxManual: !!R.gfxManual })); } catch (e) { } }
@@ -44,6 +46,7 @@ function mergeSave(s) {
 }
 /** bring the already-built world in line with a loaded save */
 function applyWorldState() {
+  setFinds(diffOf(G));   // the finds for this game's difficulty, before its own changes
   applyNodeState(); rebuildStructures(); refreshPack();
   R.towerDish.visible = !!G.flags.radio; R.idolMesh.forEach(m => m.visible = !!G.flags.storm);
   R.rockfall.visible = !G.flags.rayFree; R.rockfallCol.off = !!G.flags.rayFree;

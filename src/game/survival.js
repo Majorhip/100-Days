@@ -30,12 +30,12 @@ function ambientTempRule(c) {
 const SURV = { food: 3.0, water: 3.8, comfort: 14 };
 /**
  * Advance the survival meters by gh game-hours.
- * ctx: { sleeping, sprint, rest, temp, heat, nearFire }
+ * ctx: { sleeping, sprint, rest, temp, heat, nearFire, rate }   (rate: the difficulty's hunger, 1 = Normal)
  * Returns the blackout cause ('cold', 'thirst' or 'hunger') if health ran out while awake,
  * otherwise null.
  */
 function survivalStepRule(gh, ctx) {
-  const p = G.p, T = ctx.temp, sl = ctx.sleeping ? 0.5 : 1;
+  const p = G.p, T = ctx.temp, sl = (ctx.sleeping ? 0.5 : 1) * (ctx.rate || 1);
   p.food = Math.max(0, p.food - SURV.food * gh * sl * (ctx.sprint ? 1.6 : 1));
   p.water = Math.max(0, p.water - SURV.water * gh * sl * (ctx.sprint ? 1.5 : 1) * (ctx.heat ? 2 : 1));
   if (T >= SURV.comfort) p.warm = Math.min(100, p.warm + (ctx.nearFire ? 34 : 11) * gh);

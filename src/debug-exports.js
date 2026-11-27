@@ -68,6 +68,7 @@ export * from './ui/savefile.js';
 export * from './player/swim.js';
 export * from './models/gltf-animals.js';
 export * from './backups.js';
+export * from './data/difficulty.js';
 export * from './player/climate.js';
 export * from './world/days.js';
 export * from './creatures/wildlife.js';

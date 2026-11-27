@@ -18,10 +18,12 @@ import { showMessage } from '../ui/panels.js';
 import { saveGame } from '../save.js';
 import { onNewDay } from '../world/days.js';
 import { packSpot } from './swim.js';   // added after the migration
+import { diffOf } from '../data/difficulty.js';   // added after the migration: difficulty
 
 // @moved-from: original
 function hurtPlayer(dmg, src) {
   if (R.cinematic || R.sleeping || R.invuln > 0) return;
+  if (src === 'hurt') dmg *= diffOf(G).hurt;   // animals bite harder or softer by difficulty
   const p = G.p; dmg = Math.max(1, Math.round(dmg * (1 - armorValue())));
   p.hp -= dmg; R.shake = 0.4; uiDamage(); sfx('hurt');
   if (p.hp <= 0) { p.hp = 0; blackout(src || 'hurt'); }

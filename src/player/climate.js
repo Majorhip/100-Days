@@ -10,6 +10,7 @@ import { nightAmount } from '../world/sky.js';
 import { heldDef, wearStat, armorValue } from './inventory.js';
 import { blackout } from './health.js';
 import { ambientTempRule, survivalStepRule } from '../game/survival.js';
+import { diffOf } from '../data/difficulty.js';
 
 /** the conditions where the player stands, as the temperature rule needs them */
 function climateHere() {
@@ -24,9 +25,9 @@ function ambientTemp() {
   const { T, heat } = ambientTempRule(climateHere());
   R.heat = heat; R.temp = T; return T;
 }
-/** ctx: { sleeping, sprint, rest } */
+/** ctx: { sleeping, sprint, rest }; hunger and thirst run at the game's difficulty */
 function survivalStep(gh, ctx) {
-  const why = survivalStepRule(gh, { ...ctx, temp: R.temp, heat: R.heat, nearFire: !!R.nearFire });
+  const why = survivalStepRule(gh, { ...ctx, temp: R.temp, heat: R.heat, nearFire: !!R.nearFire, rate: diffOf(G).hunger });
   if (why) blackout(why);
 }
 

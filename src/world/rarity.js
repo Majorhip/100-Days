@@ -9,8 +9,9 @@
 // Animals: each kind has a cap (how many roam near you at once, as a share of the original
 // cap) and a chance per second that one turns up while there are fewer. The original
 // refilled every kind the moment one was gone, so the island always felt full.
-import { R } from '../state.js';
+import { G, R } from '../state.js';
 import { shCell } from './collision.js';
+import { diffOf, HUNTED } from '../data/difficulty.js';
 
 /** the share of each kind of find that is really there */
 const PICKUP_KEEP = { sticks: 0.55, stones: 0.55, flintp: 0.65, mushroom: 0.5, herb: 0.65, bush: 0.6, reed: 0.7 };
@@ -22,17 +23,34 @@ function hash01(i) {
   return (h >>> 0) / 4294967296;
 }
 
-/** take out the finds that are not there (called at the end of placeNodes) */
-function thinPickups(nodes, setNodeMatrix) {
+let _nodes = null, _setMatrix = null;
+/** take out the finds that are not there (called at the end of placeNodes, at Normal) */
+function thinPickups(nodes, setNodeMatrix) { _nodes = nodes; _setMatrix = setNodeMatrix; setFinds(diffOf(null)); }
+/**
+ * Show the finds for a difficulty level (step 4): called when a game starts or continues, before
+ * the save's own changes are applied. Finds come and go by the same fixed order, so a harder
+ * level only takes more away and an easier one only brings some back.
+ */
+function setFinds(level) {
+  if (!_nodes) return;
   const st = R.start;
-  nodes.forEach((n, i) => {
+  _nodes.forEach((n, i) => {
     const keep = PICKUP_KEEP[n.t];
-    if (keep === undefined || hash01(i) < keep) return;
-    if (st && Math.hypot(n.x - st.x, n.z - st.z) < START_SAFE) return;
-    n.absent = true; n.gone = true;
-    setNodeMatrix(n, false, false);
-    if (n.col) n.col.off = true;
-    const c = shCell(n.x, n.z).nodes, k = c.indexOf(n); if (k >= 0) c.splice(k, 1);
+    if (keep === undefined) return;
+    const out = hash01(i) >= level.finds(keep) && !(st && Math.hypot(n.x - st.x, n.z - st.z) < START_SAFE);
+    if (out === !!n.absent) return;
+    const c = shCell(n.x, n.z).nodes, k = c.indexOf(n);
+    if (out) {
+      n.absent = true; n.gone = true;
+      _setMatrix(n, false, false);
+      if (n.col) n.col.off = true;
+      if (k >= 0) c.splice(k, 1);
+    } else {
+      n.absent = false; n.gone = false;
+      _setMatrix(n, true, true);
+      if (n.col) n.col.off = false;
+      if (k < 0) c.push(n);
+    }
   });
 }
 
@@ -45,7 +63,9 @@ const ANIMAL_RARITY = {
   horse: { cap: 1, p: 0.005 }, donkey: { cap: 1, p: 0.006 }, alpaca: { cap: 1, p: 0.006 },
   wolf: { cap: 1, p: 0.05 }, snowwolf: { cap: 1, p: 0.03 }
 };
-function rareCap(type, cap) { const a = ANIMAL_RARITY[type]; return a ? Math.max(1, Math.round(cap * a.cap)) : cap; }
-function rareRoll(type) { const a = ANIMAL_RARITY[type]; return !a || Math.random() < a.p; }
+/** more or fewer of the animals you hunt, by difficulty (step 4) */
+const huntK = type => HUNTED.includes(type) ? diffOf(G).animals : 1;
+function rareCap(type, cap) { const a = ANIMAL_RARITY[type]; return a ? Math.max(1, Math.round(cap * Math.min(1, a.cap * huntK(type)))) : cap; }
+function rareRoll(type) { const a = ANIMAL_RARITY[type]; return !a || Math.random() < a.p * huntK(type); }
 
-export { PICKUP_KEEP, START_SAFE, hash01, thinPickups, ANIMAL_RARITY, rareCap, rareRoll };
+export { PICKUP_KEEP, START_SAFE, hash01, thinPickups, setFinds, ANIMAL_RARITY, rareCap, rareRoll };

@@ -375,3 +375,41 @@ and only when no panel is open, nobody is asleep and no cutscene is playing.
 **Fixed along the way:** `src/debug-exports.js` was missing `player/climate.js` and
 `world/days.js`, which step 1 added, so `window.__stranded.advanceTime` was missing. Nothing had
 used it until this check.
+
+## Step 4: difficulty (27 Nov 2026)
+**The levels:** `src/data/difficulty.js` has Easy, Normal and Hard. Normal is the game as it was.
+
+| | Easy | Normal | Hard |
+|---|---|---|---|
+| Small finds there (share of Normal's share k) | 1 − (1 − k) × 0.3 | k | k × 0.75 |
+| Missing finds on the island (of 1,071) | 116 | 392 | 555 |
+| Hunted animals (cap share and chance) | × 1.5 | × 1 | × 0.7 |
+| Hunger and thirst | × 0.8 | × 1 | × 1.2 |
+| Damage from animals | × 0.7 | × 1 | × 1.3 |
+
+**Saving the level:**
+- **Picked on the title screen,** under the menu. The choice is remembered in this browser as
+  `stranded100_v3_diff`.
+- **Stored with the game** as `G.diff`, but only when it isn't Normal. Normal saves, and every
+  older save, are byte for byte as before, so the save round trip is unchanged.
+- **Shown on Continue** when the level isn't Normal (for example "Day 5, Level 3 · Hard").
+
+**How finds follow the level:**
+- `setFinds(level)` in `rarity.js` shows the finds for a level. Finds come and go in a fixed
+  order (by index hash), so a harder level only removes more and an easier one only brings some
+  back.
+- It runs when a new game starts and in `applyWorldState()`, before the save's own changes.
+- The island is still built at Normal, so the fingerprint is unchanged.
+- Finds that Easy brings back have no terrain stamp, which is cosmetic only.
+
+**Where the rest is applied:**
+- **Hunger:** the survival rule takes `ctx.rate`.
+- **Animals:** `rareCap` and `rareRoll` scale the hunted kinds.
+- **Damage:** `hurtPlayer` scales damage with the source `'hurt'` (animals).
+
+**Tests:**
+- **Unit tests** cover the rates, the levels and older saves counting as Normal.
+- **The smoke step "difficulty levels"** (also in the quick set):
+  - finds Easy, then Hard, then back to Normal leaves exactly the same ones missing
+  - a deer cap of 2: 2 on Easy, 1 on Normal
+  - a bite of 10: 10 on Normal, 13 on Hard
