@@ -46,6 +46,7 @@ function nearestHostile(d) {
 }
 function damageCreature(c, dmg, tool) {
   if (c.dead) return;
+  if (c.tame) { hint('That is your ' + c.def.n.replace('Wild ', '').toLowerCase() + '!'); return; }   // (riding, src/creatures/mount.js)
   if (c.state === 'stun') dmg *= 1.5;
   dmg = Math.round(dmg); c.hp -= dmg; c.flash = 0.12; sfx('hit'); R.focus = c; R.focusT = 5;
   dmgNumber(c.x, c.y + c.model.h + 0.3, c.z, dmg, c.state === 'stun' ? 'crit' : '');
@@ -86,10 +87,11 @@ function updateCreatures(dt) {
     if (c.dead) { c.deadT -= dt; c.g.scale.setScalar(Math.max(0.01, c.scale * Math.min(1, c.deadT / 0.45))); if (c.model.anim) c.model.anim(c, dt); if (c.deadT <= 0) removeCreature(c); continue; }
     if (def.sea) { updateShark(c, dt); continue; }   // swims: src/creatures/sea.js
     const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz); c.moving = 0; c.st -= dt; if (c.atkCd > 0) c.atkCd -= dt;
-    if (d > 150 && !c.raid) { removeCreature(c); continue; }
-    if (def.passive) {
+    if (d > 150 && !c.raid && !c.tame) { removeCreature(c); continue; }
+    if (c.tame) c.tameUpdate(c, dt);   // your horse, donkey or alpaca (src/creatures/mount.js)
+    else if (def.passive) {
       if (c.state === 'flee') { moveCreature(c, -dx, -dz, def.spd, dt); if (c.st <= 0) c.state = 'idle'; }
-      else if (d < def.flee) { c.state = 'flee'; c.st = rnd(2, 3.2); if (c.type === 'rabbit' && d < 14) sfx('squeak'); }
+      else if (d < def.flee && !c.calm) { c.state = 'flee'; c.st = rnd(2, 3.2); if (c.type === 'rabbit' && d < 14) sfx('squeak'); }
       else wander(c, dt, 2.0);
     } else {
       // fear of flame (never during a Wolf Moon)

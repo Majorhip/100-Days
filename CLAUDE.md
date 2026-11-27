@@ -141,5 +141,9 @@ ledger (`tests/golden/approved-edits.mjs`). That part is retired.
   materials the game looks up by name.
 - **Start-up stalls:** r128 compiles shaders on first use and blocks the page. New materials are
   warmed up behind the loading bar (`warmUp` in `src/ui/loading.js`).
+- **New features hook in through flags, not imports.** Older chain modules (creatures, movement,
+  targeting, health) must not import new modules that import later ones, because that would
+  change the start-up order. Riding talks to them through `c.calm`, `c.tame`, `c.tameUpdate`,
+  `c.throwOff`, `R.riding` and `R.dismount` (`src/creatures/mount.js`).
 - **New buttons in panels:** handle them with a capture-phase document click listener that calls
   `stopPropagation`, as `savefile.js` and `about.js` do, so the panels' own handlers are untouched.

@@ -23,6 +23,7 @@ import { diffOf } from '../data/difficulty.js';   // added after the migration: 
 // @moved-from: original
 function hurtPlayer(dmg, src) {
   if (R.cinematic || R.sleeping || R.invuln > 0) return;
+  if (R.riding && R.riding.throwOff) R.riding.throwOff();   // riding: a hit throws you off
   if (src === 'hurt') dmg *= diffOf(G).hurt;   // animals bite harder or softer by difficulty
   const p = G.p; dmg = Math.max(1, Math.round(dmg * (1 - armorValue())));
   p.hp -= dmg; R.shake = 0.4; uiDamage(); sfx('hurt');
@@ -30,6 +31,7 @@ function hurtPlayer(dmg, src) {
 }
 function blackout(why) {
   if (R.cinematic) return;
+  if (R.riding && R.dismount) R.dismount();
   const p = G.p; R.cinematic = true; sfx('blackout'); G.stats.blackouts++;
   // drop loose materials as a backpack at this spot (tools, clothes and story items stay with you)
   const items = {}; let any = false;

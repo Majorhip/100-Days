@@ -63,6 +63,7 @@ const key = k => R.touch && TKEY[k] ? '<kbd class="tk">' + TKEY[k] + '</kbd>' : 
 /* ---------- actions ---------- */
 function primaryAction() {
   if (R.panel || R.cinematic || R.sleeping || !R.started) return;
+  if (R.riding) { hint('Get off first: press <b>E</b>.'); return; }   // riding (src/creatures/mount.js)
   if (R.build) { placeBuild(); return; }
   const t = R.target, cls = heldDef().tool.cls;
   if (R.fish) { fishClick(); return; }
@@ -80,6 +81,7 @@ function primaryAction() {
 function interact() {
   if (R.panel || R.cinematic || R.sleeping || !R.started || R.t - (R.closedAt || -9) < 0.25) return;
   if (R.build) return;
+  if (R.riding && R.dismount) { R.dismount(); return; }   // E while riding gets you off
   const t = R.target; if (!t) return;
   if (t.kind === 'water') { drinkHere(); return; }
   if (t.kind === 'poi') { t.ref.act(); return; }

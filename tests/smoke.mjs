@@ -318,6 +318,45 @@ try {
     return ev(() => { const S = window.__stranded, html = document.getElementById('panel').textContent, toast = document.getElementById('toasts').textContent; S.closePanel(); S.clearCreatures(); return { seen: Object.keys(S.G.seen || {}).join(), day: (S.G.seen || {}).deer === S.G.day, card: /Deer/.test(html) && html.includes('???'), count: (html.match(/spotted: (\d+ \/ \d+)/) || [])[1], toast: /New animal: Deer/.test(toast) }; });
   }, r => ({ ok: r.seen === 'deer' && r.day && r.card && r.toast && r.count === '1 / 21', info: `spotted: ${r.seen} (wolf behind not), card shown ${r.card}, tip ${r.toast}, journal ${r.count}` }));
 
+  // riding (step 7): feed a wild horse on 3 days, ride it, deep water stops it, get off, a hit
+  // throws you off, and it comes back if it goes missing
+  await step('tame and ride a horse', async () => {
+    const r = {};
+    await ev(() => {
+      const S = window.__stranded, { G, R } = S, p = G.p; S.clearCreatures(); delete G.mount; R.riding = null;
+      p.x = 0; p.z = 60; p.y = S.groundAt(p.x, p.z); p.vy = 0; p.yaw = 0; p.pitch = -0.3; S.give('berries', 5);
+      const c = S.spawnCreature('horse', p.x, p.z - 2.6); c.st = 99; c.tx = null; window.__horse = c;
+    });
+    for (let day = 0; day < 3; day++) {
+      await ev(() => { const S = window.__stranded, c = window.__horse; c.x = S.G.p.x; c.z = S.G.p.z - 2.6; c.st = 99; c.tx = null; S.slowTick(); });
+      await wait(400);
+      r['target' + day] = await ev(() => { const S = window.__stranded, t = S.R.target; const ok = !!(t && t.kind === 'poi' && t.ref.id === 'mount'); S.interact(); S.G.day++; return ok; });
+    }
+    Object.assign(r, await ev(() => { const S = window.__stranded, c = window.__horse; return { tame: !!(S.G.mount && S.G.mount.tame && c.tame), badge: !!S.G.badges.rider }; }));
+    await ev(() => { window.__stranded.slowTick(); });
+    await wait(400);
+    r.mounted = await ev(() => { const S = window.__stranded; S.interact(); return S.R.riding === window.__horse; });
+    const a = await ev(() => { const { G, R } = window.__stranded; R.keys.KeyW = true; return { x: G.p.x, z: G.p.z }; });
+    await wait(2000);
+    Object.assign(r, await ev(a0 => { const S = window.__stranded, { G, R } = S, c = window.__horse; R.keys.KeyW = false; S.primaryAction(); return { moved: Math.hypot(G.p.x - a0.x, G.p.z - a0.z), under: Math.hypot(c.x - G.p.x, c.z - G.p.z) < 0.01, eye: R.camera.position.y - G.p.y, noSwing: !(R.swing > 0) }; }, a));
+    await ev(() => {   // to the shore of Mirror Lake, facing the middle
+      const { G, R, LAKES, heightAt, groundAt } = window.__stranded, L = LAKES.find(l => l.id === 'mirror');
+      let d = 20; while (heightAt(L.x, L.z + d) < 0.8 && d < 90) d += 0.5;
+      G.p.x = L.x; G.p.z = L.z + d + 1; G.p.y = groundAt(G.p.x, G.p.z); G.p.yaw = 0; R.keys.KeyW = true;
+    });
+    await wait(3000);
+    Object.assign(r, await ev(() => { const S = window.__stranded, { G, R } = S; R.keys.KeyW = false; const o = { swam: !!R.swim, depth: S.heightAt(G.p.x, G.p.z) }; S.interact(); o.off = !S.R.riding; return o; }));
+    Object.assign(r, await ev(() => {
+      const S = window.__stranded, { G, R } = S, c = window.__horse; S.mountUp(c); const inv0 = R.invuln, hp0 = G.p.hp; R.invuln = 0; S.hurtPlayer(5, 'hurt'); R.invuln = inv0; G.p.hp = hp0;
+      const thrown = !R.riding && c.bolt > 0;
+      S.clearCreatures(); S.slowTick(); const back = R.creatures.find(q => q.tame);
+      const o = { thrown, back: !!back && back.type === 'horse' && Math.hypot(back.x - G.mount.x, back.z - G.mount.z) < 0.5 };
+      S.clearCreatures(); delete G.mount; return o;
+    }));
+    return r;
+  }, r => ({ ok: r.target0 && r.target1 && r.target2 && r.tame && r.badge && r.mounted && r.moved > 12 && r.under && r.eye > 2.2 && r.noSwing && !r.swam && r.depth > -0.65 && r.off && r.thrown && r.back,
+    info: `fed on 3 days (aimed at it ${[r.target0, r.target1, r.target2].join('/')}), tame ${r.tame}, badge ${r.badge}; rode ${r.moved && r.moved.toFixed(1)} m in 2 s, eye ${r.eye && r.eye.toFixed(2)} m, no swing ${r.noSwing}; at the lake: swam ${r.swam}, stopped at depth ${r.depth && r.depth.toFixed(2)}, got off ${r.off}; thrown off ${r.thrown}; came back ${r.back}` }));
+
   await step('a storm', async () => {
     await ev(() => { const { G } = window.__stranded; G.weather = 'storm'; G.weatherHrs = 99; G.hour = 14; });
     await wait(6000);

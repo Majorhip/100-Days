@@ -31,7 +31,7 @@ function spawnPoint(biome, r0, r1) {
 }
 function updateSpawner() {
   const p = G.p, b = R.biome, night = nightAmount() > 0.6, cnt = {};
-  for (const c of R.creatures) if (!c.dead && !c.lair && !c.boss && !c.raid) cnt[c.type] = (cnt[c.type] || 0) + 1;
+  for (const c of R.creatures) if (!c.dead && !c.lair && !c.boss && !c.raid && !c.tame) cnt[c.type] = (cnt[c.type] || 0) + 1;
   const want = (type, cap, biome, o) => { if ((cnt[type] || 0) < rareCap(type, cap) && rareRoll(type)) { const s = spawnPoint(biome, 46, 72); if (s) { spawnCreature(type, s.x, s.z, o); return true; } } return false; };
   if (b === 'forest') {
     want('rabbit', night ? 1 : 3, 'forest'); if (!night) want('deer', 2, 'forest'); want('fox', 1, 'forest');

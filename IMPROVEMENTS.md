@@ -189,6 +189,10 @@ kinds), Lucky Spot (a rare one) and Naturalist (every animal), which keeps the B
 
 ## Step 7 — Ride the horse (item 8)
 
+**Status: done 27 Nov 2026.** `src/creatures/mount.js`. Taming uses berries. Riding is 9 m/s, or
+14 m/s galloping with Shift. The animal doesn't get hungry, and Scout isn't changed. All three are
+open for play-testing.
+
 **Plan:**
 1. **Taming:** wild horses (and the donkey and alpaca) are skittish. Feed one by hand a few times, on
    different days, and it lets you ride it.

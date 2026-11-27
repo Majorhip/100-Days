@@ -450,3 +450,36 @@ Settings offers Auto.
 
 **Check:** the smoke step "animal journal" puts a deer 12 m in front and a wolf 12 m behind. Only
 the deer is spotted, the tip shows, and the journal shows the Deer card, "???" cards and "1 / 21".
+
+## Step 7: riding (27 Nov 2026)
+**Taming** (`src/creatures/mount.js`):
+- **Calm:** wild horses, donkeys and alpacas stay put (`c.calm`, set once a second) while you
+  carry berries, walk rather than sprint, and don't yet have an animal.
+- **Feeding:** E on one feeds it a berry, once per game day.
+- **Tame:** on the third day you've fed one, the animal you feed becomes yours (`G.mount`), and
+  you get the 🐎 Rider badge.
+
+**Riding:**
+- **Getting on and off:** E on your animal gets you on, and E again gets you off, to the side.
+- **Speed:** 9 m/s, or 14 m/s galloping with Shift. Walking is 5 and sprinting 8.4. Stamina
+  refills while you ride.
+- **The view:** eyes are 2.4 m up instead of 1.62. You can see the horse's head and neck ahead.
+- **Limits:** no tools and no jumping. Your animal stops at water deeper than 0.6 m, with a tip.
+- **Getting hurt:** a hit throws you off and the animal bolts for 2 s. A blackout gets you off
+  first.
+
+**Your animal:**
+- It can't be hurt by you ("That is your horse!").
+- It isn't removed when far away, and it isn't counted against the herd caps.
+- It waits where you left it (`G.mount.x`, `.z`, `.yaw`). If it goes missing, for example
+  after a blackout clears the creatures, it comes back there within a second.
+
+**How it hooks in:** through flags (`c.calm`, `c.tame`, `c.tameUpdate`, `c.throwOff`,
+`R.riding`, `R.dismount`), not imports, so the older modules keep their start-up order.
+
+**Check:** the smoke step "tame and ride a horse" covers:
+- feeding on 3 days, aimed at the horse each time; tame, with the badge
+- 17.9 m ridden in 2 s, eyes 2.37 m up, no tool swing
+- at Mirror Lake: no swimming, stopped at a depth of 0.43 m, and E gets you off
+- a hit throws you off
+- after the creatures are cleared, the horse is back at its spot
