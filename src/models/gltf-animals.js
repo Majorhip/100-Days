@@ -13,7 +13,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { SkeletonUtils } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { litMat } from '../gfx/core.js';
-import { R } from '../state.js';
+import { G, R } from '../state.js';
 import { quadruped } from './animals.js';
 import { scorpion } from './scorpion.js';
 import { posedBox } from './posed-box.js';
@@ -39,8 +39,10 @@ import fishUrl from '../../assets/animals/packed/Fish.glb?url';
 import bearUrl from '../../assets/animals/packed/Bear.glb?url';
 import grizzleUrl from '../../assets/animals/packed/Grizzle.glb?url';
 import frostclawUrl from '../../assets/animals/packed/Frostclaw.glb?url';
+// Uncle Ray: 'Man' by Quaternius (CC0), recoloured, with Ray's hat added here
+import manUrl from '../../assets/animals/packed/Man.glb?url';
 
-const FILES = { Wolf: wolfUrl, Fox: foxUrl, ShibaInu: shibaUrl, Deer: deerUrl, Stag: stagUrl, Pig: pigUrl, Snake: snakeUrl, Crab: crabUrl, Spider: spiderUrl, Frog: frogUrl, Bat: batUrl, Horse: horseUrl, Horse_White: horseWhiteUrl, Donkey: donkeyUrl, Alpaca: alpacaUrl, Shark: sharkUrl, Fish: fishUrl, Bear: bearUrl, Grizzle: grizzleUrl, Frostclaw: frostclawUrl };
+const FILES = { Wolf: wolfUrl, Fox: foxUrl, ShibaInu: shibaUrl, Deer: deerUrl, Stag: stagUrl, Pig: pigUrl, Snake: snakeUrl, Crab: crabUrl, Spider: spiderUrl, Frog: frogUrl, Bat: batUrl, Horse: horseUrl, Horse_White: horseWhiteUrl, Donkey: donkeyUrl, Alpaca: alpacaUrl, Shark: sharkUrl, Fish: fishUrl, Bear: bearUrl, Grizzle: grizzleUrl, Frostclaw: frostclawUrl, Man: manUrl };
 
 /**
  * Which model each creature (or model name in spawnCreature's o.model) uses.
@@ -82,7 +84,9 @@ const KINDS = {
   // the bears. Frostclaw's height includes the ice on its back, so its body matches the others
   bear: { file: 'Bear', height: 1.5, scale: 1, colors: {} },
   grizzle: { file: 'Grizzle', height: 1.5, scale: 1.55, colors: { Eyes: { c: 0xff9a2a, glow: true } } },
-  frostclaw: { file: 'Frostclaw', height: 1.82, scale: 1.7, colors: { Eyes: { c: 0x39d0ff, glow: true }, Ice: { c: 0x8fdcff, glow: true } } }
+  frostclaw: { file: 'Frostclaw', height: 1.82, scale: 1.7, colors: { Eyes: { c: 0x39d0ff, glow: true }, Ice: { c: 0x8fdcff, glow: true } } },
+  // Uncle Ray, in the hand-built Ray's colours (green shirt, brown trousers, greying hair) and hat
+  ray: { file: 'Man', height: 1.78, scale: 1, colors: { Shirt: { c: 0x4d6e3c }, Pants: { c: 0x5a4632 }, Hair: { c: 0x6b5a4a }, Skin: { c: 0xe2b48c } }, hat: 0x8c6c3c }
 };
 // measured by tools/animals/measure.mjs at height 'at' (speeds scale with the model's height);
 // runAt: the speed from which it gallops; attack: the clip used for attacks
@@ -109,7 +113,9 @@ const CLIP_INFO = {
   // the bears (measured with feet Toe[LR]$); extra clips Roar and Slam for the bosses' specials
   Bear: { at: 1.5, walk: 0.92, run: 3.58, bite: 0.517, runAt: 2.4, attack: 'Attack' },
   Grizzle: { at: 1.5, walk: 0.92, run: 3.58, bite: 0.517, runAt: 2.4, attack: 'Attack' },
-  Frostclaw: { at: 1.82, walk: 0.92, run: 3.58, bite: 0.517, runAt: 2.4, attack: 'Attack' }
+  Frostclaw: { at: 1.82, walk: 0.92, run: 3.58, bite: 0.517, runAt: 2.4, attack: 'Attack' },
+  // Uncle Ray stands (Idle) and claps (Clap); he doesn't walk or fight
+  Man: { at: 1.78, walk: 1, run: 1, bite: 0, runAt: 99, attack: 'Attack', noSync: true }
 };
 
 const MODELS = {};   // file -> { scene, clips: {name: AnimationClip}, fit: {s, x, y, z} }
@@ -203,6 +209,7 @@ function gltfAnimal(kind) {
   const baseY = inner.position.y;
   const g = new THREE.Group(); g.add(inner); g.scale.setScalar(k.scale);
   if (k.collar) addCollar(inner, k.collar, k.height);
+  if (k.hat) addHat(g, inner, k.hat, k.height);
 
   const mixer = new THREE.AnimationMixer(inner), act = {};
   for (const n in src.clips) act[n] = mixer.clipAction(src.clips[n]);
@@ -221,7 +228,7 @@ function gltfAnimal(kind) {
     g, legs: [new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D()], head: new THREE.Object3D(), tail: new THREE.Object3D(), body: null,
     mats, eye: null, stride: 10, h: (k.height + (k.fly || 0)) * k.scale, gltf: kind, file: k.file,
     deathT: (src.clips.Death ? src.clips.Death.duration : 0) + 0.45,   // play the fall, then shrink away as before
-    mixer,
+    mixer, play,
     /** called every frame by updateCreatures after it has moved the creature */
     anim(c, dt) {
       lock -= dt;
@@ -278,6 +285,45 @@ function addCollar(inner, color, height) {
   neck.add(ring);
 }
 
+/** Ray's hat, as the hand-built Ray wore it (a wide brim and a crown), on the Head bone. Placed in
+ *  metres on top of the head, level, whatever way the bone points */
+const HAT_DOWN = 0.07;   // how far the brim sits below the top of the head (m)
+function addHat(g, inner, color, height) {
+  g.updateMatrixWorld(true);
+  let head = null; inner.traverse(o => { if (o.isBone && o.name === 'Head') head = o; });
+  if (!head) return;
+  const mat = litMat({ color }), hat = new THREE.Group();
+  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.04, 0.48), mat), crown = new THREE.Mesh(new THREE.BoxGeometry(0.29, 0.14, 0.27), mat);
+  crown.position.y = 0.09; brim.castShadow = crown.castShadow = true; hat.add(brim, crown);
+  const at = head.getWorldPosition(new THREE.Vector3()); at.y = height - HAT_DOWN;
+  hat.position.copy(head.worldToLocal(at));
+  hat.quaternion.copy(head.getWorldQuaternion(new THREE.Quaternion()).invert());
+  hat.scale.setScalar(1 / head.getWorldScale(new THREE.Vector3()).x);
+  head.add(hat);
+}
+
+/** Uncle Ray: swap the hand-built model for the animated one once it is loaded, as for Scout.
+ *  The story code (src/story/quests.js updateStory) turns r.g to face you and sways r.model.armL
+ *  and r.model.head; on the animated model those are stand-ins, and rayAnim() plays the clips */
+function upgradeRay(r) {
+  if (!r || r.model.gltf || !isLoaded('ray')) return;
+  const m = gltfAnimal('ray'); if (!m) return;
+  m.armL = new THREE.Object3D(); m.armR = new THREE.Object3D();
+  m.g.position.copy(r.g.position); m.g.rotation.y = r.g.rotation.y; m.g.visible = r.g.visible;
+  R.scene.remove(r.g); r.model = m; r.g = m.g; R.scene.add(m.g);
+}
+/** every frame while Ray is out: he stands, and claps when you come up to him (again each time
+ *  you've been away) */
+const CLAP_NEAR = 7, CLAP_RESET = 16, CLAP_SECS = 3.3;   // metres, metres, seconds (two claps)
+function rayAnim(r, dt) {
+  const m = r.model; if (!m.gltf) return;
+  const d = Math.hypot(G.p.x - r.x, G.p.z - r.z);
+  if (d > CLAP_RESET) m.met = false;
+  if (!m.met && d < CLAP_NEAR) { m.met = true; m.clapT = CLAP_SECS; m.play('Clap', 0.25); }
+  if (m.clapT > 0 && (m.clapT -= dt) <= 0) m.play('Idle', 0.4);
+  m.mixer.update(dt);
+}
+
 /** Ray's dog: swap the hand-built Scout for the animated one once it is loaded (Scout is made
  *  while the island is built, before the models have finished loading) */
 function upgradeScout(s) {
@@ -289,4 +335,4 @@ function upgradeScout(s) {
 /** Scout's state in the terms anim() reads: biting just after a bite lands, else moving or idle */
 const scoutPose = s => ({ state: s.bite > 0.8 ? 'wind' : 'idle', st: 0, moving: s.moving, flash: 0, dead: false });
 
-export { KINDS, CLIP_INFO, loadAnimalModels, posedBox, isLoaded, gltfAnimal, upgradeScout, scoutPose };
+export { KINDS, CLIP_INFO, loadAnimalModels, posedBox, isLoaded, gltfAnimal, upgradeScout, scoutPose, upgradeRay, rayAnim };

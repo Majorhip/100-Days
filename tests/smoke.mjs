@@ -268,6 +268,25 @@ try {
     info: r.button ? `About shows the credits ${/CC BY 3\.0/.test(r.text)}, panel still open ${r.open}, closes again ${r.closed}` : 'no About button'
   }));
 
+  // Uncle Ray is the animated Quaternius man in Ray's colours and hat (swapped in once the models
+  // are loaded); he faces you, and claps when you come up to him
+  await step('uncle ray', async () => {
+    await ev(() => { const S = window.__stranded; S.G.flags.rayFree = true; S.placeRay(); const r = S.R.ray; S.G.p.x = r.x + 30; S.G.p.z = r.z; });
+    await page.waitForFunction(() => !!window.__stranded.R.ray.model.gltf, { timeout: 30000 });
+    await wait(500);
+    await ev(() => { const S = window.__stranded, r = S.R.ray; S.G.p.x = r.x; S.G.p.z = r.z + 4; S.G.p.y = S.groundAt(S.G.p.x, S.G.p.z); S.G.p.vy = 0; });
+    await wait(1500);
+    const r = await ev(() => {
+      const S = window.__stranded, r = S.R.ray, m = r.model;
+      let hat = false; r.g.traverse(o => { if (o.isBone && o.name === 'Head') o.traverse(h => { if (h.geometry && h.geometry.type === 'BoxGeometry') hat = true; }); });
+      const facing = Math.abs(S.angDiff(r.g.rotation.y, Math.atan2(S.G.p.x - r.x, S.G.p.z - r.z)));
+      const clip = m.mixer._actions.filter(a => a.isRunning() && a.getEffectiveWeight() > 0.5).map(a => a.getClip().name).join('+');
+      return { model: m.gltf, inScene: S.R.scene.children.includes(r.g), visible: r.g.visible, hat, facing: +facing.toFixed(2), clip, clapT: +(m.clapT || 0).toFixed(1) };
+    });
+    await ev(() => { window.__stranded.G.flags.rayFree = false; window.__stranded.placeRay(); });
+    return r;
+  }, r => ({ ok: r.model === 'ray' && r.inScene && r.visible && r.hat && r.facing < 0.3 && r.clip === 'Clap', info: `model ${r.model}, in scene ${r.inScene}, hat ${r.hat}, facing off by ${r.facing} rad, playing ${r.clip}` }));
+
   // rarer finds: about half the small finds are not there (hidden, cannot be picked, never
   // grow back), all of them stay near the start; rarer animals: smaller caps, one at a time
   await step('rarer finds and animals', () => ev(() => {

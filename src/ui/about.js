@@ -8,7 +8,7 @@ const ABOUT = '<div class="about" style="margin:10px auto 0;max-width:440px;padd
   '<b>Stranded: 100 Days on Kestrel Island</b><br>' +
   'Made for Caspar.<br>' +
   'Built with ' + link('https://threejs.org', 'three.js') + '.<br>' +
-  'Animals by ' + link('https://quaternius.com', 'Quaternius') + ' (CC0).<br>' +
+  'Animals and Uncle Ray by ' + link('https://quaternius.com', 'Quaternius') + ' (CC0).<br>' +
   'Bears made from ' + link('https://poly.pizza/m/56ym_pyVnel', '“Black bear”') + ' by Poly by Google, licensed under ' +
   link('https://creativecommons.org/licenses/by/3.0/', 'CC BY 3.0') + '; rigged, animated and retextured for this game.' +
   '</div>';

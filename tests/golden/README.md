@@ -483,3 +483,24 @@ the deer is spotted, the tip shows, and the journal shows the Deer card, "???" c
 - at Mirror Lake: no swimming, stopped at a depth of 0.43 m, and E gets you off
 - a hit throws you off
 - after the creatures are cleared, the horse is back at its spot
+
+## Step 8: Uncle Ray's model (28 Nov 2026)
+**The model:** "Man" by Quaternius (CC0, `assets/animals/raw/Man.glb`, listed in
+`assets/animals/sources.tsv`). `node tools/animals/build.mjs Man` keeps two clips, Idle and
+Clapping (renamed Clap), and `node tools/animals/pack.mjs Man` packs it to 72 KB. Both tools now
+take model names, so one model can be rebuilt without touching the others.
+
+**In the game** (`src/models/gltf-animals.js`, kind `ray`):
+- **Look:** 1.78 m tall, recoloured to the hand-built Ray's colours (green shirt, brown trousers,
+  greying hair). His hat, a brim and a crown as before, is added on the Head bone (`addHat`).
+- **Swap:** Ray is built with the island, before the models finish loading. `upgradeRay()` swaps
+  in the animated one once it is loaded, as `upgradeScout()` does. The story code still turns him
+  to face you. `armL` and `head` are stand-ins on the new model, so that code needs no change.
+- **Clap:** `rayAnim()` plays Idle, and Clap twice (3.3 s) when you come within 7 m. He claps
+  again after you've been more than 16 m away.
+- **Hooks in:** `src/story/quests.js` imports `upgradeRay` and `rayAnim`. `creatures.js` loads
+  `gltf-animals.js` earlier, so the start-up order is unchanged.
+- **Fallback:** if the model doesn't load, Ray keeps his hand-built model.
+
+**Check:** the smoke step "uncle ray" frees Ray, waits for the swap, then walks up to 4 m. It
+checks the model is in the scene with its hat, faces you, and is clapping.

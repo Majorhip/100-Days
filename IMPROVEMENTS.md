@@ -215,11 +215,11 @@ open for play-testing.
 
 ## Step 8 — Matching models (item 10)
 
-**Status: waiting for an OK to download one file (27 Nov 2026).** What I found:
-- **Uncle Ray:** "Man" by Quaternius on Poly Pizza (https://poly.pizza/m/HMnuH5geEG) fits.
-  It is animated, public domain (CC0), and the file is 493 KB
-  (https://static.poly.pizza/3746be88-6799-4817-929b-6bc067c47caa.glb). It would be recoloured to
-  match Ray.
+**Status: Uncle Ray done 28 Nov 2026; the goat, rabbit and player stay as they are.** What I found:
+- **Uncle Ray (done):** "Man" by Quaternius on Poly Pizza (https://poly.pizza/m/HMnuH5geEG),
+  animated and public domain (CC0), 493 KB downloaded, 72 KB packed. He is recoloured to Ray's
+  colours, keeps his hat, faces you and claps when you come up to him. The model has no wave, so
+  he claps instead. See `tests/golden/README.md`, step 8.
 - **Goat and rabbit:** there is no free animated goat or four-legged rabbit on Poly Pizza. The
   Quaternius "Rabbit" and "Bunny" are upright plush characters, as ANIMALS.md already found. The
   free goats are static models by Poly by Google, CC BY, which would need rigging like the bears.

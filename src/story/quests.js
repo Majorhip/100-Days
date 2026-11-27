@@ -16,6 +16,7 @@ import { scoutLeaves } from '../creatures/scout.js';
 import { LM_POS, nearestClosedChest } from './props.js';
 import { placeRay } from './ray.js';
 import { toast, banner, questPop } from '../ui/hud.js';
+import { upgradeRay, rayAnim } from '../models/gltf-animals.js';   // added after the migration: Ray's animated model (already loaded by creatures.js, so the start-up order is unchanged)
 
 // @moved-from: original
 
@@ -69,7 +70,8 @@ function updateQuests() {
 function updateStory(dt) {
   if (R.balloon) { R.balloon.rotation.z = Math.sin(R.t * 0.5) * 0.04; R.balloon.rotation.x = Math.cos(R.t * 0.37) * 0.04; }
   R.towerLamp.visible = !!G.flags.radio && Math.sin(R.t * 3) > 0;
-  const r = R.ray; if (r.g.visible) { const a = Math.atan2(G.p.x - r.x, G.p.z - r.z); r.g.rotation.y += angDiff(r.g.rotation.y, a) * Math.min(1, dt * 3); r.model.armL.rotation.x = Math.sin(R.t * 1.2) * 0.08; r.model.head.rotation.y = Math.sin(R.t * 0.6) * 0.15; }
+  const r = R.ray; upgradeRay(r);
+  if (r.g.visible) { const a = Math.atan2(G.p.x - r.x, G.p.z - r.z); r.g.rotation.y += angDiff(r.g.rotation.y, a) * Math.min(1, dt * 3); r.model.armL.rotation.x = Math.sin(R.t * 1.2) * 0.08; r.model.head.rotation.y = Math.sin(R.t * 0.6) * 0.15; rayAnim(r, dt); }
   // sparkle on unopened treasure chests so they catch the eye
   if (Math.random() < dt * 3) { const c = nearestClosedChest(); if (c && dist2(c.x, c.z, G.p.x, G.p.z) < 40) puff(c.x + rnd(-0.5, 0.5), c.y + 0.9, c.z + rnd(-0.4, 0.4), 0xffe066, 1, { size: 0.07, up: 1.5, g: 0, speed: 0.3, life: 1.6, grow: 0.2 }); }
 }

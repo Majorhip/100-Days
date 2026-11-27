@@ -34,7 +34,9 @@ let a = 0, b = 0;
 /** every material, mesh (with its primitives' materials), node and clip, by name: must not change */
 const names = doc => { const r = doc.getRoot(); return JSON.stringify([r.listMaterials().map(m => m.getName()), r.listMeshes().map(m => m.getName() + ':' + m.listPrimitives().map(p => p.getMaterial() && p.getMaterial().getName()).join('+')), r.listNodes().map(n => n.getName()), r.listAnimations().map(a => a.getName())]); };
 const kb = n => (n / 1024).toFixed(0).padStart(5) + ' KB';
-for (const f of readdirSync(SRC).filter(f => f.endsWith('.glb')).sort()) {
+// node tools/animals/pack.mjs Man   packs only the models named (default: all of them)
+const ONLY = process.argv.slice(2);
+for (const f of readdirSync(SRC).filter(f => f.endsWith('.glb') && (!ONLY.length || ONLY.includes(f.slice(0, -4)))).sort()) {
   const doc = await io.read(join(SRC, f));
   const before = names(doc);
   doc.setLogger({ debug() { }, info() { }, warn: m => console.warn('  ' + m), error: m => console.error('  ' + m) });

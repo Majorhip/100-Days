@@ -36,12 +36,17 @@ export const MODELS = {
   Donkey: ['Idle', 'Walk', 'Gallop', 'Attack_Kick', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
   Alpaca: ['Idle', 'Walk', 'Gallop', 'Attack_Kick', 'Death', 'Idle_HitReact_Left', 'Idle_HitReact_Right', 'Eating'],
   Shark: { 'SharkArmature|SharkArmature|SharkArmature|Swim|SharkArmature|Swim': 'Idle', 'SharkArmature|SharkArmature|SharkArmature|Swim_Fast|SharkArmature|Swim_Fast': 'Gallop', 'SharkArmature|SharkArmature|SharkArmature|Swim_Bite|SharkArmature|Swim_Bite': 'Attack' },
-  Fish: { 'Armature|Swim': 'Idle' }
+  Fish: { 'Armature|Swim': 'Idle' },
+  // Uncle Ray (src/models/gltf-animals.js upgradeRay): standing, and clapping when you come by
+  Man: { 'HumanArmature|Man_Idle': 'Idle', 'HumanArmature|Man_Clapping': 'Clap' }
 };
+// node tools/animals/build.mjs Man   builds only the models named (default: all of them)
+const ONLY = process.argv.slice(2);
 
 const io = new NodeIO();
 mkdirSync(OUT, { recursive: true });
 for (const [name, list] of Object.entries(MODELS)) {
+  if (ONLY.length && !ONLY.includes(name)) continue;
   const rename = Array.isArray(list) ? Object.fromEntries(list.map(k => [k, k])) : list, keep = Object.keys(rename);
   const src = join(RAW, name + '.glb'), dst = join(OUT, name + '.glb');
   const doc = await io.read(src), root = doc.getRoot();
