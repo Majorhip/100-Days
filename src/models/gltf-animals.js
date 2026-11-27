@@ -14,6 +14,7 @@ import { SkeletonUtils } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { litMat } from '../gfx/core.js';
 import { R } from '../state.js';
 import { quadruped } from './animals.js';
+import { scorpion } from './scorpion.js';
 import { posedBox } from './posed-box.js';
 import wolfUrl from '../../assets/animals/game/Wolf.glb?url';
 import foxUrl from '../../assets/animals/game/Fox.glb?url';
@@ -145,6 +146,11 @@ function variant(k) {
 /** a new animated model for this kind; if it is not loaded, the kind's fallback or null (the
  *  caller then builds the hand-built one) */
 function gltfAnimal(kind) {
+  // the scorpion and the Dune King: a hand-built faceted black scorpion (src/models/scorpion.js),
+  // not a glTF — the reference model has no skeleton and only a skitter clip. Returned here so the
+  // creature code gets it before falling back to the original scorpionModel() in animals.js.
+  if (kind === 'scorpion') return scorpion(1, false);
+  if (kind === 'duneking') return scorpion(2.6, true);
   const k0 = KINDS[kind]; if (!k0) return null;
   const k = variant(k0), src = MODELS[k.file];
   if (!src) return k.fallback ? k.fallback() : null;

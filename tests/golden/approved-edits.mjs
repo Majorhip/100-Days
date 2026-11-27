@@ -124,6 +124,10 @@ export const EDITS = [
     kind: 'replace', was: "'>Click and drag to look</option></select></label>') + '</div>';", now: "'>Click and drag to look</option></select></label>') + '<button data-a=\"about\">ℹ️ About</button></div>';",
     why: 'Settings (pause menu and the title screen\'s How to play box): an About button that shows the credits (src/ui/about.js).'
   },
+  {
+    kind: 'module', file: 'src/models/scorpion.js', globals: [],
+    why: 'A faceted near-black scorpion, in the look of Google Data Arts Team\'s "Black Scorpion" (3 Dreams of Black). Built by hand: that model has no skeleton and only one skitter clip, so it cannot drive the game\'s animation like the rigged animals. gltfAnimal() returns it for the scorpion and the Dune King (same shape as scorpionModel, so the leg/tail animation and hit flash are unchanged); the original scorpionModel() stays as the fallback.'
+  },
   // ---- after the migration: snow wolves fear only crystal light (the Crystal Lantern) ----
   {
     kind: 'module', file: 'src/models/lantern.js', globals: [],
