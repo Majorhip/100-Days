@@ -1,6 +1,8 @@
 # Stranded: 100 Days — Migration Plan v2: single HTML file → Vite project
 
-**Status:** Rewritten 25 November 2026. Replaces the August draft, which assumed a menu-driven game built from plain web pages. If you still have the earlier `MIGRATION.md` handover, this plan takes precedence where they disagree; carry over anything specific from it that still applies.
+**Status (27 November 2026): done.** Phases 0–6 are finished and pushed. What is still open: the four balance targets (Phase 5, waiting for the original "typical day" model), the optional GitHub Pages link, the person-played "Feel" check (§6), and the open questions (§11). Details of each phase are in `tests/golden/README.md`; standing instructions are in `CLAUDE.md`.
+
+**Plan written:** Rewritten 25 November 2026. Replaces the August draft, which assumed a menu-driven game built from plain web pages. If you still have the earlier `MIGRATION.md` handover, this plan takes precedence where they disagree; carry over anything specific from it that still applies.
 
 **Goal:** the same game, with the same look and the same saves, split into modules with git history. One command builds it back into a single HTML file Caspar can double-click.
 
@@ -97,26 +99,26 @@ stranded/
 Each phase is one Claude Code session and one or more commits.
 
 ### Phase 0 — Prerequisites (one evening)
-- [ ] Install **Node.js** (current LTS, 22 or newer) and **Git**.
-- [ ] Create a **GitHub** account and an empty private repo called `stranded`.
-- [ ] Make sure your Claude plan includes **Claude Code**, and install it (instructions at docs.claude.com). The desktop app's Claude Code mode works if you'd rather avoid the terminal.
+- [x] Install **Node.js** (current LTS, 22 or newer) and **Git**.
+- [x] Create a **GitHub** account and an empty private repo called `stranded`. (Done as `Majorhip/100-Days`.)
+- [x] Make sure your Claude plan includes **Claude Code**, and install it (instructions at docs.claude.com). The desktop app's Claude Code mode works if you'd rather avoid the terminal.
 
 ### Phase 1 — Snapshot and record the "golden" reference
-- [ ] Create the repo and commit `original/Stranded-100-Days-PC.html` **untouched** as the first commit.
-- [ ] Record what "the same" means, before changing anything:
+- [x] Create the repo and commit `original/Stranded-100-Days-PC.html` **untouched** as the first commit.
+- [x] Record what "the same" means, before changing anything:
   - **World fingerprint:** a hash of the terrain heights, every tree/rock/pickup position, the lakes and the landmark sites. If the island changes, this changes.
   - **A real save:** play 10–15 minutes (build a fire, chop trees, open a chest) and export the save from localStorage to `tests/fixtures/save-v3.json`.
   - **Reference screenshots:** the same 6 views (meadow at noon, dusk, campfire at night, Frostpeak, Dust Flats, storm) at High.
 
 ### Phase 2 — Scaffold
-- [ ] Vite project with `three@0.128.0` and `vite-plugin-singlefile`.
-- [ ] Move the HTML markup and CSS out of the file into `index.html` and `src/ui/styles.css`.
-- [ ] `npm run dev` serves the game; `npm run build` produces one `dist/index.html`.
+- [x] Vite project with `three@0.128.0` and `vite-plugin-singlefile`.
+- [x] Move the HTML markup and CSS out of the file into `index.html` and `src/ui/styles.css`.
+- [x] `npm run dev` serves the game; `npm run build` produces one `dist/index.html`.
 
 ### Phase 3 — Lift and shift (the safety net)
-- [ ] Move the **entire game script, unchanged,** into `src/legacy.js`, importing three.js from npm instead of the embedded copy.
-- [ ] **Parity check:** the built single file plays identically, and the world fingerprint and saved game match.
-- [ ] Commit. From here on you're on Vite, even before anything is split.
+- [x] Move the **entire game script, unchanged,** into `src/legacy.js`, importing three.js from npm instead of the embedded copy.
+- [x] **Parity check:** the built single file plays identically, and the world fingerprint and saved game match.
+- [x] Commit. From here on you're on Vite, even before anything is split.
 
 ### Phase 4 — Split by section (3–6 sessions)
 Move one or two sections per session, in dependency order. Run the parity checks after every move.
@@ -136,6 +138,8 @@ Move one or two sections per session, in dependency order. Run the parity checks
 
 `legacy.js` shrinks each session and is deleted at the end.
 
+- [x] Done: the game is split into 63 modules and `src/legacy.js` is gone. Departures: boot, title and loop are in `src/boot.js`; shaders are still JavaScript strings, not `.glsl` files (moving them changes code, so it was left for later).
+
 ### Phase 5 — Tests worth having (1 session)
 - **World fingerprint** matches Phase 1, so the island is identical.
 - **Balance targets** hold. These are the numbers the game was tuned to:
@@ -145,6 +149,9 @@ Move one or two sections per session, in dependency order. Run the parity checks
   - hunting + fire ≈ 0
 - **The Phase 1 save loads**, and resaving it round-trips.
 - **Smoke test** in headless Chrome: new game, chop, build and light a fire, night with wolves, storm, sleep, swim, visit all three biomes, switch through all four graphics levels. Zero errors.
+
+- [x] World fingerprint, save load and round trip, and the smoke test are done (`npm test`, `npm run parity`).
+- [ ] Balance targets: the survival rates are pinned by 27 tests, but the four energy-per-day targets are a `todo` until the original "typical day" model turns up.
 
 ### Phase 6 — Ship (1 evening)
 - [x] `npm run ship` builds and copies the game to `release/Stranded-100-Days-PC.html` (the same file name). Giving Caspar the file is a hand-over step.
@@ -182,7 +189,7 @@ Move one or two sections per session, in dependency order. Run the parity checks
 ## 8. After the migration (separate projects, in this order)
 
 1. **TypeScript, gradually.** Start with `src/data/` and `src/game/`, where types act as the design document and catch "wrong stat" bugs. Rendering code can stay JavaScript as long as it likes.
-2. **Animated creature models — wolf pilot first.**
+2. **Animated creature models — wolf pilot first.** *Done (26–27 Nov 2026): see ANIMALS.md. Wolves, deer, fox, Scout, new wildlife, herds, the shark, fish and the three bears are animated.*
    - **Source:** Quaternius's free CC0 low-poly packs. The flat-shaded style matches the game.
    - **Known coverage:** animated wolf, plus packs with idle/walk/run/jump/death clips. Still to confirm: animated bear, goat, rabbit, deer and scorpion. Anything without a match keeps its hand-built model.
    - **Not recommended:** Kenney's animated animals are cube-style pets that would clash. Kenney's animated human characters could work for Uncle Ray.
