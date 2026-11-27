@@ -362,6 +362,21 @@ try {
     }, () => ev(b => { const { R } = window.__stranded; return { ok: R.biome === b, info: `biome ${R.biome}` }; }, biome));
   }
 
+  // Auto graphics (step 5): slow frames step the level down, all the way to Low; a level picked
+  // by hand is left alone
+  await step('auto graphics', async () => {
+    const slow = () => ev(() => { const { GFX } = window.__stranded; GFX.fpsT = 14.5; GFX.fpsN = 5; });
+    const was = await ev(() => { const S = window.__stranded, { R } = S, w = { manual: R.gfxManual, q: R.quality }; R.gfxManual = false; R.gfxTuned = false; S.setQuality(3); return w; });
+    const html = await ev(() => window.__stranded.settingsHTML());
+    const seen = [];
+    for (let i = 0; i < 3; i++) { await slow(); await wait(1500); seen.push(await ev(() => window.__stranded.R.quality)); }
+    const toast = await ev(() => document.getElementById('toasts').textContent);
+    await ev(() => { const S = window.__stranded; S.R.gfxManual = true; S.setQuality(3); }); await slow(); await wait(1500);
+    const manual = await ev(() => window.__stranded.R.quality);
+    await ev(w => { const S = window.__stranded; S.R.gfxManual = w.manual; S.setQuality(w.q); }, was);
+    return { seen, toast: /Graphics set to Low/.test(toast), manual, auto: html.includes('<option value="0" selected>Auto (now High)</option>') };
+  }, r => ({ ok: r.seen.join() === '2,1,1' && r.toast && r.manual === 3 && r.auto, info: `High -> ${r.seen.join(' -> ')} (Low reached, tip shown ${r.toast}); picked by hand stays ${r.manual}; Settings offers Auto ${r.auto}` }));
+
   for (const q of [1, 2, 3, 4]) {
     await step(`graphics level ${q}`, async () => { await ev(qq => window.__stranded.setQuality(qq), q); await wait(3000); },
       () => ev(qq => { const { R } = window.__stranded; return { ok: R.quality === qq && R.Q && R.Q.n === ['', 'Low', 'Medium', 'High', 'Ultra'][qq], info: `${R.Q.n}, ${Math.round(R.fps)} fps` }; }, q));

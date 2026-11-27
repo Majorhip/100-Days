@@ -7,6 +7,7 @@ import './panels.js';   // load order: runs after the previous part of the origi
 import { R } from '../state.js';
 import { setVolume } from '../audio/audio.js';
 import { GFXQ } from '../gfx/quality.js';
+import { GFX } from '../gfx/textures.js';
 import { saveSettings } from '../save.js';
 import { setQuality } from '../boot.js';
 import { touchHelpHTML } from '../input/touch.js';
@@ -21,14 +22,20 @@ function settingsHTML() {
   return '<div class="settings"><label>🖱️ Mouse speed <input type="range" min="0.3" max="2.5" step="0.1" value="' + R.sens + '" data-a="set" data-id="sens"></label>' +
     '<label>🔊 Volume <input type="range" min="0" max="1" step="0.05" value="' + R.vol + '" data-a="set" data-id="vol"></label>' +
     '<label>🎵 Music <input type="checkbox" ' + (R.music ? 'checked' : '') + ' data-a="set" data-id="music"></label>' +
-    '<label>🖥️ Graphics <select data-a="set" data-id="quality">' + [1, 2, 3, 4].map(q => '<option value="' + q + '" ' + (R.quality === q ? 'selected' : '') + '>' + GFXQ[q].n + '</option>').join('') + '</select></label>' +
+    '<label>🖥️ Graphics <select data-a="set" data-id="quality">' +
+      // Auto (added after the migration): the game steps down while it runs slowly; picking a level turns it off
+      '<option value="0" ' + (!R.gfxManual ? 'selected' : '') + '>Auto (now ' + GFXQ[R.quality].n + ')</option>' +
+      [1, 2, 3, 4].map(q => '<option value="' + q + '" ' + (R.gfxManual && R.quality === q ? 'selected' : '') + '>' + GFXQ[q].n + '</option>').join('') + '</select></label>' +
     (R.touch ? '' : '<label>👀 Look mode <select data-a="set" data-id="look"><option value="lock" ' + (!R.dragLook ? 'selected' : '') + '>Mouse look (click to lock)</option><option value="drag" ' + (R.dragLook ? 'selected' : '') + '>Click and drag to look</option></select></label>') + '<button data-a="about">ℹ️ About</button></div>';
 }
 function bindSetting(el) {
   const id = el.dataset.id; el.onclick = e => e.stopPropagation();
   const apply = () => {
     if (id === 'sens') R.sens = +el.value; if (id === 'vol') setVolume(+el.value); if (id === 'music') R.music = el.checked;
-    if (id === 'quality') { setQuality(+el.value); R.gfxManual = true; } if (id === 'look') R.dragLook = el.value === 'drag';
+    if (id === 'quality') {
+      if (+el.value === 0) { R.gfxManual = false; R.gfxTuned = false; GFX.fpsT = 0; GFX.fpsN = 0; }   // Auto: watch the frame rate again
+      else { setQuality(+el.value); R.gfxManual = true; }
+    } if (id === 'look') R.dragLook = el.value === 'drag';
     saveSettings();
   };
   el.oninput = apply; el.onchange = apply;

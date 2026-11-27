@@ -413,3 +413,19 @@ used it until this check.
   - finds Easy, then Hard, then back to Normal leaves exactly the same ones missing
   - a deer cap of 2: 2 on Easy, 1 on Normal
   - a bite of 10: 10 on Normal, 13 on Hard
+
+## Step 5: Auto graphics (27 Nov 2026)
+**What was there:** the original game already stepped the graphics down while it ran slowly.
+- In the first minute it measured 10 s of frames. Below 30 fps it went down one level, with a
+  tip, and measured again.
+- Picking a level in Settings turned this off for good, and it never went below Medium.
+
+**What changed:**
+- **Auto in Settings:** Graphics now has **Auto (now High)**, shown as chosen while nothing has
+  been picked by hand. Choosing it turns the step-down back on and starts a new measurement.
+- **Down to Low:** the step-down carries on until the game keeps up or it reaches Low.
+- **Unchanged:** the 30 fps threshold and the tip. It still never steps up on its own.
+
+**Check:** the smoke step "auto graphics" fakes slow frames three times. The level goes from High
+to Medium to Low and stays at Low, and the tip says Low. A level picked by hand is left alone, and
+Settings offers Auto.

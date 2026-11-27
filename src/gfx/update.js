@@ -60,12 +60,13 @@ function gfxUpdate(dt) {
   for (const f of R.worldFires) { const d = dist2(f.x, f.z, G.p.x, G.p.z); if (d < 45) src.push({ x: f.x, y: f.y + 0.6, z: f.z, d, big: false }); }
   updateLife(dt);
   if (PP.on) gradeUpdate(dt);
-  // automatic step-down if the computer is struggling (only until the player picks a setting)
+  // automatic step-down if the computer is struggling (only until the player picks a setting;
+  // Settings -> Graphics -> Auto turns it back on). It keeps stepping down to Low if it must.
   if (R.started && !R.panel && !R.sleeping && !R.gfxManual && !R.gfxTuned && R.quality > 1) {
     GFX.fpsT = (GFX.fpsT || 0) + dt; if (GFX.fpsT > 4) GFX.fpsN = (GFX.fpsN || 0) + 1;
     if (GFX.fpsT > 14) {
       const fps = GFX.fpsN / (GFX.fpsT - 4); GFX.fpsT = 0; GFX.fpsN = 0;
-      if (fps < 30) { setQuality(R.quality - 1); saveSettings(); toast('🖥️ Graphics set to <b>' + GFXQ[R.quality].n + '</b> so the game runs smoothly. You can change this in Settings.', 'tip', 7000); if (R.quality <= 2) R.gfxTuned = true; }
+      if (fps < 30) { setQuality(R.quality - 1); saveSettings(); toast('🖥️ Graphics set to <b>' + GFXQ[R.quality].n + '</b> so the game runs smoothly. You can change this in Settings.', 'tip', 7000); }
       else R.gfxTuned = true;
     }
   } else if (R.panel || R.sleeping) { GFX.fpsT = 0; GFX.fpsN = 0; }

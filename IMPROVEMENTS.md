@@ -155,6 +155,10 @@ continues. The island itself, `NODES` and the fingerprint stay the same.
 
 ## Step 5 — Auto graphics level (item 5)
 
+**Status: done 27 Nov 2026.** The original already stepped down below 30 fps, but it stopped at
+Medium and couldn't be turned back on. Now Settings has **Auto (now …)**, and the step-down goes
+all the way to Low. The original's 30 fps threshold is kept.
+
 **Plan:**
 1. **A new graphics option, Auto,** the default for new players.
 2. **Watch the frame rate:** after the first 30 seconds of play, watch it for 20 seconds. Below about
