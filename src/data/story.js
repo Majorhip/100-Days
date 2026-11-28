@@ -28,7 +28,9 @@ const DIALOGS = {
   rescue: ['The last rock crumbles. Blue light pours out of the cavern.', 'A man with a wild beard and a ranger hat stumbles out, blinking at the snow.', 'RAY: "Sam! LOOK at you! You crossed the whole island and climbed Frostpeak to find me?"', 'RAY: "I had three weeks of tinned beans and a lot of time to feel silly. You are the best thing I have ever seen."', 'RAY: "Meet me at the Radio Tower. Let\'s call home."'],
   rayTowerNoRadio: ['RAY: "The tower still needs its three parts, kiddo. Power coil, battery, antenna. Get those and we can call home."'],
   rayStay: ['RAY: "Then we stay. I\'ll keep the camp fed — you keep being a legend. The ship comes on Day 100."'],
-  rayIdle: ['RAY: "Day 100, kiddo. Until then, this island is ours. Have you found all ten golden idols yet?"']
+  rayIdle: ['RAY: "Day 100, kiddo. Until then, this island is ours. Have you found all ten golden idols yet?"'],
+  // Scout's story, chapter 1 (added after the migration: src/story/scout-story.js)
+  scoutPup: ['RAY: "Did you hear Scout last night? Howling at Frostpeak again."', 'RAY: "He\'s done that ever since I found him. Did I ever tell you? I found him as a pup, all on his own, right in the middle of the Stone Circle."', 'RAY: "No mum. No tracks. Just a little red-gold fluff ball, barking at the mountain."', 'RAY: "I never did work out where he came from. This island keeps a few secrets, kiddo."']
 };
 const INTRO = [
   ['THE STORM', 'You were on the supply boat <b>Petrel</b>, heading to spend the holidays with your Uncle Ray — the ranger of wild, faraway <b>Kestrel Island</b>.'],

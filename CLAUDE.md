@@ -48,6 +48,9 @@ into one file. The migration is finished (MIGRATION.md). Since then, new feature
   - `assets/animals/game/`: the working models. `assets/animals/packed/`: what the game embeds.
     After changing a model, run `node tools/animals/pack.mjs`.
   - `src/ui/about.js`: the credits
+  - `src/story/scout-story.js` and `src/game/scout-story.js`: Scout's story for the middle days.
+    The plan is `MIDDLE-DAYS-PLAN.md`, a spoiler file: never show it to Caspar or repeat it in the
+    game.
 
 ## Build check and the old ledger
 

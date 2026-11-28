@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vite build && vitest run",
-    "check": "vite build && vitest run tests/survival.test.js tests/time.test.js && node tests/golden/parity.mjs dist/index.html --quick",
+    "check": "vite build && vitest run tests/survival.test.js tests/time.test.js tests/scout-story.test.js && node tests/golden/parity.mjs dist/index.html --quick",
     "smoke": "node tests/smoke.mjs",
     "golden:fingerprint": "node tests/golden/fingerprint.mjs",
     "golden:save": "node tests/golden/savecheck.mjs",

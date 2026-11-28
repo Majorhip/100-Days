@@ -79,19 +79,23 @@ function scoutAlert(c) {
 function compassWord(dx, dz) { const a = Math.atan2(dx, -dz), i = Math.round(a / (Math.PI / 4)); return ['NORTH', 'NORTH-EAST', 'EAST', 'SOUTH-EAST', 'SOUTH', 'SOUTH-WEST', 'WEST', 'NORTH-WEST'][(i + 8) % 8]; }
 function updateScout(dt) {
   const s = R.scout, p = G.p; if (!s) return; upgradeScout(s); s.moving = 0; if (s.barkT > 0) s.barkT -= dt; if (s.bite > 0) s.bite -= dt;
+  if (s.howlT > 0) s.howlT -= dt;   // (added after the migration: Scout's story sets howlT and scared, src/story/scout-story.js)
   if (G.scout.friend) {
     const d = dist2(s.x, s.z, p.x, p.z);
     if (d > 48 || R.teleScout) { R.teleScout = false; const a = p.yaw + rnd(-0.6, 0.6); s.x = p.x + Math.sin(a) * 3; s.z = p.z + Math.cos(a) * 3; }
     let foe = null, fd = 11;
     for (const c of R.creatures) { if (c.dead || c.def.passive || c.state === 'flee') continue; if (c.state === 'idle' && !c.boss) continue; const dd = dist2(c.x, c.z, s.x, s.z); if (dd < fd && dist2(c.x, c.z, p.x, p.z) < 14) { fd = dd; foe = c; } }
     const go = (tx, tz, sp, stop) => { const dx = tx - s.x, dz = tz - s.z, l = Math.hypot(dx, dz); if (l > stop) { const nx = s.x + dx / l * sp * dt, nz = s.z + dz / l * sp * dt; if (heightAt(nx, nz) > -0.3) { const k = collide(nx, nz, 0.3); s.x = k[0]; s.z = k[1]; } s.moving = sp; s.yaw += angDiff(s.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 10); } return l; };
-    if (foe) { const l = go(foe.x, foe.z, 8.5, foe.def.r * foe.scale + 0.7); if (l < foe.def.r * foe.scale + 1.2 && s.bite <= 0) { s.bite = 1.1; damageCreature(foe, 6 + G.p.level, null); if (Math.random() < 0.4) sfx('bark'); } }
-    else if (d > 3.2) go(p.x, p.z, d > 9 ? 9.5 : d > 5 ? 6.5 : 4, 2.4);
+    if (foe) { s.howlT = 0; const l = go(foe.x, foe.z, 8.5, foe.def.r * foe.scale + 0.7); if (l < foe.def.r * foe.scale + 1.2 && s.bite <= 0) { s.bite = 1.1; damageCreature(foe, 6 + G.p.level, null); if (Math.random() < 0.4) sfx('bark'); } }
+    else if (s.howlT > 0) { const fp = SITES.summit; s.yaw += angDiff(s.yaw, Math.atan2(fp.x - s.x, fp.z - s.z)) * Math.min(1, dt * 4); }   // howling at Frostpeak
+    else if (d > (s.scared ? 1.8 : 3.2)) go(p.x, p.z, d > 9 ? 9.5 : d > 5 ? 6.5 : 4, s.scared ? 1.4 : 2.4);   // scared of thunder: he keeps closer
   }
+  s.howl = lerp(s.howl || 0, s.howlT > 0.5 ? 1 : 0, Math.min(1, dt * 3));   // nose up, for the model
   s.y = lerp(s.y, heightAt(s.x, s.z), Math.min(1, dt * 12)); s.g.position.set(s.x, s.y, s.z); s.g.rotation.y = s.yaw;
+  s.g.rotation.z = s.scared ? Math.sin(R.t * 40) * (s.moving ? 0.012 : 0.03) : 0;   // shivering in a thunderstorm
   const m = s.model;
   if (s.moving > 0) { s.phase += dt * s.moving * 2.6; const k = Math.sin(s.phase) * 0.7; m.legs[0].rotation.x = k; m.legs[3].rotation.x = k; m.legs[1].rotation.x = -k; m.legs[2].rotation.x = -k; } else m.legs.forEach(l => l.rotation.x *= 0.8);
-  m.tail.rotation.y = Math.sin(R.t * (G.scout.friend ? 11 : 4)) * 0.6; m.head.rotation.x = Math.sin(R.t * 1.7) * 0.07 - (s.moving ? 0 : 0.12); if (m.anim) m.anim(scoutPose(s), dt);
+  m.tail.rotation.y = Math.sin(R.t * (G.scout.friend ? 11 : 4)) * 0.6; m.head.rotation.x = Math.sin(R.t * 1.7) * 0.07 - (s.moving ? 0 : 0.12) - s.howl * 0.5; if (m.anim) m.anim(scoutPose(s), dt);
   R.scoutPoi.x = s.x; R.scoutPoi.y = s.y + 0.5; R.scoutPoi.z = s.z;
 }
 // @end-moved

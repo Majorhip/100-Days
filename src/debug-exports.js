@@ -77,3 +77,5 @@ export * from './creatures/wildlife.js';
 export * from './creatures/sea.js';
 export * from './ui/loading.js';
 export * from './world/rarity.js';
+export * from './game/scout-story.js';
+export * from './story/scout-story.js';

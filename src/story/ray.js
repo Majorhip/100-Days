@@ -35,6 +35,7 @@ function talkToRay() {
       showChoice('What do you tell Uncle Ray?', [['🚁 Call the helicopter', 'Finish the story now and go home.', () => { G.flags.rayChoice = 'heli'; G.ending = 'heli'; showEnding('heli'); }], ['🏝️ Stay until Day 100!', 'Keep surviving with Uncle Ray at your camp.', () => { G.flags.rayChoice = 'stay'; placeRay(); showDialog(DIALOGS.rayStay); saveGame(); }]]);
     }); return;
   }
+  if (R.rayTalk && R.rayTalk()) return;   // added after the migration: Ray has something to say first (src/story/scout-story.js)
   showDialog(DIALOGS.rayIdle);
 }
 // @end-moved

@@ -57,6 +57,8 @@ const FILES = { Wolf: wolfUrl, Fox: foxUrl, ShibaInu: shibaUrl, Deer: deerUrl, S
  *   fallback  builds a hand-built model for a creature the original game did not have, for
  *           when the animated one is not loaded
  *   collar  colour of a collar on the neck (Scout)
+ *   lift    the bone that lifts the head when the creature's c.howl is set, 0 to 1 (Scout
+ *           howling at Frostpeak: src/story/scout-story.js)
  *   turn    the model faces backwards in its file: turn it round
  *   fly     flies this high (m) above the ground, bobbing (bats)
  *   colors on a textured material tint the texture (the boar is the pig, tinted brown)
@@ -69,7 +71,7 @@ const KINDS = {
   deer: { variants: [{ file: 'Deer', height: 1.55, weight: 0.65 }, { file: 'Stag', height: 2.0, weight: 0.35 }], scale: 1, colors: {} },
   fox: { file: 'Fox', height: 0.62, scale: 1, colors: {}, fallback: foxBox(0xc0652e, 0x8a4420, 0xf3e6d6) },
   arcticfox: { file: 'Fox', height: 0.62, scale: 1, colors: { Main: { c: 0xf2f4f6 }, Main_Light: { c: 0xffffff }, Grey: { c: 0xd3d9df } }, fallback: foxBox(0xf2f4f6, 0xd3d9df, 0xffffff) },
-  scout: { file: 'ShibaInu', height: 0.75, scale: 1, colors: { Main: { c: 0xc98a3c } }, collar: 0xd9342b },
+  scout: { file: 'ShibaInu', height: 0.75, scale: 1, colors: { Main: { c: 0xc98a3c } }, collar: 0xd9342b, lift: 'Neck1' },
   boar: { file: 'Pig', height: 0.8, scale: 1, colors: { AtlasMaterial: { c: 0x93806f } } },
   snake: { file: 'Snake', height: 0.7, scale: 1, colors: {}, turn: true },
   crab: { file: 'Crab', height: 0.45, scale: 1, colors: {}, turn: true },
@@ -210,6 +212,10 @@ function gltfAnimal(kind) {
   const g = new THREE.Group(); g.add(inner); g.scale.setScalar(k.scale);
   if (k.collar) addCollar(inner, k.collar, k.height);
   if (k.hat) addHat(g, inner, k.hat, k.height);
+  // lifting the head (k.lift): the turn is undone before the mixer runs each frame, so it can
+  // never build up, even on a bone no clip moves
+  let liftB = null, lifted = false; const liftQ = new THREE.Quaternion(), _m = new THREE.Matrix4(), _ax = new THREE.Vector3();
+  if (k.lift) inner.traverse(o => { if (o.isBone && o.name === k.lift) liftB = o; });
 
   const mixer = new THREE.AnimationMixer(inner), act = {};
   for (const n in src.clips) act[n] = mixer.clipAction(src.clips[n]);
@@ -260,13 +266,22 @@ function gltfAnimal(kind) {
           // standing still: idle, and now and then (when calm) put the nose down to eat
           if (cur !== act.Idle && cur !== act.Eating) pause = 0;
           pause += dt;
-          if (cur === act.Eating && cur.time > cur.getClip().duration - 0.3) play('Idle', 0.4);
+          if (c.howl > 0.01) { play('Idle', 0.3); pause = 0; }   // howling (Scout): head up, never eating
+          else if (cur === act.Eating && cur.time > cur.getClip().duration - 0.3) play('Idle', 0.4);
           else if (cur !== act.Eating) play(c.state === 'idle' && pause > 1.2 && Math.random() < dt * 0.15 && act.Eating ? 'Eating' : 'Idle', 0.3);
         }
       }
       lastFlash = c.flash;
       if (k.fly) { flyT += dt; inner.position.y = c.dead ? Math.max(baseY, inner.position.y - dt * 4) : baseY + k.fly + Math.sin(flyT * 2.3) * 0.2; }
+      if (lifted) { liftB.quaternion.multiply(liftQ.invert()); liftQ.invert(); lifted = false; }
       mixer.update(dt);
+      if (liftB && c.howl > 0.01) {
+        // nose up: turn the bone about the animal's own left-right axis (its +X), in the bone's frame.
+        // Full matrices, not world quaternions: a mirrored bone's quaternion would give the wrong axis
+        liftB.updateWorldMatrix(true, false);
+        _ax.set(1, 0, 0).transformDirection(g.matrixWorld).transformDirection(_m.copy(liftB.matrixWorld).invert());
+        liftQ.setFromAxisAngle(_ax, -0.9 * c.howl); liftB.quaternion.multiply(liftQ); lifted = true;
+      }
     }
   };
   return model;
@@ -333,6 +348,6 @@ function upgradeScout(s) {
   s.model = m; s.g = m.g; R.scene.add(m.g);
 }
 /** Scout's state in the terms anim() reads: biting just after a bite lands, else moving or idle */
-const scoutPose = s => ({ state: s.bite > 0.8 ? 'wind' : 'idle', st: 0, moving: s.moving, flash: 0, dead: false });
+const scoutPose = s => ({ state: s.bite > 0.8 ? 'wind' : 'idle', st: 0, moving: s.moving, flash: 0, dead: false, howl: s.howl || 0 });
 
 export { KINDS, CLIP_INFO, loadAnimalModels, posedBox, isLoaded, gltfAnimal, upgradeScout, scoutPose, upgradeRay, rayAnim };

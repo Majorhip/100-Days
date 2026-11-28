@@ -247,7 +247,10 @@ they're left out here.
 
 ---
 
-## Item 6 — The story for the middle of the game (waiting for Caspar)
+## Item 6 — The story for the middle of the game
+
+**Status:** Caspar's picks are in. The plan is in `MIDDLE-DAYS-PLAN.md`, a spoiler file he has
+agreed not to open. It was approved on 28 Nov 2026, and its step 2 is built.
 
 Caspar is choosing the flavour in the doc made for him. It has five high-level choices plus his own
 ideas, and gives no spoilers.

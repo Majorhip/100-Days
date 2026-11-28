@@ -504,3 +504,51 @@ take model names, so one model can be rebuilt without touching the others.
 
 **Check:** the smoke step "uncle ray" frees Ray, waits for the swap, then walks up to 4 m. It
 checks the model is in the scene with its hat, faces you, and is clapping.
+
+## The middle days, step 2: Scout's story begins (28 Nov 2026)
+The story plan is `MIDDLE-DAYS-PLAN.md`, a spoiler file that isn't for Caspar. This step adds the
+first slice of it.
+
+**The rule** (`src/game/scout-story.js`, pure):
+- `chapterDue()`: no chapters until Ray is free and the player chose to stay.
+- **Chapter n can start** on Day 21, 31, 41, 51, 61 or 71: the morning after a Wolf Moon.
+- **Each chapter after the first** waits until the one before is done, and until 3 days after it
+  began. A player who stays late therefore catches up about every 3 days.
+- **Only the chapters built so far are given.** That's 1 for now.
+- `howlsTonight()`: every third evening, then every other evening after chapter 1.
+
+**The story** (`src/story/scout-story.js`, called once a second from `slowTick`):
+- **Chapter 1:**
+  - A toast: Ray wants a word about Scout. His E prompt shows 💬.
+  - Talking to him plays `DIALOGS.scoutPup`: he found Scout as a pup in the Stone Circle.
+  - If you don't talk to him, a reminder comes each morning.
+- **Thunderstorms:** while Scout is a friend, he shivers, follows closer (1.8 m instead of 3.2) and
+  whines now and then. The first time each day, a toast says he hates thunder. **His fighting is
+  unchanged.**
+- **Dusk (19:00–20:00) on a howling evening:**
+  - Scout stops, turns to Frostpeak and lifts his nose (`lift: 'Neck1'` in `KINDS.scout`, up to
+    0.9 rad), and howls twice (the new `doghowl` sound), for 5.5 s. He doesn't start his Eating
+    clip while howling.
+  - **The turn's axis comes from full world matrices, not world quaternions.** A first try with
+    quaternions looked wrong in the screenshots. The cause turned out to be the Eating clip, which
+    the seeded test browser started every time, but the matrix version is the safer one either way.
+  - Not during a storm, a Wolf Moon, riding or sleep. A fight cancels it.
+- **Saves:** `G.story = { ch, day, done }`, made only when chapter 1 starts. Every other save is
+  unchanged, so the round trip still gives the fixture back exactly.
+
+**How it hooks in** (flags only):
+- `scout.js` reads `howlT` and `scared` on `R.scout`.
+- `ray.js` asks `R.rayTalk()` first.
+- `gltf-animals.js` undoes each frame's neck lift before the mixer runs, so it can't build up.
+
+**Checks:**
+- **`tests/scout-story.test.js`** (9 tests, also in `npm run check`).
+- **The smoke step "scout's story":**
+  - chapter 1 on Day 25 after "stay", with the toast and the 💬
+  - 4 lines mentioning the Stone Circle, then the chapter is done and the 💬 goes
+  - no chapter 2 on Day 31
+  - a storm makes him shiver, with the tip
+  - at 19:12 on Day 32 he howls and faces Frostpeak. His head rises above the base of his neck
+    (by about 3 cm; the check needs more than 1.5 cm), and he isn't eating.
+- **Screenshots:** `node tools/story/scout-shots.mjs <dir>` shows him standing and howling, from the
+  side.

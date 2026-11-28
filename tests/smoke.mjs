@@ -287,6 +287,63 @@ try {
     return r;
   }, r => ({ ok: r.model === 'ray' && r.inScene && r.visible && r.hat && r.facing < 0.3 && r.clip === 'Clap', info: `model ${r.model}, in scene ${r.inScene}, hat ${r.hat}, facing off by ${r.facing} rad, playing ${r.clip}` }));
 
+  // Scout's story, step 2 (src/story/scout-story.js, MIDDLE-DAYS-PLAN.md): chapter 1 starts after
+  // "stay" and Ray tells the pup story; no chapter 2 yet; a storm makes Scout shiver; at dusk on a
+  // howling evening he stops, faces Frostpeak and lifts his nose
+  await step("scout's story", async () => {
+    const r = {};
+    const keep = await ev(() => {
+      const S = window.__stranded, { G, R } = S, k = { friend: G.scout.friend, fed: G.scout.fed, rayFree: G.flags.rayFree, rayChoice: G.flags.rayChoice, radio: G.flags.radio, day: G.day, hour: G.hour };
+      S.clearCreatures(); G.day = 25; G.hour = 10; G.weather = 'clear'; G.weatherHrs = 99;
+      G.scout.friend = true; G.scout.fed = 25; G.flags.radio = true; G.flags.rayFree = true; G.flags.rayChoice = 'stay'; delete G.story; S.placeRay(); R.teleScout = true;
+      S.updateScoutStory(); return k;
+    });
+    Object.assign(r, await ev(() => { const S = window.__stranded, st = S.G.story || {}; return { ch: st.ch, done0: st.done, toast: /wants a word about Scout/.test(document.getElementById('toasts').textContent), label: S.R.rayPoi.label() }; }));
+    Object.assign(r, await ev(() => {   // talk to Ray: the pup story, then the chapter is done
+      const S = window.__stranded, lines = []; S.talkToRay();
+      for (let i = 0; i < 8 && S.R.panel === 'dialog'; i++) { lines.push(document.getElementById('panel').textContent); S.R.panelNext(); }
+      const o = { lines: lines.length, circle: lines.some(l => /Stone Circle/.test(l)), done: S.G.story.done, closed: !S.R.panel, label2: S.R.rayPoi.label() };
+      S.G.day = 31; S.updateScoutStory(); o.ch2 = S.G.story.ch;   // chapter 2 isn't built yet
+      S.G.weather = 'storm'; S.updateScoutStory(); return o;
+    }));
+    await wait(400);
+    Object.assign(r, await ev(async () => {   // a storm: Scout shivers
+      const S = window.__stranded, a = [];
+      for (let i = 0; i < 8; i++) { a.push(S.R.scout.g.rotation.z); await new Promise(q => setTimeout(q, 31)); }
+      return { scared: S.R.scout.scared, shiver: +(Math.max(...a) - Math.min(...a)).toFixed(3), stormToast: /hates thunder/.test(document.getElementById('toasts').textContent) };
+    }));
+    // how far his head sits above the base of his neck (m), and the clip playing: lifting his nose
+    // raises it; eating would put his nose on the ground
+    const headY = () => ev(() => {
+      const s = window.__stranded.R.scout, b = {}; s.g.traverse(o => { if (o.isBone) b[o.name] = o; });
+      const y = o => o.getWorldPosition(new o.position.constructor()).y;
+      return { y: b.Head ? +(y(b.Head) - y(b.Neck1)).toFixed(3) : null, clip: s.model.mixer._actions.filter(a => a.isRunning() && a.getEffectiveWeight() > 0.5).map(a => a.getClip().name).join('+') };
+    });
+    await ev(() => {   // dusk on a howling evening (Day 32, even)
+      const S = window.__stranded, { G, R } = S; G.weather = 'clear'; S.updateScoutStory(); S.clearCreatures();
+      G.day = 32; G.hour = 19.2; R.scout.x = G.p.x + 3; R.scout.z = G.p.z; S.updateScoutStory();
+    });
+    await wait(1500);
+    Object.assign(r, await ev(() => {
+      const S = window.__stranded, s = S.R.scout, fp = S.SITES.summit;
+      return { howlT: +s.howlT.toFixed(1), howl: +s.howl.toFixed(2), facing: +Math.abs(S.angDiff(s.yaw, Math.atan2(fp.x - s.x, fp.z - s.z))).toFixed(2), howlToast: /howls/.test(document.getElementById('toasts').textContent) };
+    }));
+    const up = await headY(); r.headUp = up.y; r.howlClip = up.clip;
+    await ev(() => { window.__stranded.R.scout.howlT = 0; });
+    await wait(2000);   // nose back down; eating can't start for another second or so
+    r.headDown = (await headY()).y;
+    await ev(k => {
+      const S = window.__stranded, { G } = S, set = (o, n, v) => { if (v === undefined) delete o[n]; else o[n] = v; };
+      G.scout.friend = k.friend; G.scout.fed = k.fed; set(G.flags, 'rayFree', k.rayFree); set(G.flags, 'rayChoice', k.rayChoice); set(G.flags, 'radio', k.radio);
+      G.day = k.day; G.hour = k.hour; delete G.story; S.placeRay(); S.clearCreatures();
+    }, keep);
+    return r;
+  }, r => ({
+    ok: r.ch === 1 && r.done0 === false && r.toast && /💬/.test(r.label) && r.lines === 4 && r.circle && r.done && r.closed && !/💬/.test(r.label2) && r.ch2 === 1 &&
+      r.scared && r.shiver > 0.01 && r.stormToast && r.howlT > 3 && r.howl > 0.8 && r.facing < 0.3 && r.howlToast && r.headUp - r.headDown > 0.015 && !/Eating/.test(r.howlClip),
+    info: `chapter ${r.ch} with toast ${r.toast}, prompt "${r.label}"; ${r.lines} lines (Stone Circle ${r.circle}), done ${r.done}; no chapter 2: ${r.ch2 === 1}; storm: shiver ${r.shiver} rad, tip ${r.stormToast}; dusk: howling ${r.howlT} s left, nose up ${r.howl}, facing Frostpeak off by ${r.facing} rad, head above neck ${r.headDown} -> ${r.headUp} m playing ${r.howlClip}`
+  }));
+
   // rarer finds: about half the small finds are not there (hidden, cannot be picked, never
   // grow back), all of them stay near the start; rarer animals: smaller caps, one at a time
   await step('rarer finds and animals', () => ev(() => {
