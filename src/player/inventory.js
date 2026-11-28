@@ -34,9 +34,17 @@ function slotTool(slot) { const c = G.p.pick && G.p.pick[slot]; return c && inv(
 function switchTool(slot) {
   const list = slotTools(slot); if (list.length < 2) return null;
   const next = list[(list.indexOf(slotTool(slot)) + 1) % list.length];
-  if (next === list[0]) unpick(slot); else (G.p.pick || (G.p.pick = {}))[slot] = next;
-  uiDirty(); return next;
+  pickTool(next); return next;
 }
+/** make this tool the one its slot holds, and return the slot (your best tool needs no pick) */
+function pickTool(id) {
+  if (id === 'hands') return 'hands';
+  const slot = ITEMS[id].tool.slot;
+  if (id === bestTool(slot)) unpick(slot); else (G.p.pick || (G.p.pick = {}))[slot] = id;
+  uiDirty(); return slot;
+}
+/** every tool you own, hotbar slot by slot, the best of each slot first (the mouse wheel steps through them) */
+const allTools = hotbar => hotbar.flatMap(s => bestTool(s) ? slotTools(s) : []);
 /** back to your best tool for a slot (a new one crafted, say) */
 function unpick(slot) { if (!G.p.pick) return; delete G.p.pick[slot]; if (!Object.keys(G.p.pick).length) delete G.p.pick; }
 function heldId() { return slotTool(G.p.held) || 'hands'; }
@@ -56,4 +64,4 @@ function addXP(n) {
 }
 // @end-moved
 
-export { inv, give, take, canAfford, pay, bestTool, slotTools, slotTool, switchTool, unpick, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP };
+export { inv, give, take, canAfford, pay, bestTool, slotTools, slotTool, switchTool, pickTool, allTools, unpick, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP };

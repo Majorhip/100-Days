@@ -609,6 +609,21 @@ Crystal Lantern he could never pick the fire torch again.
 
 **Check:** the smoke step "hotbar: switch tools in a slot".
 
+**Fixed the same day: "still can't select the torch".** The number key worked, but the ways Caspar
+would really try didn't:
+- **The pack:** it says "Tools and weapons: click to hold", but clicking the **Torch** held the
+  torch *slot*, which gave the lantern. It now holds that very tool (`pickTool()`).
+- **The mouse wheel** stepped from slot to slot. It now steps through every tool you own
+  (`allTools()`), so the torch and the lantern both come round.
+- **T** toggled the slot's tool on and off. With a torch and a lantern it now goes lantern, torch,
+  hands. With one, it's on and off as before.
+- **The tip** only came when a second tool arrived during play, so a game that already had both (as
+  Caspar's does) never saw it. It now also comes after 45 s of play, and names all the ways. It still
+  doesn't come at once, so a save that's just loaded is unchanged.
+
+**Check:** the same smoke step now also presses T three times, rolls the wheel, and clicks the Torch
+in the pack.
+
 **`--only` caveat:** some smoke steps depend on earlier ones. "torch and crystal lantern" run alone
 fails (the snow wolf flees the torch too) on today's build and on the build before the story work
 alike. Run the whole smoke test before a commit.

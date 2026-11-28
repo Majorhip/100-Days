@@ -12,7 +12,7 @@ import { ITEMS } from '../data/items.js';
 import { RECIPES } from '../data/recipes.js';
 import { BUILD_BY_ID } from '../data/buildings.js';
 import { NOTES, LANDMARKS, BADGES, TIPS } from '../data/story.js';
-import { inv, give, take, canAfford, pay, bestTool, unpick, wearStat, armorValue, dmgMult, addXP } from '../player/inventory.js';
+import { inv, give, take, canAfford, pay, bestTool, pickTool, unpick, wearStat, armorValue, dmgMult, addXP } from '../player/inventory.js';
 import { eat, drinkCanteen } from '../player/health.js';
 import { refreshViewModel } from '../player/viewmodel.js';
 import { stopFishing } from '../player/fishing.js';
@@ -160,7 +160,7 @@ function panelAction(a, id, el) {
     case 'use': {
       const d = ITEMS[id]; R.invInfo = id;
       if (d.food) { eat(id); renderPanel(); }
-      else if (d.tool) { G.p.held = d.tool.slot; refreshViewModel(); closePanel(); }
+      else if (d.tool) { G.p.held = pickTool(id); refreshViewModel(); closePanel(); }   // (pickTool: added after the migration) this tool, not just the best of its kind
       else if (id === 'canteen') { drinkCanteen(); renderPanel(); }
       else { if (R.touch) renderPanel(); else hint(d.d); }
       break;

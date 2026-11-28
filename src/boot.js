@@ -165,7 +165,7 @@ function startGame(isNew) {
 }
 
 /* ---------- per-second checks ---------- */
-let _multi = null;   // (added after the migration) how many hotbar slots hold more than one of your tools
+let _multi = null, _ticks = 0;   // (added after the migration) how many hotbar slots hold more than one of your tools; seconds played
 function slowTick() {
   const p = G.p, b = biomeAt(p.x, p.z);
   if (b !== R.biome) {
@@ -175,8 +175,10 @@ function slowTick() {
   }
   R.stepKind = p.y < -0.2 ? 'water' : groundAt(p.x, p.z) > heightAt(p.x, p.z) + 0.08 ? 'wood' : b === 'snow' ? 'snow' : b === 'desert' ? 'sand' : 'grass';
   updateSpawner(); checkLandmarks(); updateQuests(); revealFog(); scoutHungerCheck(); checkSightings(); updateMount(); updateScoutStory();
-  const multi = HOTBAR.filter(s => slotTools(s).length > 1).length;   // a second tool for a slot just came: how to switch (once)
-  if (_multi !== null && multi > _multi) tipOnce('switchtool', 'You have two tools for one hotbar slot (<b>⇄</b>). Choose that slot again (its number key, or click it) to switch between them.');
+  // how to choose between two tools for one hotbar slot, once: when a second one comes, or after 45 s
+  // of play for a game that already had two (not at once, so a save that is just loaded is unchanged)
+  const multi = HOTBAR.filter(s => slotTools(s).length > 1).length; _ticks++;
+  if (multi > 0 && ((_multi !== null && multi > _multi) || _ticks === 45)) tipOnce('switchtool', 'Two tools for one hotbar slot (<b>⇄</b>), like the torch and the lantern? Press its number key again, roll the mouse wheel, or click the one you want in your pack (<b>Tab</b>).');
   _multi = multi;
   if (G.day === 1 && G.hour > 17.5 && G.hour < 19) tipOnce('dusk', 'The sun is setting! Build a <b>Campfire</b> and a <b>Lean-to Shelter</b> (press <b>B</b>) before dark.');
   if (G.p.food < 20) tipOnce('hungry', 'You are getting hungry! Press <b>F</b> to eat. Cooked food is best.');

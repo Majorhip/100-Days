@@ -8,7 +8,7 @@ import { clamp } from '../core/math.js';
 import { G, R } from '../state.js';
 import { audioInit, sfx } from '../audio/audio.js';
 import { ITEMS, HOTBAR } from '../data/items.js';
-import { bestTool, switchTool } from '../player/inventory.js';
+import { bestTool, switchTool, slotTools, slotTool, pickTool, allTools, heldId } from '../player/inventory.js';
 import { quickEat, drinkCanteen } from '../player/health.js';
 import { refreshViewModel } from '../player/viewmodel.js';
 import { primaryAction, interact } from '../player/targeting.js';
@@ -49,7 +49,12 @@ function setupInput(canvas) {
       case 'KeyR': if (R.build) R.build.rot = (R.build.rot + 1) % 4; break;
       case 'KeyX': if (R.build) cancelBuild(); else tryDismantle(); break;
       case 'KeyH': if (R.whistle) R.whistle(); break;   // (added after the migration) Tomas's whistle: Scout comes running
-      case 'KeyT': G.p.held = G.p.held === 'torch' ? 'hands' : (bestTool('torch') ? 'torch' : G.p.held); refreshViewModel(); break;
+      case 'KeyT': {   // (changed after the migration) with a torch and a lantern, T goes lantern, torch, hands
+        const lights = slotTools('torch'), i = G.p.held === 'torch' ? lights.indexOf(slotTool('torch')) : -1;
+        if (!lights.length) break;
+        if (i < 0) G.p.held = 'torch'; else if (i + 1 < lights.length) pickTool(lights[i + 1]); else { G.p.held = 'hands'; if (lights.length > 1) pickTool(lights[0]); }
+        refreshViewModel(); break;
+      }
       default: if (e.code.startsWith('Digit')) { const i = +e.code.slice(5) - 1; if (i >= 0 && i < HOTBAR.length) selectSlot(HOTBAR[i]); }
     }
   });
@@ -71,7 +76,13 @@ function setupInput(canvas) {
       G.p.yaw -= clamp(e.movementX, -120, 120) * s; G.p.pitch = clamp(G.p.pitch - clamp(e.movementY, -120, 120) * s, -1.45, 1.45);
     }
   });
-  window.addEventListener('wheel', e => { if (!R.started || R.panel) return; const own = HOTBAR.filter(s => bestTool(s)); let i = own.indexOf(G.p.held); i = (i + (e.deltaY > 0 ? 1 : own.length - 1)) % own.length; selectSlot(own[i]); }, { passive: true });
+  // (changed after the migration) the wheel steps through every tool you own, so both the torch and
+  // the lantern, or both axes, come round in turn
+  window.addEventListener('wheel', e => {
+    if (!R.started || R.panel) return;
+    const own = allTools(HOTBAR); let i = own.indexOf(heldId()); i = (i + (e.deltaY > 0 ? 1 : own.length - 1)) % own.length;
+    if (R.fish) stopFishing(); G.p.held = pickTool(own[i]); refreshViewModel(); sfx('click');
+  }, { passive: true });
   document.addEventListener('pointerlockchange', () => { R.locked = document.pointerLockElement === canvas; if (R.locked) R.lockOk = true; if (!R.locked && R.started && !R.panel && !R.cinematic && !R.dragLook && !R.suppressPause) openPanel('pause'); });
   document.addEventListener('pointerlockerror', () => { R.lockErr = (R.lockErr || 0) + 1; if (!R.lockOk && R.lockErr >= 3) { R.dragLook = true; hint('Mouse-look is blocked here: hold the left mouse button and drag to look around, or use the arrow keys.', 6); } else if (R.started && !R.panel) hint('Click the game to look around with the mouse.', 3); });
 }

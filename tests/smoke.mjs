@@ -243,11 +243,25 @@ try {
       S.updateHUD(0); o.icon = slot.querySelector('.ic').textContent; o.multi = slot.classList.contains('multi');
       S.selectSlot('torch'); o.third = S.heldId(); o.cleared = !G.p.pick;
       o.tip = !!G.flags.tip_switchtool; G.p.held = 'hands'; S.refreshViewModel();
+      // T: lantern, torch, hands (real key presses)
+      const key = code => window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
+      const t = []; for (let i = 0; i < 3; i++) { key('KeyT'); t.push(S.heldId()); } o.tkey = t.join('/');
+      // the mouse wheel: every tool you own comes round, both lights included
+      const w = new Set(); for (let i = 0; i < 12; i++) { window.dispatchEvent(new WheelEvent('wheel', { deltaY: 100 })); w.add(S.heldId()); } o.wheel = w.has('torch') && w.has('lantern');
+      G.p.held = 'hands'; S.refreshViewModel();
+      S.openPanel('inv');
       return o;
     });
+    await wait(450);   // (a panel ignores clicks in its first 300 ms)
+    // the pack: click the Torch (in "Tools and weapons: click to hold") and hold the torch, not the lantern
+    Object.assign(r, await ev(() => {
+      const S = window.__stranded, el = document.querySelector('#panel [data-a="use"][data-id="torch"]'); if (el) el.click();
+      const o = { pack: S.heldId(), packClosed: !S.R.panel }; S.G.p.held = 'hands'; S.refreshViewModel(); return o;
+    }));
     return r;
-  }, r => ({ ok: r.first === 'lantern' && r.second === 'torch' && r.pick === 'torch' && r.hint && r.icon === '🔥' && r.multi && r.third === 'lantern' && r.cleared && r.tip,
-    info: `held ${r.first}, then ${r.second} (picked ${r.pick}, hint ${r.hint}, slot shows ${r.icon}, ⇄ ${r.multi}), then ${r.third} (pick cleared ${r.cleared}); tip ${r.tip}` }));
+  }, r => ({ ok: r.first === 'lantern' && r.second === 'torch' && r.pick === 'torch' && r.hint && r.icon === '🔥' && r.multi && r.third === 'lantern' && r.cleared && r.tip &&
+      r.tkey === 'lantern/torch/hands' && r.wheel && r.pack === 'torch' && r.packClosed,
+    info: `held ${r.first}, then ${r.second} (picked ${r.pick}, hint ${r.hint}, slot shows ${r.icon}, ⇄ ${r.multi}), then ${r.third} (pick cleared ${r.cleared}); tip ${r.tip}; T: ${r.tkey}; wheel reaches both ${r.wheel}; pack's Torch holds ${r.pack}` }));
 
   // the bears: the animated bear, Grizzle and Frostclaw; the bosses' wind-up plays Roar (then
   // a galloping charge) or, for Frostclaw's jump, Slam
