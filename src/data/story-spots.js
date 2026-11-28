@@ -3,7 +3,7 @@
 // and its fingerprint are unchanged.
 const STORY_SPOTS = {
   green: { x: -151.5, z: 72 },     // chapter 2: the Green Stone, buried in the west woods near Old Grizzle's den
-  box: { x: 212, z: 94 },          // chapter 3: Tomas's box, by the Old Iron Mine's entrance
+  box: { x: 209, z: 95.5 },        // chapter 3: Tomas's box, by the Old Iron Mine's entrance (5 m from its chest)
   // chapter 5: the glowing paw trail, from the Frozen Lake's west shore south-west through the snowy
   // trees, ending at the cairn with the Blue Stone
   trail: [[42, -117], [31.5, -128], [19, -139], [8, -146], [-2, -151], [-12, -156]],

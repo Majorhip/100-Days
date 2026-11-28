@@ -9,7 +9,7 @@ import { launch, openGame, prepPage, SAVE_KEY, HIGH_SETTINGS, ROOT } from '../..
 // name, wanted point, search radius (m), biome (or any), steepest slope allowed
 const WANT = [
   ['green', -150, 72, 30, 'forest', 0.35],      // the west woods, near Old Grizzle's den
-  ['box', 211, 93, 7, 'any', 0.35],             // by the Old Iron Mine's entrance
+  ['box', 209, 95.5, 3, 'any', 0.35],           // by the Old Iron Mine's entrance, a few metres from its chest
   ['trail0', 42, -117, 6, 'snow', 0.6],         // the paw trail: from the Frozen Lake's west shore...
   ['trail1', 30, -128, 6, 'snow', 0.6],
   ['trail2', 19, -139, 6, 'snow', 0.6],

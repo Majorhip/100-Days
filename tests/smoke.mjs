@@ -475,6 +475,97 @@ try {
     info: `chapter ${r.ch}, limping ${r.limp}, toast ${r.toast}; wolf beside him bitten ${r.wolfHurt}; prompt "${r.label0}" -> "${r.label1}" -> "${r.label2}"; bandaged ${r.bandaged}, healed after his meat ${r.healed}; far howl at 20:30 ${r.answered}, tip ${r.howlBack}`
   }));
 
+  // story step 6: on Day 59 Scout senses tomorrow's Snow Moon; on Day 60 it brings 8 snow wolves.
+  // Chapter 5 on Day 61: by day the paw prints are hidden and Scout sniffs where they start; at
+  // night they glow and he leads along them; the cairn at the end gives the Blue Stone and page 3,
+  // and Ray then has news (Ember's family)
+  await step('story: snow moon and paws in the dark', async () => {
+    const keep = await ev(() => {
+      const S = window.__stranded, { G, R } = S, k = { friend: G.scout.friend, fed: G.scout.fed, rayFree: G.flags.rayFree, rayChoice: G.flags.rayChoice, radio: G.flags.radio, day: G.day, hour: G.hour, raidDone: G.raidDone, pos: [G.p.x, G.p.z], notes: G.notes.slice() };
+      S.clearCreatures(); G.weather = 'clear'; G.weatherHrs = 99; S.take('bluestone', 99);
+      G.scout.friend = true; G.flags.radio = true; G.flags.rayFree = true; G.flags.rayChoice = 'stay'; G.story = { ch: 4, day: 51, done: true }; S.placeRay();
+      G.day = 59; G.hour = 9; G.scout.fed = 59; S.updateScoutStory(); return k;
+    });
+    await wait(3200);   // Scout's warning comes a moment after the new day
+    const r = await ev(() => {
+      const S = window.__stranded, { G, R } = S, o = { soon: /SNOW MOON/.test(document.getElementById('toasts').textContent) };
+      G.day = 60; G.hour = 20.6; G.raidDone = 59; G.scout.fed = 60; S.updateScoutStory(); S.clearCreatures(); R.raid = null;
+      S.updateSpawner(); o.kind = R.raid && R.raid.kind; o.total = R.raid && R.raid.total; o.banner = /SNOW MOON/.test(document.getElementById('banner').textContent);
+      for (let i = 0; i < 4; i++) S.updateSpawner(); o.snowwolves = R.creatures.filter(c => c.raid && c.type === 'snowwolf').length;
+      S.endRaid(true); S.clearCreatures();
+      G.day = 61; G.hour = 10; G.scout.fed = 61; S.updateScoutStory(); o.ch = G.story.ch;
+      const m = S.storyMade(), T = S.STORY_SPOTS.trail; o.paws = !!m.paws; o.pawsByDay = !!(m.paws && m.paws.visible);
+      G.p.x = T[0][0] + 3; G.p.z = T[0][1] + 3; G.p.y = S.groundAt(G.p.x, G.p.z); G.p.vy = 0; R.scout.x = T[0][0] + 0.3; R.scout.z = T[0][1]; S.updateScoutStory(); o.sniff = !!R.scout.dig;
+      return o;
+    });
+    await wait(400);
+    Object.assign(r, await ev(() => {
+      const S = window.__stranded, { G, R } = S, m = S.storyMade(), T = S.STORY_SPOTS.trail, bl = S.STORY_SPOTS.blue, o = { dayTip: /in the daylight/.test(document.getElementById('toasts').textContent) };
+      const at = (x, z) => { G.p.x = x; G.p.z = z; G.p.y = S.groundAt(x, z); G.p.vy = 0; S.updateScoutStory(); };
+      G.hour = 21; at(T[0][0] + 1, T[0][1] + 1); o.pawsAtNight = m.paws.visible;
+      const L = R.scout.lead; o.leads = !!L && Math.hypot(L.x - T[1][0], L.z - T[1][1]) < Math.hypot(G.p.x - T[1][0], G.p.z - T[1][1]);
+      at(T[3][0], T[3][1]); o.trailI = G.story.trailI;
+      at(bl.x + 1.5, bl.z + 1.5);
+      const poi = S.POIS.find(q => q.id === 'storyCairn'); o.on = poi.on(); poi.act();
+      o.stone = S.inv('bluestone'); o.page = /PUPS/.test(document.getElementById('panel').textContent); o.done = G.story.done; o.glowGone = !m.blue.visible; S.closePanel();
+      o.rayNews = /💬/.test(R.rayPoi.label()); S.talkToRay(); const lines = [];
+      for (let i = 0; i < 6 && R.panel === 'dialog'; i++) { lines.push(document.getElementById('panel').textContent); R.panelNext(); }
+      o.ember = lines.some(l => /Ember/.test(l)); o.heard = !!G.story.pupsHeard;
+      return o;
+    }));
+    await ev(k => {
+      const S = window.__stranded, { G } = S, set = (q, n, v) => { if (v === undefined) delete q[n]; else q[n] = v; };
+      G.scout.friend = k.friend; G.scout.fed = k.fed; set(G.flags, 'rayFree', k.rayFree); set(G.flags, 'rayChoice', k.rayChoice); set(G.flags, 'radio', k.radio);
+      G.day = k.day; G.hour = k.hour; G.raidDone = k.raidDone; G.p.x = k.pos[0]; G.p.z = k.pos[1]; G.p.y = S.groundAt(G.p.x, G.p.z); S.take('bluestone', 99); G.notes = k.notes; delete G.story; S.placeRay(); S.clearCreatures();
+    }, keep);
+    return r;
+  }, r => ({
+    ok: r.soon && r.kind === 'snow' && r.total === 8 && r.banner && r.snowwolves > 0 && r.ch === 5 && r.paws && !r.pawsByDay && r.sniff && r.dayTip &&
+      r.pawsAtNight && r.leads && r.trailI === 3 && r.on && r.stone === 1 && r.page && r.done && r.glowGone && r.rayNews && r.ember && r.heard,
+    info: `Day 59 warning ${r.soon}; Day 60 moon ${r.kind}, ${r.total} wolves, banner ${r.banner}, ${r.snowwolves} snow wolves in; chapter ${r.ch}, paws ${r.paws} (by day shown ${r.pawsByDay}); sniffs at the start ${r.sniff}, tip ${r.dayTip}; night: paws shown ${r.pawsAtNight}, leads on ${r.leads}, got to bend ${r.trailI}; cairn ${r.on}: Blue Stone ${r.stone}, page 3 ${r.page}, done ${r.done}; Ray news ${r.rayNews}, Ember ${r.ember}, heard ${r.heard}`
+  }));
+
+  // story step 7: on Day 69 Scout senses tomorrow's Storm Moon; on Day 70 the Wolf Moon comes with
+  // a thunderstorm until dawn. Chapter 6 on Day 71: the lights over Frostpeak are stronger; at the
+  // Stone Circle a stone that doesn't fit is refused, the right ones glow in their holes, and with
+  // all three back the chapter is done
+  await step('story: storm moon and the stone circle', async () => {
+    const keep = await ev(() => {
+      const S = window.__stranded, { G, R } = S, k = { friend: G.scout.friend, fed: G.scout.fed, rayFree: G.flags.rayFree, rayChoice: G.flags.rayChoice, radio: G.flags.radio, day: G.day, hour: G.hour, raidDone: G.raidDone, pos: [G.p.x, G.p.z] };
+      S.clearCreatures(); G.weather = 'clear'; G.weatherHrs = 99; ['greenstone', 'goldstone', 'bluestone'].forEach(id => S.take(id, 99));
+      G.scout.friend = true; G.flags.radio = true; G.flags.rayFree = true; G.flags.rayChoice = 'stay'; G.story = { ch: 5, day: 61, done: true, blueFound: true }; S.placeRay();
+      G.day = 69; G.hour = 9; G.scout.fed = 69; S.updateScoutStory(); return k;
+    });
+    await wait(3200);
+    const r = await ev(() => {
+      const S = window.__stranded, { G, R } = S, o = { soon: /STORM MOON/.test(document.getElementById('toasts').textContent) };
+      G.day = 70; G.hour = 20.6; G.raidDone = 69; G.scout.fed = 70; S.updateScoutStory(); S.clearCreatures(); R.raid = null;
+      S.updateSpawner(); o.kind = R.raid && R.raid.kind; o.weather = G.weather; o.stormHrs = +G.weatherHrs.toFixed(1); o.banner = /STORM MOON/.test(document.getElementById('banner').textContent);
+      S.endRaid(true); S.clearCreatures(); G.weather = 'clear'; G.weatherHrs = 99;
+      G.day = 71; G.hour = 10; G.scout.fed = 71; S.updateScoutStory(); o.ch = G.story.ch; o.lights = +S.R.auroraBoost.toFixed(2);
+      const ci = S.SITES.circle; G.p.x = ci.x; G.p.z = ci.z + 3; G.p.y = S.groundAt(G.p.x, G.p.z); G.p.vy = 0;
+      ['greenstone', 'goldstone', 'bluestone'].forEach(id => S.give(id, 1, true));
+      const poi = w => S.POIS.find(q => q.id === 'storyNotch' + w), put = (w, name) => { poi(w).act(); const opt = R.panelArg.opts.find(x => x[0].includes(name)); S.closePanel(); opt[2](); };
+      o.label = poi(4).label();
+      put(4, 'Gold Stone'); o.refused = /doesn't fit/.test(document.getElementById('hint').textContent) && S.inv('goldstone') === 1;
+      put(4, 'Green Stone'); put(0, 'Gold Stone'); put(6, 'Blue Stone');
+      const m = S.storyMade(); o.glow = ['greenstone', 'goldstone', 'bluestone'].map(id => m['glow_' + id] && m['glow_' + id].visible).join('/');
+      o.left = ['greenstone', 'goldstone', 'bluestone'].reduce((n, id) => n + S.inv(id), 0); o.done = G.story.done; o.all = !!G.story.allPlaced;
+      o.banner2 = /STONES ARE HOME/.test(document.getElementById('banner').textContent);
+      return o;
+    });
+    await ev(k => {
+      const S = window.__stranded, { G } = S, set = (q, n, v) => { if (v === undefined) delete q[n]; else q[n] = v; };
+      G.scout.friend = k.friend; G.scout.fed = k.fed; set(G.flags, 'rayFree', k.rayFree); set(G.flags, 'rayChoice', k.rayChoice); set(G.flags, 'radio', k.radio);
+      G.day = k.day; G.hour = k.hour; G.raidDone = k.raidDone; G.p.x = k.pos[0]; G.p.z = k.pos[1]; G.p.y = S.groundAt(G.p.x, G.p.z); delete G.story; S.placeRay(); S.clearCreatures();
+      const m = S.storyMade(); ['greenstone', 'goldstone', 'bluestone'].forEach(id => { if (m['glow_' + id]) m['glow_' + id].visible = false; });
+    }, keep);
+    return r;
+  }, r => ({
+    ok: r.soon && r.kind === 'storm' && r.weather === 'storm' && r.stormHrs > 9 && r.banner && r.ch === 6 && r.lights >= 0.79 && /TREE/.test(r.label) && r.refused && r.glow === 'true/true/true' && r.left === 0 && r.done && r.all && r.banner2,
+    info: `Day 69 warning ${r.soon}; Day 70 moon ${r.kind}, weather ${r.weather} for ${r.stormHrs} h, banner ${r.banner}; chapter ${r.ch}, lights +${r.lights}; "${r.label}": gold refused ${r.refused}; glowing ${r.glow}, stones left ${r.left}, done ${r.done}, all home ${r.all}, banner ${r.banner2}`
+  }));
+
   // rarer finds: about half the small finds are not there (hidden, cannot be picked, never
   // grow back), all of them stay near the start; rarer animals: smaller caps, one at a time
   await step('rarer finds and animals', () => ev(() => {

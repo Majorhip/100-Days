@@ -122,7 +122,7 @@ function updateSky(dt) {
   if (isDay) u.moonDir.value.set(0, -1, 0); else u.moonDir.value.copy(_sunDir);
   u.uCloud.value = clamp(0.18 + wet * 0.95, 0, 1);
   GU.uCloudCov.value = u.uCloud.value; GU.uCloudSh.value = (isDay ? 0.34 : 0.12) * (1 - sstep(0.55, 0.95, wet)) * sstep(0.02, 0.2, _sunDir.y + (isDay ? 0 : 1));
-  u.uAurora.value = lerp(u.uAurora.value, (R.biome === 'snow' ? 1 : 0.45) * (1 - wet), Math.min(1, dt * 0.3));
+  u.uAurora.value = lerp(u.uAurora.value, (R.biome === 'snow' ? 1 : 0.45) * (1 - wet) + (R.auroraBoost || 0), Math.min(1, dt * 0.3));   // (R.auroraBoost: added after the migration, Scout's story: the lights over Frostpeak)
   u.uMoonC.value.set(R.raid ? 0xff5040 : 0x9ab0ff);
   R.moon.visible = !isDay; R.moon.position.copy(R.camera.position).addScaledVector(_sunDir, 800);
   R.moon.material.color.setRGB(1.7, 1.75, 1.9); if (R.raid) R.moon.material.color.setRGB(2.4, 0.5, 0.35);

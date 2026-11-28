@@ -648,3 +648,49 @@ alike. Run the whole smoke test before a commit.
   - the prompt changes from asking for a bandage, to wrapping his paw, to his meat
   - fed after wrapping, he is healed
   - the far howl comes at 20:30
+
+## The middle days, steps 6 and 7: the moons, the paws, the stones (28 Nov 2026)
+**Wolf Moons with a twist** (`moonKind` in `src/game/scout-story.js`), once the story has begun:
+- **Snow Moons** on Days 60 and 80: 8 snow wolves (`SNOW_MOON_WOLVES`) instead of the red pack,
+  which is 14 from Day 50. A snow wolf has 66 health and bites for 13; a Wolf Moon red wolf has about
+  48 health and bites for 9. They only fear the Crystal Lantern.
+- **Storm Moons** on Days 70 and 90: the usual pack, and a thunderstorm until about 06:30. The
+  existing rules then apply: fires need a roof, and a storm takes 9 off warmth outside.
+- **How it hooks in:** `spawner.js` asks `R.raidKind()` in `startRaid`, and the banners say SNOW
+  MOON or STORM MOON. The day before, Scout senses it: a toast after the morning's new day. On the
+  day itself, another toast. With no story, nothing changes.
+
+**Chapter 5** (from Day 61): paws in the dark.
+- **The paw trail** (`STORY_SPOTS.trail`) is about 80 m long, from the Frozen Lake's west shore
+  south-west through the snowy trees. It's about 57 prints, each a pad and four toes, in the glow
+  material, and shown only from 19:30 to 05:30.
+- **By day,** Scout leads to where it starts and sniffs the snow, and a tip says there's nothing to
+  see "in the daylight".
+- **At night** he leads along it one bend at a time (`G.story.trailI`). The cairn at its end gives
+  the Blue Stone and Tomas's page 3.
+- **Then Ray has news (💬):** "That's exactly where I found him... Ember's family."
+
+**Chapter 6** (from Day 71): the stones go back.
+- **The Stone Circle:** three of its standing stones (west, east, north; `STONES` in
+  `src/data/story-spots.js`) get a carving (a tree, a sun over the dunes, a snowflake) and a round
+  hole, from chapter 2 on.
+- **Putting a stone in:** E on a stone offers the stones you carry. The wrong one: "It doesn't fit.
+  This stone is carved with a tree." The right one glows in its hole.
+- **All three back** finishes the chapter (+150 XP).
+- **The lights over Frostpeak:** the northern aurora gets `R.auroraBoost` added in `gfx/sky.js`:
+  +0.16 a chapter from chapter 2, up to +0.8 in chapter 6. With no story it's 0.
+
+**Checks:**
+- **The smoke step "story: snow moon and paws in the dark":**
+  - the warning on Day 59, then the Snow Moon of 8 snow wolves on Day 60
+  - chapter 5: the paws are hidden by day, and Scout sniffs the start
+  - at night the paws show and he leads on
+  - the cairn gives the Blue Stone and page 3, and Ray's news names Ember
+- **The smoke step "story: storm moon and the stone circle":**
+  - the warning on Day 69, then the Storm Moon (a storm for 9.9 h) on Day 70
+  - chapter 6 with the lights at +0.8
+  - the Gold Stone is refused at the tree stone, all three go in and glow, and the chapter is done
+- **Screenshots:** `node tools/story/scout-shots.mjs <dir>` takes the box, the paws at night, the
+  cairn, the west and north stones, and the lights.
+- **Moved:** Tomas's box went to (209, 95.5), 5 m from the mine's chest. At 2 m it looked like a
+  second chest.

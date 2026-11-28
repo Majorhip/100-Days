@@ -13,6 +13,7 @@ import { give, addXP } from '../player/inventory.js';
 import { spawnCreature, removeCreature } from './creatures.js';
 import { updateWildlife } from './wildlife.js';   // added after the migration: step C animals
 import { rareCap, rareRoll } from '../world/rarity.js';   // added after the migration: rarer animals
+import { SNOW_MOON_WOLVES } from '../game/scout-story.js';   // added after the migration: Scout's story (pure, imports nothing)
 import { badge } from '../story/quests.js';
 import { toast, banner } from '../ui/hud.js';
 
@@ -50,25 +51,31 @@ function updateSpawner() {
   lair('cave2', 'bear', 'cave2', 1); lair('wolfDen', 'wolf', 'wolfDen', 3); lair('crystalW', 'snowwolf', 'crystal', 2);
   const boss = (type, site) => { const s = SITES[site]; if (!G.bossDead[type] && dist2(p.x, p.z, s.x, s.z) < 110 && !R.creatures.some(c => c.type === type)) spawnCreature(type, s.x, s.z); };
   boss('grizzle', 'den'); boss('duneking', 'boneyard'); boss('frostclaw', 'summit');
-  // Wolf Moon
+  // Wolf Moon (a Snow Moon sends snow wolves: added after the migration, see startRaid)
   if (R.raid) {
     const alive = R.creatures.filter(c => c.raid && !c.dead).length;
-    if (R.raid.spawned < R.raid.total && alive < 4) { const s = spawnPoint(null, 30, 46); if (s) { const c = spawnCreature('wolf', s.x, s.z, { model: 'redwolf', raid: true, hpMul: 1.15 }); c.state = 'chase'; c.warned = true; R.raid.spawned++; if (Math.random() < 0.5) sfx('howl'); } }
+    if (R.raid.spawned < R.raid.total && alive < 4) { const s = spawnPoint(null, 30, 46); if (s) { const c = R.raid.kind === 'snow' ? spawnCreature('snowwolf', s.x, s.z, { raid: true }) : spawnCreature('wolf', s.x, s.z, { model: 'redwolf', raid: true, hpMul: 1.15 }); c.state = 'chase'; c.warned = true; R.raid.spawned++; if (Math.random() < 0.5) sfx('howl'); } }
     if (G.hour > 5.6 && G.hour < 12) endRaid(true);
   } else if (G.day % 10 === 0 && G.raidDone < G.day && (G.hour >= 20.5 || G.hour < 3) && !R.sleeping) startRaid();
 }
 function startRaid() {
-  G.raidDone = G.day; const total = Math.min(14, 4 + Math.floor(G.day / 10) * 2);
-  R.raid = { total, spawned: 0, killed: 0 };
+  // (added after the migration) once Scout's story has begun, some Wolf Moons have a twist.
+  // R.raidKind() (src/story/scout-story.js) says 'snow': snow wolves, which only fear the Crystal
+  // Lantern; or 'storm': a thunderstorm until dawn as well
+  const kind = R.raidKind ? R.raidKind() : 'red';
+  G.raidDone = G.day; const total = kind === 'snow' ? SNOW_MOON_WOLVES : Math.min(14, 4 + Math.floor(G.day / 10) * 2);
+  R.raid = { total, spawned: 0, killed: 0, kind };
   for (const c of R.creatures.slice()) if (c.type === 'wolf' && !c.raid && !c.lair) removeCreature(c);
-  banner('🌕 WOLF MOON', total + ' red-eyed wolves are hunting you. They are not afraid of fire tonight!'); sfx('howl'); setTimeout(() => sfx('howl'), 700); setTimeout(() => sfx('howl'), 1500);
+  if (kind === 'snow') banner('❄️ SNOW MOON', total + ' snow wolves have come down from Frostpeak. Torches do not scare them!');
+  else if (kind === 'storm') { G.weather = 'storm'; G.weatherHrs = 24 - G.hour + 6.5; sfx('thunder'); banner('⛈️ STORM MOON', total + ' red-eyed wolves, and a thunderstorm! Keep your fire under a roof.'); }
+  else banner('🌕 WOLF MOON', total + ' red-eyed wolves are hunting you. They are not afraid of fire tonight!'); sfx('howl'); setTimeout(() => sfx('howl'), 700); setTimeout(() => sfx('howl'), 1500);
 }
 function endRaid(dawn) {
   if (!R.raid) return;
-  const won = !dawn && R.raid.killed >= R.raid.total;
+  const won = !dawn && R.raid.killed >= R.raid.total, name = R.raid.kind === 'snow' ? 'SNOW MOON' : R.raid.kind === 'storm' ? 'STORM MOON' : 'WOLF MOON';
   for (const c of R.creatures.slice()) if (c.raid) { if (dawn) removeCreature(c); }
   R.raid = null;
-  if (won) { banner('WOLF MOON SURVIVED!', 'The pack is beaten. +150 XP'); addXP(150); give('fang', 3); badge('moon'); sfx('discover'); }
+  if (won) { banner(name + ' SURVIVED!', 'The pack is beaten. +150 XP'); addXP(150); give('fang', 3); badge('moon'); sfx('discover'); }
   else if (R.started && !R.cinematic) { toast('🌅 The sun rises. The Wolf Moon pack slinks away.', 'ok'); badge('moon'); }
 }
 // @end-moved
