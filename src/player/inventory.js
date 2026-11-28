@@ -26,7 +26,20 @@ function bestTool(slot) {
   for (const id in G.inv) { const t = ITEMS[id] && ITEMS[id].tool; if (t && t.slot === slot && t.tier > tier) { best = id; tier = t.tier; } }
   return best;
 }
-function heldId() { return bestTool(G.p.held) || 'hands'; }
+/** (added after the migration: choosing a tool in a hotbar slot) your tools for a slot, best first */
+function slotTools(slot) { if (slot === 'hands') return ['hands']; return Object.keys(G.inv).filter(id => ITEMS[id] && ITEMS[id].tool && ITEMS[id].tool.slot === slot).sort((a, b) => ITEMS[b].tool.tier - ITEMS[a].tool.tier); }
+/** the tool a slot holds: the one you picked (G.p.pick, saved only once you pick one), else your best */
+function slotTool(slot) { const c = G.p.pick && G.p.pick[slot]; return c && inv(c) > 0 ? c : bestTool(slot); }
+/** the next of your tools for a slot (the same slot chosen again); null if you have only one */
+function switchTool(slot) {
+  const list = slotTools(slot); if (list.length < 2) return null;
+  const next = list[(list.indexOf(slotTool(slot)) + 1) % list.length];
+  if (next === list[0]) unpick(slot); else (G.p.pick || (G.p.pick = {}))[slot] = next;
+  uiDirty(); return next;
+}
+/** back to your best tool for a slot (a new one crafted, say) */
+function unpick(slot) { if (!G.p.pick) return; delete G.p.pick[slot]; if (!Object.keys(G.p.pick).length) delete G.p.pick; }
+function heldId() { return slotTool(G.p.held) || 'hands'; }
 function heldDef() { const id = heldId(); return id === 'hands' ? HANDS : ITEMS[id]; }
 function wearStat(key, base, better) { let v = base; for (const id in G.inv) { const w = ITEMS[id] && ITEMS[id].wear; if (w && w[key] !== undefined) v = better(v, w[key]); } return v; }
 const armorValue = () => wearStat('armor', 0, Math.max);
@@ -43,4 +56,4 @@ function addXP(n) {
 }
 // @end-moved
 
-export { inv, give, take, canAfford, pay, bestTool, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP };
+export { inv, give, take, canAfford, pay, bestTool, slotTools, slotTool, switchTool, unpick, heldId, heldDef, wearStat, armorValue, dmgMult, xpNeed, addXP };

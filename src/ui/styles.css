@@ -78,6 +78,7 @@ button.mini { font-size:12px; padding:3px 8px; border-radius:7px; margin-left:8p
 .slot { position:relative; width:58px; height:58px; border-radius:12px; background:rgba(0,0,0,.45); border:3px solid rgba(255,255,255,.25); display:flex; align-items:center; justify-content:center; cursor:pointer; }
 .slot .ic { font-size:30px; } .slot .k { position:absolute; left:4px; top:1px; font-size:11px; font-weight:bold; opacity:.7; } .slot .c { position:absolute; right:4px; bottom:1px; font-size:12px; font-weight:bold; }
 .slot.sel { border-color:var(--gold); transform:translateY(-4px); box-shadow:0 0 14px rgba(255,210,74,.6); } .slot.none { opacity:.35; }
+.slot.multi::after { content:'⇄'; position:absolute; right:3px; top:0; font-size:11px; font-weight:bold; color:var(--gold); }   /* (added after the migration) more than one tool for this slot */
 #xpline { display:flex; align-items:center; gap:8px; margin-top:6px; justify-content:center; } #lvl { font-weight:bold; font-size:13px; color:var(--gold); }
 #xpbar { width:260px; height:6px; background:rgba(0,0,0,.5); border-radius:3px; overflow:hidden; } #xpf { height:100%; background:linear-gradient(90deg,#8fe6ff,#5aa0ff); transition:width .3s; }
 #canteen { position:absolute; right:-120px; bottom:30px; font-size:15px; background:rgba(0,0,0,.45); padding:4px 8px; border-radius:8px; white-space:nowrap; }

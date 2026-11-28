@@ -12,7 +12,7 @@ import { ITEMS } from '../data/items.js';
 import { RECIPES } from '../data/recipes.js';
 import { BUILD_BY_ID } from '../data/buildings.js';
 import { NOTES, LANDMARKS, BADGES, TIPS } from '../data/story.js';
-import { inv, give, take, canAfford, pay, bestTool, wearStat, armorValue, dmgMult, addXP } from '../player/inventory.js';
+import { inv, give, take, canAfford, pay, bestTool, unpick, wearStat, armorValue, dmgMult, addXP } from '../player/inventory.js';
 import { eat, drinkCanteen } from '../player/health.js';
 import { refreshViewModel } from '../player/viewmodel.js';
 import { stopFishing } from '../player/fishing.js';
@@ -198,7 +198,7 @@ function craft(id, all) {
   const d = ITEMS[id]; sfx(r.station === 'fire' ? 'sizzle' : 'craft');
   toast((r.station === 'fire' ? '🍳 Cooked ' : '🔨 Made ') + d.e[0] + ' ' + d.n + (made * (r.n || 1) > 1 ? ' ×' + made * (r.n || 1) : ''), 'ok', 2500);
   if (id === 'iron') badge('iron');
-  if (d.tool) { const best = bestTool(d.tool.slot); if (best === id) { G.p.held = d.tool.slot; refreshViewModel(); } }
+  if (d.tool) { const best = bestTool(d.tool.slot); if (best === id) { unpick(d.tool.slot); G.p.held = d.tool.slot; refreshViewModel(); } }   // (unpick: added after the migration) a new best tool replaces a picked one
   if (d.wear) toast('You are now wearing the ' + d.n + '.', 'ok', 3000);
   if (id === 'axe') tipOnce('axe', 'Your axe is in hotbar slot <b>2</b>. Walk up to a tree and left click!');
   if (id === 'torch') tipOnce('torch', 'Press <b>T</b> any time to hold your torch. Wolves hate it!'); if (id === 'lantern') tipOnce('lantern', 'Press <b>T</b> to hold your Crystal Lantern. Even snow wolves keep away from it!');

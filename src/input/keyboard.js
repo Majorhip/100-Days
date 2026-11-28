@@ -7,8 +7,8 @@ import '../player/fishing.js';   // load order: runs after the previous part of 
 import { clamp } from '../core/math.js';
 import { G, R } from '../state.js';
 import { audioInit, sfx } from '../audio/audio.js';
-import { HOTBAR } from '../data/items.js';
-import { bestTool } from '../player/inventory.js';
+import { ITEMS, HOTBAR } from '../data/items.js';
+import { bestTool, switchTool } from '../player/inventory.js';
 import { quickEat, drinkCanteen } from '../player/health.js';
 import { refreshViewModel } from '../player/viewmodel.js';
 import { primaryAction, interact } from '../player/targeting.js';
@@ -75,7 +75,14 @@ function setupInput(canvas) {
   document.addEventListener('pointerlockerror', () => { R.lockErr = (R.lockErr || 0) + 1; if (!R.lockOk && R.lockErr >= 3) { R.dragLook = true; hint('Mouse-look is blocked here: hold the left mouse button and drag to look around, or use the arrow keys.', 6); } else if (R.started && !R.panel) hint('Click the game to look around with the mouse.', 3); });
 }
 function lockPointer() { if (R.dragLook || R.touch) return; try { const pr = R.renderer.domElement.requestPointerLock(); if (pr && pr.catch) pr.catch(() => { }); } catch (e) { R.dragLook = true; } }
-function selectSlot(s) { if (!bestTool(s)) { hint('You don\'t have that tool yet.'); return; } if (R.fish) stopFishing(); G.p.held = s; refreshViewModel(); sfx('click'); }
+function selectSlot(s) {
+  if (!bestTool(s)) { hint('You don\'t have that tool yet.'); return; }
+  // (added after the migration) choosing the slot you already hold switches to your next tool of
+  // that kind: the torch and the crystal lantern, the stone and iron axes...
+  const next = G.p.held === s ? switchTool(s) : null;
+  if (R.fish) stopFishing(); G.p.held = s; refreshViewModel(); sfx('click');
+  if (next) hint(ITEMS[next].n + ' — choose this slot again to switch.', 2.5);
+}
 // @end-moved
 
 export { setupInput, lockPointer, selectSlot };

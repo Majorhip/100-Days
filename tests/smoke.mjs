@@ -230,6 +230,25 @@ try {
     info: `torch: wolf flees ${r.torch[0]}, snow wolf flees ${r.torch[1]}; lantern: ${r.lantern[0]}, ${r.lantern[1]}; blue light ${r.light.on && r.light.color === '7fdcff'}`
   }));
 
+  // choosing a tool in a hotbar slot (added after the migration, asked for by Caspar): with the
+  // torch and the crystal lantern, the slot holds the lantern; choosing it again switches to the
+  // torch (and the slot shows it), and again back to the lantern. The tip came when the second
+  // tool did.
+  await step('hotbar: switch tools in a slot', async () => {
+    await ev(() => { const S = window.__stranded; if (!S.inv('torch')) S.give('torch', 1, true); S.slowTick(); if (!S.inv('lantern')) S.give('lantern', 1, true); S.slowTick(); });
+    const r = await ev(() => {
+      const S = window.__stranded, { G } = S, o = {}, slot = document.getElementById('hb_torch'); G.p.held = 'hands';
+      S.selectSlot('torch'); o.first = S.heldId();
+      S.selectSlot('torch'); o.second = S.heldId(); o.pick = G.p.pick && G.p.pick.torch; o.hint = /Torch/.test(document.getElementById('hint').textContent);
+      S.updateHUD(0); o.icon = slot.querySelector('.ic').textContent; o.multi = slot.classList.contains('multi');
+      S.selectSlot('torch'); o.third = S.heldId(); o.cleared = !G.p.pick;
+      o.tip = !!G.flags.tip_switchtool; G.p.held = 'hands'; S.refreshViewModel();
+      return o;
+    });
+    return r;
+  }, r => ({ ok: r.first === 'lantern' && r.second === 'torch' && r.pick === 'torch' && r.hint && r.icon === '🔥' && r.multi && r.third === 'lantern' && r.cleared && r.tip,
+    info: `held ${r.first}, then ${r.second} (picked ${r.pick}, hint ${r.hint}, slot shows ${r.icon}, ⇄ ${r.multi}), then ${r.third} (pick cleared ${r.cleared}); tip ${r.tip}` }));
+
   // the bears: the animated bear, Grizzle and Frostclaw; the bosses' wind-up plays Roar (then
   // a galloping charge) or, for Frostclaw's jump, Slam
   await step('bears and boss moves', async () => {

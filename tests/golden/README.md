@@ -591,3 +591,24 @@ fixture is a Day 10 save, and on every 10th day the once-a-second tick sets the 
 (`exportNudge`, from step 3 of IMPROVEMENTS.md). Whether that tick ran before the check read the
 game was a race, so it failed about two runs in three on this PC. That reminder no longer counts as
 a difference, and a failure now names the flags that differ.
+
+## Choosing a tool in a hotbar slot (28 Nov 2026)
+**Asked for by Caspar.** A slot always held your best tool of its kind, so once he had the
+Crystal Lantern he could never pick the fire torch again.
+- **Choosing the slot you already hold switches to your next tool of that kind,** with its number
+  key or a click or tap. Torch slot: lantern, then torch, then lantern. Axe slot: iron, then stone.
+  A hint names the tool.
+- **The slot shows the tool you picked,** and a gold ⇄ marks slots holding more than one of your tools.
+- **Saving:** the pick is `G.p.pick = { slot: id }`, written only once you pick something that isn't
+  your best tool. Back to the best, it's removed, so other saves are unchanged.
+- **Crafting a new best tool** for a slot clears the pick, so the new tool is what you hold.
+- **Unchanged:** "do you have one?" checks (quests, mining prompts, the cave-in) still look at your
+  best tool, through `bestTool()`. What you hold comes from `slotTool()` (`heldId()`).
+- **A tip, once,** when a second tool for a slot arrives during play (not on loading a save that
+  already has two, which would change the save fixture's flags).
+
+**Check:** the smoke step "hotbar: switch tools in a slot".
+
+**`--only` caveat:** some smoke steps depend on earlier ones. "torch and crystal lantern" run alone
+fails (the snow wolf flees the torch too) on today's build and on the build before the story work
+alike. Run the whole smoke test before a commit.

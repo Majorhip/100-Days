@@ -11,7 +11,7 @@ import { G, R } from '../state.js';
 import { nightAmount } from '../world/sky.js';
 import { ITEMS, HOTBAR } from '../data/items.js';
 import { NT } from '../world/nodes.js';
-import { inv, bestTool, xpNeed } from '../player/inventory.js';
+import { inv, bestTool, slotTool, slotTools, xpNeed } from '../player/inventory.js';
 import { SURV } from '../game/survival.js';
 import { targetPrompt, key } from '../player/targeting.js';
 import { selectSlot } from '../input/keyboard.js';
@@ -127,10 +127,10 @@ function updateHUD(dt) {
   // hotbar
   if (_dirty) {
     for (const s of HOTBAR) {
-      const id = bestTool(s), el = $('hb_' + s);
-      el.classList.toggle('none', !id); el.classList.toggle('sel', G.p.held === s);
+      const id = slotTool(s), el = $('hb_' + s), more = slotTools(s).length > 1;   // (added after the migration) the tool picked for the slot; ⇄ when you have more than one
+      el.classList.toggle('none', !id); el.classList.toggle('sel', G.p.held === s); el.classList.toggle('multi', more);
       el.querySelector('.ic').textContent = id ? icon(id) : ''; el.querySelector('.c').textContent = s === 'bow' && id ? inv('arrow') : '';
-      el.title = id ? (id === 'hands' ? 'Hands' : ITEMS[id].n) : '';
+      el.title = id ? (id === 'hands' ? 'Hands' : ITEMS[id].n + (more ? ' (choose this slot again to switch)' : '')) : '';
       el.style.background = id && id !== 'hands' && ITEMS[id].bg ? 'linear-gradient(180deg,' + ITEMS[id].bg + '66,#0006)' : '';
     }
     $('canteen').style.display = inv('canteen') ? '' : 'none'; $('canteen').innerHTML = '🧴 <b>' + (G.flags.canteen || 0) + '</b>/5 <kbd>G</kbd>';

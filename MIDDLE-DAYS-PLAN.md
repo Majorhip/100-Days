@@ -452,9 +452,9 @@ went with the plan's recommendation, and stays easy to change after Caspar has p
    - The limp: no fighting for that one day.
    - The Great Storm: no wolves or predators while it lasts.
    - **Scout's bite is never changed.**
-5. **The hotbar:** without asking Caspar, the version built lets him **rearrange the seven slots**
-   (click one slot, then another, to swap them). Putting food in the hotbar can come later if he
-   meant that.
+5. **The hotbar:** Dad passed on what Caspar meant: the torch slot always showed the Crystal
+   Lantern, so he could never pick the fire torch. Choosing the slot you hold now switches to your
+   next tool of that kind (built 28 Nov 2026, see tests/golden/README.md).
 6. **The paw trail** (P3) is about 80 m long, not 150 m: the ground west of the Frozen Lake is
    steep further out (found with `tools/story/spots.mjs`).
 7. **"The lights on Frostpeak"** are the aurora in the northern sky, which shows from anywhere on
