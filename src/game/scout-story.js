@@ -1,10 +1,14 @@
-// Scout's story, "The Storm Dog" (MIDDLE-DAYS-PLAN.md): when each chapter is due, and which evenings
-// Scout howls at Frostpeak. Pure rules: plain values in, a result out (no three.js, page or R).
+// Scout's story, "The Storm Dog" (MIDDLE-DAYS-PLAN.md): when each chapter is due, which evenings
+// Scout howls at Frostpeak, and which Wolf Moons have a twist. Pure rules: plain values in, a
+// result out (no three.js, page or R).
 
-/** the first day each chapter can start (index = chapter): the morning after a Wolf Moon */
-const CHAPTER_DAY = [0, 21, 31, 41, 51, 61, 71];
-/** the fewest days between the start of one chapter and the next, for a player who is catching up */
-const MIN_GAP = 3;
+/** the first day each chapter can start (index = chapter). Chapters 1-6: the morning after a Wolf
+ *  Moon. Chapter 7 is the Great Storm, from Day 85. (Chapter 8, the dawn after it, follows the
+ *  storm itself: src/story/scout-story.js.) */
+const CHAPTER_DAY = [0, 21, 31, 41, 51, 61, 71, 85];
+/** the fewest days between the start of one chapter and the next, for a player who is catching
+ *  up; the Great Storm can come the day after the stones are back */
+const MIN_GAP = 3, STORM_GAP = 1;
 
 /**
  * The chapter that is due now, or 0.
@@ -21,7 +25,7 @@ function chapterDue(s) {
   const n = s.chapter + 1;
   if (n > s.built || n >= CHAPTER_DAY.length) return 0;
   if (s.day < CHAPTER_DAY[n]) return 0;
-  if (s.chapter > 0 && (!s.chapterDone || s.day - s.chapterDay < MIN_GAP)) return 0;
+  if (s.chapter > 0 && (!s.chapterDone || s.day - s.chapterDay < (n === 7 ? STORM_GAP : MIN_GAP))) return 0;
   return n;
 }
 
@@ -31,4 +35,17 @@ function howlsTonight(day, chapter) {
   return chapter >= 1 ? day % 2 === 0 : day % 3 === 0;
 }
 
-export { CHAPTER_DAY, MIN_GAP, chapterDue, howlsTonight };
+/** what tonight's Wolf Moon is like, once the story has begun: from Day 60 the mountain stirs. A
+ *  Snow Moon brings snow wolves down from Frostpeak; a Storm Moon brings a thunderstorm too */
+function moonKind(day, chapter) {
+  if (chapter < 1 || day % 10 !== 0) return 'red';
+  return day === 60 || day === 80 ? 'snow' : day === 70 || day === 90 ? 'storm' : 'red';
+}
+/** a Snow Moon's pack: 8 snow wolves, against 14 red wolves on an ordinary Wolf Moon from Day 50
+ *  (a snow wolf has 66 health and bites for 13; a Wolf Moon red wolf about 48 and 9) */
+const SNOW_MOON_WOLVES = 8;
+
+/** the Great Storm blows from 20:00 until dawn */
+const isStormHour = hour => hour >= 20 || hour < 5.5;
+
+export { CHAPTER_DAY, MIN_GAP, STORM_GAP, chapterDue, howlsTonight, moonKind, SNOW_MOON_WOLVES, isStormHour };

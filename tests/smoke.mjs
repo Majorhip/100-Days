@@ -2,9 +2,10 @@
 // card, with zero page errors allowed (shader compile errors included: three.js reports them
 // on the console).
 //
-//   node tests/smoke.mjs [target] [--quick]     (default: dist/index.html)
+//   node tests/smoke.mjs [target] [--quick] [--only=<words>]     (default: dist/index.html)
 //
-// --quick runs only the core steps (QUICK below), for npm run check.
+// --quick runs only the core steps (QUICK below), for npm run check. --only=story runs only the
+// steps whose names contain "story" (and "new game", which starts the game), while working on them.
 //
 // new game -> chop a tree -> build and light a campfire -> a night with wolves -> a storm ->
 // sleep until morning -> swim (float, cross the lake, in from the shore and out) -> visit all three biomes -> switch through all four graphics
@@ -15,6 +16,7 @@ import { launch, openGame, prepPage, SAVE_KEY, HIGH_SETTINGS } from './golden/br
 const target = process.argv.slice(2).find(a => !a.startsWith('--')) || 'dist/index.html';
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const results = [];
+const ONLY = (process.argv.find(a => a.startsWith('--only=')) || '').slice(7);
 const QUICK = process.argv.includes('--quick') && new Set(['new game', 'chop a tree', 'build and light a fire', 'rarer finds and animals', 'difficulty levels', 'a storm', 'sleep until morning', 'visit desert']);
 
 const { browser, close } = await launch({ gpu: true });
@@ -26,6 +28,7 @@ try {
   const ev = (fn, arg) => page.evaluate(fn, arg);
   async function step(name, run, check) {
     if (QUICK && !QUICK.has(name)) return;
+    if (ONLY && name !== 'new game' && !name.includes(ONLY)) return;
     const before = errors.length;
     let ok = false, info = '';
     try { const r = await run(); const c = await check(r); ok = c.ok; info = c.info || ''; } catch (e) { info = 'threw: ' + e.message; }
@@ -303,7 +306,7 @@ try {
       const S = window.__stranded, lines = []; S.talkToRay();
       for (let i = 0; i < 8 && S.R.panel === 'dialog'; i++) { lines.push(document.getElementById('panel').textContent); S.R.panelNext(); }
       const o = { lines: lines.length, circle: lines.some(l => /Stone Circle/.test(l)), done: S.G.story.done, closed: !S.R.panel, label2: S.R.rayPoi.label() };
-      S.G.day = 31; S.updateScoutStory(); o.ch2 = S.G.story.ch;   // chapter 2 isn't built yet
+      S.G.day = 27; S.updateScoutStory(); o.ch2 = S.G.story.ch;   // too soon for chapter 2 (Day 31, and 3 days after chapter 1)
       S.G.weather = 'storm'; S.updateScoutStory(); return o;
     }));
     await wait(400);
@@ -341,7 +344,47 @@ try {
   }, r => ({
     ok: r.ch === 1 && r.done0 === false && r.toast && /💬/.test(r.label) && r.lines === 4 && r.circle && r.done && r.closed && !/💬/.test(r.label2) && r.ch2 === 1 &&
       r.scared && r.shiver > 0.01 && r.stormToast && r.howlT > 3 && r.howl > 0.8 && r.facing < 0.3 && r.howlToast && r.headUp - r.headDown > 0.015 && !/Eating/.test(r.howlClip),
-    info: `chapter ${r.ch} with toast ${r.toast}, prompt "${r.label}"; ${r.lines} lines (Stone Circle ${r.circle}), done ${r.done}; no chapter 2: ${r.ch2 === 1}; storm: shiver ${r.shiver} rad, tip ${r.stormToast}; dusk: howling ${r.howlT} s left, nose up ${r.howl}, facing Frostpeak off by ${r.facing} rad, head above neck ${r.headDown} -> ${r.headUp} m playing ${r.howlClip}`
+    info: `chapter ${r.ch} with toast ${r.toast}, prompt "${r.label}"; ${r.lines} lines (Stone Circle ${r.circle}), done ${r.done}; no chapter 2 on Day 27: ${r.ch2 === 1}; storm: shiver ${r.shiver} rad, tip ${r.stormToast}; dusk: howling ${r.howlT} s left, nose up ${r.howl}, facing Frostpeak off by ${r.facing} rad, head above neck ${r.headDown} -> ${r.headUp} m playing ${r.howlClip}`
+  }));
+
+  // story step 3: chapter 2 on Day 31. Ray hints WEST; 50 m from the spot Scout runs ahead of you
+  // towards it; close to it he digs (his Eating clip), and helping him gives the Green Stone and
+  // Tomas's page 1
+  await step('story: scout leads the way', async () => {
+    const r = {};
+    const keep = await ev(() => {
+      const S = window.__stranded, { G, R } = S, g = S.STORY_SPOTS.green, k = { friend: G.scout.friend, fed: G.scout.fed, rayFree: G.flags.rayFree, rayChoice: G.flags.rayChoice, radio: G.flags.radio, day: G.day, hour: G.hour, pos: [G.p.x, G.p.z] };
+      S.clearCreatures(); G.day = 31; G.hour = 9; G.weather = 'clear'; G.weatherHrs = 99; S.take('greenstone', 99);
+      G.scout.friend = true; G.scout.fed = 31; G.flags.radio = true; G.flags.rayFree = true; G.flags.rayChoice = 'stay'; G.story = { ch: 1, day: 21, done: true }; S.placeRay();
+      G.p.x = g.x + 50; G.p.z = g.z; G.p.y = S.groundAt(G.p.x, G.p.z); G.p.vy = 0; R.teleScout = true;
+      S.updateScoutStory(); return k;
+    });
+    Object.assign(r, await ev(() => {
+      const S = window.__stranded, o = { ch: S.G.story.ch, toast: /Scout keeps staring WEST/.test(document.getElementById('toasts').textContent) };
+      S.talkToRay(); o.hint = /WEST/.test(document.getElementById('panel').textContent); S.closePanel(); return o;
+    }));
+    await wait(2500);
+    Object.assign(r, await ev(() => {
+      const S = window.__stranded, s = S.R.scout, g = S.STORY_SPOTS.green, p = S.G.p;
+      return { leading: !!s.lead, ahead: +(Math.hypot(p.x - g.x, p.z - g.z) - Math.hypot(s.x - g.x, s.z - g.z)).toFixed(1) };
+    }));
+    await ev(() => { const S = window.__stranded, { G, R } = S, g = S.STORY_SPOTS.green; G.p.x = g.x + 4; G.p.z = g.z; G.p.y = S.groundAt(G.p.x, G.p.z); R.scout.x = g.x + 3; R.scout.z = g.z + 1; S.updateScoutStory(); });
+    await wait(2500);
+    Object.assign(r, await ev(() => {
+      const S = window.__stranded, s = S.R.scout, poi = S.POIS.find(q => q.id === 'storyDig');
+      const o = { dig: !!s.dig, clip: s.model.mixer._actions.filter(a => a.isRunning() && a.getEffectiveWeight() > 0.5).map(a => a.getClip().name).join('+'), on: poi.on(), label: poi.label };
+      poi.act(); o.stone = S.inv('greenstone'); o.page = S.G.notes.includes('tomas1'); o.note = /TOMAS/.test(document.getElementById('panel').textContent); o.done = S.G.story.done; S.closePanel();
+      return o;
+    }));
+    await ev(k => {
+      const S = window.__stranded, { G } = S, set = (o, n, v) => { if (v === undefined) delete o[n]; else o[n] = v; };
+      G.scout.friend = k.friend; G.scout.fed = k.fed; set(G.flags, 'rayFree', k.rayFree); set(G.flags, 'rayChoice', k.rayChoice); set(G.flags, 'radio', k.radio);
+      G.day = k.day; G.hour = k.hour; G.p.x = k.pos[0]; G.p.z = k.pos[1]; G.p.y = S.groundAt(G.p.x, G.p.z); S.take('greenstone', 99); G.notes = G.notes.filter(n => n !== 'tomas1'); delete G.story; S.placeRay(); S.clearCreatures();
+    }, keep);
+    return r;
+  }, r => ({
+    ok: r.ch === 2 && r.toast && r.hint && r.leading && r.ahead > 4 && r.dig && /Eating/.test(r.clip) && r.on && r.stone === 1 && r.page && r.note && r.done,
+    info: `chapter ${r.ch}, toast ${r.toast}, Ray's hint ${r.hint}; leading ${r.leading}, ${r.ahead} m ahead of you; digging ${r.dig} (${r.clip}), prompt ${r.on} "${r.label}"; Green Stone ${r.stone}, page ${r.page} shown ${r.note}, done ${r.done}`
   }));
 
   // rarer finds: about half the small finds are not there (hidden, cannot be picked, never

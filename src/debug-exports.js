@@ -79,3 +79,4 @@ export * from './ui/loading.js';
 export * from './world/rarity.js';
 export * from './game/scout-story.js';
 export * from './story/scout-story.js';
+export * from './data/story-spots.js';

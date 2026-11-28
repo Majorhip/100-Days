@@ -267,6 +267,7 @@ function gltfAnimal(kind) {
           if (cur !== act.Idle && cur !== act.Eating) pause = 0;
           pause += dt;
           if (c.howl > 0.01) { play('Idle', 0.3); pause = 0; }   // howling (Scout): head up, never eating
+          else if (c.dig && act.Eating) { const a = play('Eating', 0.3); if (a.time > a.getClip().duration - 0.35) a.time = 0.4; pause = 0; }   // digging or sniffing (Scout): nose down, over and over
           else if (cur === act.Eating && cur.time > cur.getClip().duration - 0.3) play('Idle', 0.4);
           else if (cur !== act.Eating) play(c.state === 'idle' && pause > 1.2 && Math.random() < dt * 0.15 && act.Eating ? 'Eating' : 'Idle', 0.3);
         }
@@ -348,6 +349,6 @@ function upgradeScout(s) {
   s.model = m; s.g = m.g; R.scene.add(m.g);
 }
 /** Scout's state in the terms anim() reads: biting just after a bite lands, else moving or idle */
-const scoutPose = s => ({ state: s.bite > 0.8 ? 'wind' : 'idle', st: 0, moving: s.moving, flash: 0, dead: false, howl: s.howl || 0 });
+const scoutPose = s => ({ state: s.bite > 0.8 ? 'wind' : 'idle', st: 0, moving: s.moving, flash: 0, dead: false, howl: s.howl || 0, dig: !!s.dig });
 
 export { KINDS, CLIP_INFO, loadAnimalModels, posedBox, isLoaded, gltfAnimal, upgradeScout, scoutPose, upgradeRay, rayAnim };

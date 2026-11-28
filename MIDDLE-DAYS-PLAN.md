@@ -440,13 +440,23 @@ Each step follows the usual way of working:
 
 ## 7. Decisions for Dad
 
-1. ~~**The story.**~~ **Approved 28 Nov 2026:** *The Storm Dog*.
-2. **Where is Caspar's game now?** What day is it, and has he chosen "stay"? That decides how close
-   together the chapters need to come.
-3. **The helicopter choice.** Leave it as it is (recommended). A player who leaves early simply
-   misses this story.
-4. **Numbers to approve:**
+**28 Nov 2026: Dad said to build every step without asking.** Each open decision below therefore
+went with the plan's recommendation, and stays easy to change after Caspar has played.
+
+1. **The story:** approved, *The Storm Dog*.
+2. **Where Caspar's game is:** not known. The catch-up rule copes with any day: a chapter at most
+   every 3 days, and the story waits for "stay".
+3. **The helicopter choice:** left as it is. A player who leaves early misses the story.
+4. **Numbers, as proposed:**
    - The Snow Moon: 8 snow wolves instead of 14 red wolves.
    - The limp: no fighting for that one day.
    - The Great Storm: no wolves or predators while it lasts.
-5. **The hotbar:** ask Caspar which kind of change he meant (section 5).
+   - **Scout's bite is never changed.**
+5. **The hotbar:** without asking Caspar, the version built lets him **rearrange the seven slots**
+   (click one slot, then another, to swap them). Putting food in the hotbar can come later if he
+   meant that.
+6. **The paw trail** (P3) is about 80 m long, not 150 m: the ground west of the Frozen Lake is
+   steep further out (found with `tools/story/spots.mjs`).
+7. **"The lights on Frostpeak"** are the aurora in the northern sky, which shows from anywhere on
+   the island. It grows stronger chapter by chapter, blazes in the Great Storm and goes soft after
+   it. A glow on the mountain itself would be hidden by the fog at night.

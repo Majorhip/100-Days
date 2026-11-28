@@ -1,7 +1,7 @@
 // Scout's story (src/game/scout-story.js): when chapters are due, and which evenings Scout howls.
 // The rules are pure, so they are tested straight, with no stand-ins.
 import { describe, it, expect } from 'vitest';
-import { CHAPTER_DAY, chapterDue, howlsTonight } from '../src/game/scout-story.js';
+import { CHAPTER_DAY, chapterDue, howlsTonight, moonKind, SNOW_MOON_WOLVES, isStormHour } from '../src/game/scout-story.js';
 
 const base = { day: 25, stayed: true, scoutFriend: true, chapter: 0, chapterDay: 0, chapterDone: false, built: 6 };
 const due = o => chapterDue({ ...base, ...o });
@@ -33,10 +33,17 @@ describe('chapterDue', () => {
   });
   it('only chapters that exist are given, and none after the last', () => {
     expect(due({ chapter: 1, chapterDay: 21, chapterDone: true, day: 40, built: 1 })).toBe(0);
-    expect(due({ chapter: 6, chapterDay: 71, chapterDone: true, day: 90, built: 99 })).toBe(0);
+    expect(due({ chapter: 7, chapterDay: 85, chapterDone: true, day: 99, built: 99 })).toBe(0);
   });
   it('the chapters land on the mornings after the Wolf Moons from Day 20 to Day 70', () => {
-    expect(CHAPTER_DAY.slice(1)).toEqual([21, 31, 41, 51, 61, 71]);
+    expect(CHAPTER_DAY.slice(1, 7)).toEqual([21, 31, 41, 51, 61, 71]);
+  });
+  it('the Great Storm (chapter 7) comes from Day 85, the day after the stones are back', () => {
+    const after6 = { chapter: 6, chapterDay: 71, chapterDone: true, built: 7 };
+    expect(due({ ...after6, day: 84 })).toBe(0);
+    expect(due({ ...after6, day: 85 })).toBe(7);
+    expect(due({ chapter: 6, chapterDay: 90, chapterDone: true, day: 91, built: 7 })).toBe(7);   // a late player: the next day
+    expect(due({ chapter: 6, chapterDay: 90, chapterDone: true, day: 90, built: 7 })).toBe(0);
   });
 });
 
@@ -46,5 +53,23 @@ describe('howlsTonight', () => {
   });
   it('every other evening once Ray has told the story', () => {
     expect([20, 21, 22].map(d => howlsTonight(d, 1))).toEqual([true, false, true]);
+  });
+});
+
+describe('moonKind', () => {
+  it('ordinary Wolf Moons until the story begins, and on days that are not Wolf Moons', () => {
+    expect(moonKind(60, 0)).toBe('red');
+    expect(moonKind(61, 3)).toBe('red');
+    expect([20, 30, 40, 50].map(d => moonKind(d, 2))).toEqual(['red', 'red', 'red', 'red']);
+  });
+  it('from Day 60: snow, storm, snow, storm', () => {
+    expect([60, 70, 80, 90].map(d => moonKind(d, 4))).toEqual(['snow', 'storm', 'snow', 'storm']);
+  });
+  it('a Snow Moon brings 8 snow wolves', () => { expect(SNOW_MOON_WOLVES).toBe(8); });
+});
+
+describe('isStormHour', () => {
+  it('the Great Storm blows from 20:00 until dawn', () => {
+    expect([19.9, 20, 23, 2, 5.4, 5.5, 12].map(isStormHour)).toEqual([false, true, true, true, true, false, false]);
   });
 });

@@ -31,11 +31,15 @@ const exp = {
   inv: want.inv, structures: want.structures.map(s => [s.k, s.x, s.y, s.z, s.ry, s.d]),
   nodeState: want.nodeState, chests: want.chests, bossDead: want.bossDead, flags: want.flags, notes: want.notes, quest: want.quest
 };
+// The fixture is a Day 10 save, and every 10th day the game's once-a-second tick sets the Export
+// reminder (exportNudge, src/backups.js). Whether that tick runs before this check reads the game is
+// a race, so the reminder is not counted as a difference.
+if (!('exportNudge' in exp.flags) && got.flags.exportNudge === got.day) delete got.flags.exportNudge;
 const fails = [];
 for (const k of Object.keys(exp)) {
   // inventory/structure contents compared order-insensitively for object keys
   const a = JSON.stringify(sortKeys(exp[k])), b = JSON.stringify(sortKeys(got[k]));
-  if (a !== b) fails.push(k);
+  if (a !== b) fails.push(k === 'flags' ? 'flags (' + [...new Set([...Object.keys(exp.flags), ...Object.keys(got.flags)])].filter(f => JSON.stringify(exp.flags[f]) !== JSON.stringify(got.flags[f])).map(f => f + ': ' + JSON.stringify(exp.flags[f]) + ' -> ' + JSON.stringify(got.flags[f])).join(', ') + ')' : k);
 }
 function sortKeys(v) { if (Array.isArray(v)) return v.map(sortKeys); if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map(k => [k, sortKeys(v[k])])); return v; }
 

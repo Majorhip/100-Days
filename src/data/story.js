@@ -21,7 +21,12 @@ const NOTES = {
   mine: { t: 'Mine Survey', body: 'Iron ore: plenty. Smelt it in a furnace.\n\nAn IRON PICKAXE is the only thing hard enough to cut Frostpeak crystal — or to dig through a cave-in.\n\n— R.' },
   cabin: { t: 'Ray\'s Journal — Frostpeak', body: 'I found it.\n\nThe lights come from a cavern full of glowing crystals, right under the peak. The entrance is on the WEST face.\n\nI\'m going inside tomorrow with rope and a lamp. If the roof looks weak I\'ll turn back. Promise.\n\nThe big white bear at the summit — FROSTCLAW — has made a nest out of my antenna. I\'ll deal with that later.\n\nSpare furs are in the chest. This mountain will freeze you solid without a fur coat.' },
   lake: { t: 'Ice Fishing Log', body: 'The biggest fish on the island live under this ice.\n\nDrop a line in the hole. Bring a fire. Mind the snow wolves.' },
-  summit: { t: 'Scratched into the mast', body: 'KESTREL ISLAND RELAY\nProperty of Ranger R. Rivera.\n\nIf found, please return to the Radio Tower.\n\n(Mind the bear.)' }
+  summit: { t: 'Scratched into the mast', body: 'KESTREL ISLAND RELAY\nProperty of Ranger R. Rivera.\n\nIf found, please return to the Radio Tower.\n\n(Mind the bear.)' },
+  // Scout's story (added after the migration: src/story/scout-story.js)
+  tomas1: { t: 'Tomas\'s Journal — 1', body: 'My name is TOMAS. I am the ship\'s boy, and I am twelve.\n\nWe came for the GLOWING STONES. A red-gold dog met us on the beach. I named her EMBER. Every night she barks at the mountain.\n\nThe captain stole three stones from the STONE CIRCLE. The old carvings say they calm the GREAT STORM. Without them it will never stop.\n\nI took them back. I hid them where the GUARDIANS can keep them safe. The next one is locked in my box at the OLD MINE. Only a friend of the guardians can open it.' },
+  tomas2: { t: 'Tomas\'s Journal — 2', body: 'You know the guardians! Then you are a friend of the island.\n\nWe sail tomorrow. I could not put the stones back in time.\n\nThe last stone is up in the SNOW. Ember\'s family live up there. They walk at NIGHT, and their paws glow like the mountain stones.\n\nStart at the FROZEN LAKE. Follow them.' },
+  tomas3: { t: 'Tomas\'s Journal — 3', body: 'Ember had PUPS by the Stone Circle. I cannot take them, and I cannot take her. My heart hurts.\n\nOne day the mountain lights will burn bright again. Then a dog of Ember\'s family will know the way to the circle, even through the GREAT STORM.\n\nPut the stones back. Follow the dog.\n\n— Tomas' },
+  whistleBox: { t: 'Scratched inside the little box', body: 'For whoever counts the stones.\n\nBlow this and any dog of Ember\'s family will come running.\n\n— T.' }
 };
 const DIALOGS = {
   radio: ['The radio crackles... hisses... and then, a voice.', 'RAY: "...anyone? This is Ranger Ray Rivera. I\'m trapped in the crystal cavern under Frostpeak. Cave-in. I can\'t shift the rocks..."', 'You grab the microphone. "UNCLE RAY! It\'s SAM!"', 'RAY: "SAM?! You\'re ALIVE? You fixed the TOWER?! Ha!"', 'RAY: "Listen. West face of Frostpeak. You need an IRON PICKAXE to break through. And Sam... I\'m so proud of you."'],
@@ -30,7 +35,17 @@ const DIALOGS = {
   rayStay: ['RAY: "Then we stay. I\'ll keep the camp fed — you keep being a legend. The ship comes on Day 100."'],
   rayIdle: ['RAY: "Day 100, kiddo. Until then, this island is ours. Have you found all ten golden idols yet?"'],
   // Scout's story, chapter 1 (added after the migration: src/story/scout-story.js)
-  scoutPup: ['RAY: "Did you hear Scout last night? Howling at Frostpeak again."', 'RAY: "He\'s done that ever since I found him. Did I ever tell you? I found him as a pup, all on his own, right in the middle of the Stone Circle."', 'RAY: "No mum. No tracks. Just a little red-gold fluff ball, barking at the mountain."', 'RAY: "I never did work out where he came from. This island keeps a few secrets, kiddo."']
+  scoutPup: ['RAY: "Did you hear Scout last night? Howling at Frostpeak again."', 'RAY: "He\'s done that ever since I found him. Did I ever tell you? I found him as a pup, all on his own, right in the middle of the Stone Circle."', 'RAY: "No mum. No tracks. Just a little red-gold fluff ball, barking at the mountain."', 'RAY: "I never did work out where he came from. This island keeps a few secrets, kiddo."'],
+  // Ray's hints while a chapter is under way (index = chapter)
+  scoutHint: [null, null,
+    ['RAY: "Scout keeps looking WEST, eh? Follow him, kiddo. That dog knows something we don\'t."'],
+    ['RAY: "A box only a friend of the guardians can open..."', 'RAY: "Who did you fight in the WOODS? In the SANDS? Up in the ICE? You know them better than anyone."'],
+    ['RAY: "Let me see that paw... Poor fella."', 'RAY: "Wrap it with a BANDAGE — two fibre and a healing herb. Then give him his meat and let him rest."'],
+    ['RAY: "Paws that glow? You won\'t see them in daylight."', 'RAY: "Go to the FROZEN LAKE at NIGHT, kiddo. Wear your fur coat, and take Scout."'],
+    ['RAY: "Three stones... and three holes in the standing stones at the circle."', 'RAY: "WEST, EAST and NORTH. Look at the carvings, kiddo. Each stone has its home."'],
+    ['RAY: "The sky feels wrong today. Scout won\'t eat."', 'RAY: "If the Great Storm comes tonight... follow Scout. Wherever he goes."']],
+  scoutPups: ['RAY: "Pups... by the Stone Circle?"', 'RAY: "That\'s exactly where I found him. All on his own, barking at the mountain."', 'RAY: (He looks at Scout for a long time.) "Well, I\'ll be. Ember\'s family."'],
+  scoutFamily: ['RAY: "Did you see that? Up on the slope, at dawn?"', 'RAY: "He was never barking at the mountain, kiddo. He was talking to his family."', 'RAY: "And he still chose to stay with us. Good dog."']
 };
 const INTRO = [
   ['THE STORM', 'You were on the supply boat <b>Petrel</b>, heading to spend the holidays with your Uncle Ray — the ranger of wild, faraway <b>Kestrel Island</b>.'],

@@ -552,3 +552,42 @@ first slice of it.
     (by about 3 cm; the check needs more than 1.5 cm), and he isn't eating.
 - **Screenshots:** `node tools/story/scout-shots.mjs <dir>` shows him standing and howling, from the
   side.
+
+## The middle days, step 3: Scout leads the way (28 Nov 2026)
+**Chapter 2** (from Day 31, 3 days after chapter 1 began):
+- **Each morning** Scout stares the way of the dig spot and whines: a toast with the compass
+  direction (WEST from most of the island).
+- **Within 150 m, on foot,** he leads. Once a second the story puts his target 8 m ahead of you on
+  the straight line to the spot (`R.scout.lead`). He runs there and waits, looking back at you.
+  Walk the wrong way and the point moves with you, so he comes back round. Riding, he just
+  follows, because he can't keep up with a horse.
+- **Within 6 m** he goes to the spot and digs (his Eating clip, over and over, with dirt puffs).
+  "Help Scout dig" (E) gives the **Green Stone** and **Tomas's page 1** (`NOTES.tomas1`), and leaves
+  a dug hole there.
+- **Talking to Ray** while a chapter is under way gives that chapter's hint (`DIALOGS.scoutHint`).
+
+**Where things are:** `src/data/story-spots.js`, found with `node tools/story/spots.mjs` on dry,
+fairly flat ground clear of trees, rocks and colliders. They are not in `SITES` or `NODES`, so the
+fingerprint is unchanged. Story props are only made once the story reaches them, so saves without
+the story (the fixture, the screenshots) see no difference.
+
+**Hooks added for the later steps** (flags on `R.scout`): `lead` (also `lead.far`: no teleport
+back when he runs off in the Great Storm), `dig` and `limp` (slow, doesn't fight). On his E prompt,
+`R.scoutLabel()` and `R.scoutAct()` go first.
+
+**Checks:**
+- **The rule tests (14)** now cover chapter 7 (the Great Storm from Day 85), the Wolf Moon twists
+  (`moonKind`: from Day 60, snow, storm, snow, storm, once the story has begun; a Snow Moon is 8 snow
+  wolves) and the storm hours.
+- **The smoke step "story: scout leads the way":**
+  - chapter 2 on Day 31, with the WEST toast and Ray's hint
+  - from 50 m, he is 7.6 m ahead of you within 2.5 s
+  - close by he digs (Eating), and the prompt gives the stone, the page (shown) and the chapter is done
+- **`node tests/smoke.mjs --only=story`** runs just the story steps (and "new game") while working
+  on them.
+
+**A flaky save check, fixed:** `savecheck.mjs` sometimes failed with "differs in: flags". The
+fixture is a Day 10 save, and on every 10th day the once-a-second tick sets the Export reminder
+(`exportNudge`, from step 3 of IMPROVEMENTS.md). Whether that tick ran before the check read the
+game was a race, so it failed about two runs in three on this PC. That reminder no longer counts as
+a difference, and a failure now names the flags that differ.

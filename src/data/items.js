@@ -63,7 +63,12 @@ const ITEMS = {
   coil: { n: 'Power Coil', e: ['⚙️'], d: 'Radio part 1 of 3.', bg: '#b8860b', story: true },
   battery: { n: 'Battery', e: ['🔋'], d: 'Radio part 2 of 3.', bg: '#b8860b', story: true },
   antenna: { n: 'Antenna', e: ['📡'], d: 'Radio part 3 of 3.', bg: '#b8860b', story: true },
-  idol: { n: 'Golden Idol', e: ['🗿'], d: 'One of ten. They belong at the Stone Circle.', bg: '#d9a520', story: true }
+  idol: { n: 'Golden Idol', e: ['🗿'], d: 'One of ten. They belong at the Stone Circle.', bg: '#d9a520', story: true },
+  // Scout's story (added after the migration: src/story/scout-story.js)
+  greenstone: { n: 'Green Stone', e: ['💚'], d: 'A smooth green stone that glows a little. Tomas hid it in the woods.', bg: '#3c9a5a', story: true },
+  goldstone: { n: 'Gold Stone', e: ['💛'], d: 'A smooth gold stone that glows a little. Tomas locked it in his box.', bg: '#c9a227', story: true },
+  bluestone: { n: 'Blue Stone', e: ['💙'], d: 'A smooth blue stone that glows a little. Ember\'s family led you to it.', bg: '#3a7bd5', story: true },
+  whistle: { n: 'Tomas\'s Whistle', e: ['🪈'], d: 'Press H to whistle: Scout comes running from anywhere.', bg: '#a0703c', story: true }
 };
 const HOTBAR = ['hands', 'axe', 'pick', 'melee', 'bow', 'torch', 'rod'];
 const HANDS = { n: 'Hands', e: ['✋'], tool: { slot: 'hands', cls: 'hands', dmg: 4, reach: 2.5, power: 0, tier: 0 } };
