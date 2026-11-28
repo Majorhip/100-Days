@@ -694,3 +694,46 @@ alike. Run the whole smoke test before a commit.
   cairn, the west and north stones, and the lights.
 - **Moved:** Tomas's box went to (209, 95.5), 5 m from the mine's chest. At 2 m it looked like a
   second chest.
+
+## The middle days, step 8: the Great Storm and the dawn (28 Nov 2026)
+**Chapter 7** (from Day 85, once the stones are back):
+- **That morning:** a warning, and Ray's hint "follow Scout".
+- **From 20:00 until dawn:** the **Great Storm** (`R.greatStorm`). The weather is held at storm,
+  lightning strikes about four times as often (`gfx/weather.js`), and the lights blaze (+1.6).
+  Hostile creatures are removed and nothing spawns (`R.noPredators`, read by `spawner.js`): "Even
+  the wolves are hiding tonight."
+- **Scout isn't scared any more** (no shiver from chapter 7 on). He runs 12 m ahead towards the Stone
+  Circle from anywhere (`lead.far`, so he isn't pulled back to you) and waits beside the altar.
+- **The climax:** with all three stones in and you within 11 m, Scout howls (4.5 s). Then lightning
+  and a 160 m column of blue light from the altar (faded over 5 s). The storm breaks to a clear
+  sky, +200 XP.
+- **Not followed?** The storm drops at dawn and comes back every night until it's done. A save made
+  mid-climax resets on loading.
+
+**Chapter 8**, the first morning (05:20 to 12:00) at least an hour after the storm breaks:
+- **The wild dog:** a red-gold dog (`stormdog`, the same model, 0.9 m) about 22 m away towards
+  Frostpeak, where no standing stone hides it. It howls, Scout howls back, and after 9 s it trots
+  away.
+- **The Storm Dog badge.**
+- **The collar chip:** a glowing blue chip on Scout's collar (`collarChip()`).
+- **Ray's news:** "He was never barking at the mountain, kiddo. He was talking to his family."
+- **The lights go soft again,** and on howling evenings a far howl answers Scout.
+
+**The endings:** in the two ship endings, Scout stands at the back of the boat ("see you, family")
+after the story, or curls up at your feet if the story wasn't finished. The helicopter ending is
+unchanged.
+
+**Tomas's whistle** (from chapter 2):
+- **The box:** a little box inside the Stone Circle with a number dial: "How many stones stand in
+  this circle?" The answer is 8.
+- **The whistle:** press **H** to whistle and Scout comes running (`R.teleScout`). There's no touch
+  button for it yet.
+
+**Checks:**
+- **The smoke step "story: the great storm and the dawn":**
+  - the 20:12 storm: no wolves and nothing spawns, Scout brave, the lights at +1.6, leading from 60 m
+  - at the altar: the howl, then calmed, with the banner
+  - the dawn: chapter 8, the badge, the wild dog, the chip, the lights at 0, "Scout howls back"
+  - Ray's "family"; the ship ending's line
+  - the box: 7 is refused, 8 opens it; the whistle calls Scout
+- **Screenshots:** `scout-shots.mjs` adds the storm, the beam, the dawn dog and the collar chip.

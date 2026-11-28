@@ -48,6 +48,7 @@ function setupInput(canvas) {
       case 'KeyG': drinkCanteen(); break;
       case 'KeyR': if (R.build) R.build.rot = (R.build.rot + 1) % 4; break;
       case 'KeyX': if (R.build) cancelBuild(); else tryDismantle(); break;
+      case 'KeyH': if (R.whistle) R.whistle(); break;   // (added after the migration) Tomas's whistle: Scout comes running
       case 'KeyT': G.p.held = G.p.held === 'torch' ? 'hands' : (bestTool('torch') ? 'torch' : G.p.held); refreshViewModel(); break;
       default: if (e.code.startsWith('Digit')) { const i = +e.code.slice(5) - 1; if (i >= 0 && i < HOTBAR.length) selectSlot(HOTBAR[i]); }
     }

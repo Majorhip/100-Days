@@ -68,7 +68,7 @@ const BADGES = {
   grizzle: ['🐻', 'Bear Wrestler', 'Defeat Old Grizzle'], duneking: ['🦂', 'King of the Dunes', 'Defeat the Dune King'], frostclaw: ['❄️', 'Frostbreaker', 'Defeat Frostclaw'],
   spot10: ['🔭', 'Keen Eye', 'Spot 10 kinds of animal'], spotrare: ['✨', 'Lucky Spot', 'Spot a rare animal'], spotall: ['🐾', 'Naturalist', 'Spot every animal on the island'], rider: ['🐎', 'Rider', 'Tame a wild horse, donkey or alpaca'],   // (added after the migration: the animal journal)
   explorer: ['🧭', 'Explorer', 'Discover every landmark'], treasure: ['💰', 'Treasure Hunter', 'Open all 10 treasure chests'], storm: ['⚡', 'Stormcaller', 'Earn the Storm Spear'],
-  radio: ['📡', 'On the Air', 'Repair the Radio Tower'], ray: ['🧔', 'Found Him', 'Rescue Uncle Ray'],
+  radio: ['📡', 'On the Air', 'Repair the Radio Tower'], ray: ['🧔', 'Found Him', 'Rescue Uncle Ray'], stormdog: ['🐕', 'Storm Dog', 'Follow Scout through the Great Storm'],   // (stormdog: added after the migration, Scout's story)
   d10: ['🔟', '10 Days', 'Survive to Day 10'], d25: ['🏕️', '25 Days', 'Survive to Day 25'], d50: ['⭐', '50 Days', 'Survive to Day 50'], d100: ['👑', '100 Days', 'Survive to Day 100']
 };
 const TIPS = [

@@ -90,7 +90,7 @@ function updatePrecip(dt) {
   R.snow.geometry.setDrawRange(0, Math.floor(R.snow.userData.n * Q.part * (wet ? 1 : 0.45)));
   R.snow.material.uniforms.uVel.value.set(0.6 + GU.uWind.value.x * (wet ? 3 : 1), wet ? -2.6 : -1.5, GU.uWind.value.z * (wet ? 3 : 1));
   R.snow.material.uniforms.uCol.value.setScalar(lerp(1.0, 0.35, GU.uNight.value));
-  if (G.weather === 'storm' && !R.sleeping && Math.random() < dt * 0.09) { R.flashT = 0.28; makeBolt(); setTimeout(() => sfx('thunder'), 300 + Math.random() * 1500); uiFlash('#fff', 0.35); }
+  if (G.weather === 'storm' && !R.sleeping && Math.random() < dt * (R.greatStorm ? 0.35 : 0.09)) { R.flashT = 0.28; makeBolt(); setTimeout(() => sfx('thunder'), 300 + Math.random() * 1500); uiFlash('#fff', 0.35); }   // (R.greatStorm: added after the migration, far more lightning)
   if (R.boltT > 0) { R.boltT -= dt; R.bolt.material.opacity = Math.random() > 0.3 ? 1 : 0.25; if (R.boltT <= 0) R.bolt.visible = false; }
 }
 // @end-moved

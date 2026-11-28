@@ -59,5 +59,21 @@ try {
   await look(ci.x - 4, ci.z + 1.2, ci.x - 7.5, 0, ci.z, 18.3); await ev(() => { window.__stranded.G.p.pitch = 0.0; window.__stranded.updateScoutStory(); }); await shot('6-circle-west');
   await look(ci.x + 1.2, ci.z - 4, ci.x, 0, ci.z - 7.5, 18.3); await ev(() => { window.__stranded.G.p.pitch = 0.0; window.__stranded.updateScoutStory(); }); await shot('7-circle-north');
   await look(-40, 60, -40, 0, -100, 23.5); await ev(() => { window.__stranded.G.p.pitch = 0.42; window.__stranded.updateScoutStory(); }); await shot('8-lights', 8000);
+
+  // the Great Storm at the Stone Circle, the beam of light as it breaks, the wild dog at dawn, and
+  // the chip on Scout's collar
+  await ev(() => {
+    const S = window.__stranded, { G, R } = S;
+    G.scout.friend = true; G.scout.fed = 99; G.day = 85; G.story = { ch: 6, day: 71, done: true, allPlaced: true, placed: { greenstone: true, goldstone: true, bluestone: true } };
+    G.hour = 9; S.updateScoutStory();
+  });
+  await look(ci.x + 9, ci.z + 9, ci.x, 3, ci.z, 20.3); await ev(() => { const S = window.__stranded; S.R.teleScout = true; S.updateScoutStory(); }); await shot('9-great-storm', 6000);
+  await ev(() => { const S = window.__stranded, { G, R } = S, ci = S.SITES.circle; G.p.x = ci.x + 5; G.p.z = ci.z + 5; R.scout.x = ci.x + 1.8; R.scout.z = ci.z + 2.2; S.updateScoutStory(); });
+  await ev(() => { const S = window.__stranded, ci = S.SITES.circle, p = S.G.p; p.yaw = Math.atan2(-(ci.x - p.x), -(ci.z - p.z)); p.pitch = 0.55; }); await shot("10-beam", 5600);
+  await wait(4000);
+  const dog = await ev(() => { const S = window.__stranded, { G } = S; G.day = 86; G.hour = 6; S.updateScoutStory(); const w = S.storyMade().wild; return w ? { x: w.x, z: w.z } : null; });
+  if (dog) { const p = await ev(() => ({ x: window.__stranded.G.p.x, z: window.__stranded.G.p.z })); await look(p.x, p.z, dog.x, 0, dog.z, 6.1); await ev(() => { window.__stranded.G.p.pitch += 0.05; }); await shot('11-dawn-dog', 2400); }
+  await ev(() => { const S = window.__stranded, { G, R } = S, s = R.scout, p = G.p; s.x = p.x; s.z = p.z - 1.3; s.yaw = 0.4; p.yaw = 0; p.pitch = -0.75; G.hour = 12; G.weather = 'clear'; G.scout.friend = false; });
+  await shot('12-collar-chip', 2500);
   console.log(errors.length ? 'page errors:\n  ' + errors.slice(0, 5).join('\n  ') : 'no page errors');
 } finally { await close(); }

@@ -14,7 +14,7 @@ into one file. The migration is finished (MIGRATION.md). Since then, new feature
 | `npm run check` | The quick set: build, build check, rules tests, island, save, core smoke steps. About 1–2 min. |
 | `npm test` | Build, then Vitest: survival and time rules, island fingerprint, save. Takes about 3 min. |
 | `npm run parity` | Build, then every browser check, screenshots included. Takes about 7 min. |
-| `npm run smoke` | Headless Chrome play-through of `dist/index.html` (24 steps, zero page errors) |
+| `npm run smoke` | Headless Chrome play-through of `dist/index.html` (37 steps, zero page errors; `--only=story` runs some) |
 | `npm run ship` | Build, copy to `release/Stranded-100-Days-PC.html`, prove a save from the original shows up |
 
 - **While working:** run `npm run check` after each change.

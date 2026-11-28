@@ -566,6 +566,64 @@ try {
     info: `Day 69 warning ${r.soon}; Day 70 moon ${r.kind}, weather ${r.weather} for ${r.stormHrs} h, banner ${r.banner}; chapter ${r.ch}, lights +${r.lights}; "${r.label}": gold refused ${r.refused}; glowing ${r.glow}, stones left ${r.left}, done ${r.done}, all home ${r.all}, banner ${r.banner2}`
   }));
 
+  // story step 8: chapter 7 on Day 85, with the stones home. At 20:00 the Great Storm: no wolves,
+  // Scout isn't scared and leads from far away to the Stone Circle; at the altar he howls, and the
+  // storm breaks. At dawn a wild red-gold dog howls, the Storm Dog badge, a chip on Scout's collar,
+  // and Ray understands. The ship ending names Scout. Tomas's whistle box opens with 8.
+  await step('story: the great storm and the dawn', async () => {
+    const keep = await ev(() => {
+      const S = window.__stranded, { G, R } = S, k = { friend: G.scout.friend, fed: G.scout.fed, rayFree: G.flags.rayFree, rayChoice: G.flags.rayChoice, radio: G.flags.radio, day: G.day, hour: G.hour, pos: [G.p.x, G.p.z], notes: G.notes.slice() };
+      S.clearCreatures(); G.weather = 'clear'; G.weatherHrs = 99; S.take('whistle', 99);
+      G.scout.friend = true; G.flags.radio = true; G.flags.rayFree = true; G.flags.rayChoice = 'stay';
+      G.story = { ch: 6, day: 71, done: true, allPlaced: true, placed: { greenstone: true, goldstone: true, bluestone: true } }; S.placeRay();
+      G.day = 85; G.hour = 9; G.scout.fed = 85; S.updateScoutStory(); return k;
+    });
+    const r = await ev(() => {
+      const S = window.__stranded, { G, R } = S, ci = S.SITES.circle, o = { ch: G.story.ch, toast: /GREAT STORM/.test(document.getElementById('toasts').textContent), lights: R.auroraBoost };
+      G.p.x = ci.x + 60; G.p.z = ci.z; G.p.y = S.groundAt(G.p.x, G.p.z); G.p.vy = 0; R.teleScout = true;
+      S.spawnCreature('wolf', G.p.x + 10, G.p.z);
+      G.hour = 20.2; S.updateScoutStory();
+      o.storm = !!R.greatStorm && G.weather === 'storm'; o.wolves = R.creatures.filter(c => !c.dead && c.type === 'wolf').length; o.banner = /GREAT STORM/.test(document.getElementById('banner').textContent);
+      S.updateSpawner(); o.spawned = R.creatures.length; o.brave = !R.scout.scared; o.lights2 = R.auroraBoost;
+      const L = R.scout.lead; o.far = !!(L && L.far) && Math.hypot(L.x - ci.x, L.z - ci.z) < Math.hypot(G.p.x - ci.x, G.p.z - ci.z);
+      G.p.x = ci.x + 5; G.p.z = ci.z + 4; G.p.y = S.groundAt(G.p.x, G.p.z); R.scout.x = ci.x + 1.8; R.scout.z = ci.z + 2.2; S.updateScoutStory();
+      o.calming = !!G.story.calming;
+      return o;
+    });
+    await wait(8000);
+    Object.assign(r, await ev(() => {
+      const S = window.__stranded, { G, R } = S, o = { calmed: G.story.done && !R.greatStorm && G.weather === 'clear' && !R.noPredators, breaks: /STORM BREAKS/.test(document.getElementById('banner').textContent) };
+      G.day = 86; G.hour = 6; S.updateScoutStory();
+      o.ch8 = G.story.ch; o.badge = !!G.badges.stormdog; o.wild = !!S.storyMade().wild; o.chip = !!R.scout.model.chip; o.lights3 = R.auroraBoost;
+      return o;
+    }));
+    await wait(6000);
+    Object.assign(r, await ev(() => {
+      const S = window.__stranded, { G, R } = S, o = { howledBack: /Scout howls back/.test(document.getElementById('toasts').textContent) };
+      o.rayNews = /💬/.test(R.rayPoi.label()); S.talkToRay(); const lines = [];
+      for (let i = 0; i < 6 && R.panel === 'dialog'; i++) { lines.push(document.getElementById('panel').textContent); R.panelNext(); }
+      o.family = lines.some(l => /his family/.test(l));
+      S.showEnding('ship'); o.ending = /see you, family/.test(document.getElementById('panel').textContent); S.closePanel();
+      const ci = S.SITES.circle; G.p.x = ci.x + 4; G.p.z = ci.z + 2; G.p.y = S.groundAt(G.p.x, G.p.z);
+      const poi = S.POIS.find(q => q.id === 'storyWhistle'); o.boxOn = poi.on();
+      poi.act(); let opt = R.panelArg.opts.find(x => x[0] === '7'); S.closePanel(); opt[2](); o.wrong = !S.inv('whistle');
+      poi.act(); opt = R.panelArg.opts.find(x => x[0] === '8'); S.closePanel(); opt[2](); o.whistle = S.inv('whistle'); S.closePanel();
+      R.teleScout = false; R.whistle(); o.called = R.teleScout === true || /comes running/.test(document.getElementById('toasts').textContent);
+      return o;
+    }));
+    await ev(k => {
+      const S = window.__stranded, { G, R } = S, set = (q, n, v) => { if (v === undefined) delete q[n]; else q[n] = v; };
+      G.scout.friend = k.friend; G.scout.fed = k.fed; set(G.flags, 'rayFree', k.rayFree); set(G.flags, 'rayChoice', k.rayChoice); set(G.flags, 'radio', k.radio);
+      G.day = k.day; G.hour = k.hour; G.p.x = k.pos[0]; G.p.z = k.pos[1]; G.p.y = S.groundAt(G.p.x, G.p.z); G.notes = k.notes; S.take('whistle', 99);
+      delete G.story; delete G.badges.stormdog; R.greatStorm = false; R.noPredators = false; R.auroraBoost = 0; G.weather = 'clear'; G.weatherHrs = 99; S.placeRay(); S.clearCreatures();
+    }, keep);
+    return r;
+  }, r => ({
+    ok: r.ch === 7 && r.toast && r.storm && r.wolves === 0 && r.banner && r.spawned === 0 && r.brave && r.lights2 > 1.5 && r.far && r.calming && r.calmed && r.breaks &&
+      r.ch8 === 8 && r.badge && r.wild && r.chip && r.lights3 === 0 && r.howledBack && r.rayNews && r.family && r.ending && r.boxOn && r.wrong && r.whistle === 1 && r.called,
+    info: `chapter ${r.ch}, toast ${r.toast}; 20:12 storm ${r.storm}, wolves ${r.wolves}, banner ${r.banner}, nothing spawns ${r.spawned === 0}, brave ${r.brave}, lights +${r.lights2}, leads from far ${r.far}; at the altar: howl ${r.calming}, calmed ${r.calmed}, banner ${r.breaks}; dawn: chapter ${r.ch8}, badge ${r.badge}, wild dog ${r.wild}, collar chip ${r.chip}, lights +${r.lights3}, howled back ${r.howledBack}; Ray ${r.rayNews} "family" ${r.family}; ending ${r.ending}; whistle box ${r.boxOn}: 7 refused ${r.wrong}, 8 gives ${r.whistle}, whistle calls ${r.called}`
+  }));
+
   // rarer finds: about half the small finds are not there (hidden, cannot be picked, never
   // grow back), all of them stay near the start; rarer animals: smaller caps, one at a time
   await step('rarer finds and animals', () => ev(() => {

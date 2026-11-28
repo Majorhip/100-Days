@@ -14,6 +14,13 @@
 //   (west), a sun over the dunes (east) and a snowflake (north), each with a hole for its stone
 // - the lights over Frostpeak (the northern aurora, R.auroraBoost read by gfx/sky.js) grow
 //   stronger with each chapter
+// - chapter 7: the Great Storm, from Day 85 once the stones are back: each night from 20:00 a huge
+//   storm (R.greatStorm, R.noPredators). Scout isn't scared any more: he runs into it to the Stone
+//   Circle and howls at the altar; lightning, a beam to the sky, and the storm breaks
+// - chapter 8: the dawn after. A wild red-gold dog howls from the slope towards Frostpeak, Scout
+//   howls back; the Storm Dog badge; a chip of blue stone on Scout's collar; Ray understands
+// - Tomas's whistle: a little box in the Stone Circle with a counting lock (8 standing stones);
+//   H whistles, and Scout comes running (R.whistle, read by keyboard.js)
 // - from Day 60, some Wolf Moons have a twist (R.raidKind(), read by spawner.js): a Snow Moon or a
 //   Storm Moon, which Scout senses the day before
 // - Scout is scared of thunder: he shivers, keeps close and whines (just for show: he still fights)
@@ -30,10 +37,14 @@
 // G.story = { ch, day, done, ... }, made only when chapter 1 starts, so other saves are unchanged.
 import { G, R } from '../state.js';
 import { sfx } from '../audio/audio.js';
-import { SITES, heightAt } from '../world/terrain.js';
+import { SITES, heightAt, slopeAt } from '../world/terrain.js';
 import { puff } from '../world/sky.js';
 import { box, cyl, ico, part } from '../core/geometry.js';
 import { MAT_GLOW, litMat } from '../gfx/core.js';
+import { gltfAnimal, collarChip } from '../models/gltf-animals.js';
+import { removeCreature } from '../creatures/creatures.js';
+import { badge } from './quests.js';
+import { angDiff, lerp } from '../core/math.js';
 import * as THREE from 'three';
 import { ITEMS } from '../data/items.js';
 import { addCollider } from '../world/collision.js';
@@ -44,10 +55,10 @@ import { POIS } from '../player/targeting.js';
 import { hearts, compassWord } from '../creatures/scout.js';
 import { prop, readNote } from './props.js';
 import { showDialog, showChoice } from '../ui/panels.js';
-import { toast, banner, hint } from '../ui/hud.js';
-import { chapterDue, howlsTonight, moonKind, LOCK_DIALS, LOCK_PICTURES, lockRight } from '../game/scout-story.js';
+import { toast, banner, hint, uiFlash } from '../ui/hud.js';
+import { chapterDue, howlsTonight, moonKind, LOCK_DIALS, LOCK_PICTURES, lockRight, isStormHour } from '../game/scout-story.js';
 
-const BUILT = 6;   // chapters in the game so far
+const BUILT = 7;   // chapters in the game so far
 const HOWL = { from: 19, to: 20, secs: 5.5 };   // dusk (game hours), and how long he howls (s)
 const LEAD = { near: 150, ahead: 8, dig: 6 };   // he leads within 150 m; runs 8 m ahead; digs when you're within 6 m
 
@@ -56,7 +67,8 @@ let seenDay = null, wasFriend = false, wasStorm = false, stormDay = null, nextWh
 const story = () => G.story || { ch: 0, day: 0, done: true };
 const active = n => !!(G.story && G.story.ch === n && !G.story.done);
 const pupsNews = () => !!(G.story && G.story.pupsNews && !G.story.pupsHeard);   // after page 3
-const rayHasNews = () => active(1) || pupsNews();
+const familyNews = () => !!(G.story && G.story.familyNews && !G.story.familyHeard);   // after the dawn
+const rayHasNews = () => active(1) || pupsNews() || familyNews();
 const night = () => G.hour >= 19.5 || G.hour < 5.5;   // when the paw prints glow
 const dist = (x, z) => Math.hypot(x - G.p.x, z - G.p.z);
 const dirTo = (x, z) => compassWord(x - G.p.x, z - G.p.z);
@@ -99,6 +111,11 @@ const CHAPTERS = {
     },
     daily: () => toast('🐕 Scout looks ' + dirTo(B.x, B.z) + ' again. Tomas\'s box is waiting at the Old Iron Mine.', 'ok', 7000),
     tick: () => leadTo(B.x, B.z + 1.3, B.x, B.z)   // he waits in front of the box
+  },
+  7: {
+    start: () => toast("⛈️ The sky feels heavy and strange, and Scout won't eat his breakfast. Ray thinks the <b>GREAT STORM</b> is coming tonight.", 'warn', 11000),
+    daily: () => toast('⛈️ The Great Storm will come back tonight. When it does, follow Scout!', 'warn', 8000),
+    tick: () => stormTick()
   },
   6: {
     start: () => {
@@ -192,6 +209,118 @@ function placeStone(id, w) {
     banner('THE STONES ARE HOME', 'All three glow in the Stone Circle. Far away, the lights over Frostpeak flare.');
   }
 }
+/* ---------- the Great Storm (chapter 7) ---------- */
+const ALTAR = { x: CI.x + 1.8, z: CI.z + 1.8 };   // where Scout stands to howl, beside the altar
+function stormTick() {
+  const st = G.story, on = isStormHour(G.hour) && (G.day > st.day || G.hour >= 20);
+  if (on && !R.greatStorm) startStorm();
+  if (!on && R.greatStorm) endStorm(false);
+  if (!R.greatStorm) return;
+  G.weather = 'storm'; G.weatherHrs = Math.max(G.weatherHrs, 2);
+  const s = R.scout;
+  if (!G.scout.friend || st.calming) return;
+  const d = dist(CI.x, CI.z);
+  if (d > 14) {   // he runs ahead through the storm, as far as it takes, and waits for you
+    const k = Math.min(1, 12 / d); s.lead = { x: G.p.x + (CI.x - G.p.x) * k, z: G.p.z + (CI.z - G.p.z) * k, far: true };
+    if (Math.random() < 0.25) sfx('bark');
+    return;
+  }
+  s.lead = { x: ALTAR.x, z: ALTAR.z, lookX: CI.x, lookZ: CI.z, far: true };
+  if (!Object.keys(STONES).every(placed)) {
+    if (R.t > (st.nagT || 0)) { st.nagT = R.t + 9; sfx('bark'); hint('Scout barks at the empty holes in the standing stones. The stones must go back first!', 4); }
+    return;
+  }
+  if (d < 11 && Math.hypot(s.x - ALTAR.x, s.z - ALTAR.z) < 2.5) calmStorm();
+}
+function startStorm() {
+  R.greatStorm = true; R.noPredators = true;
+  for (const c of R.creatures.slice()) if (!c.dead && !c.def.passive && !c.tame && !c.boss) removeCreature(c);   // even the wolves hide
+  G.weather = 'storm'; G.weatherHrs = 12; sfx('thunder'); R.flashT = 0.5; uiFlash('#fff', 0.5);
+  if (G.scout.friend) { sfx('bark'); banner('⛈️ THE GREAT STORM', "Scout isn't shaking any more. He barks once, and runs into the storm!"); }
+  else banner('⛈️ THE GREAT STORM', 'Even the wolves are hiding tonight. Where is Scout?');
+}
+function endStorm(calmed) {
+  R.greatStorm = false; R.noPredators = false;
+  if (calmed) { G.weather = 'clear'; G.weatherHrs = 10; return; }
+  G.weather = 'cloudy'; G.weatherHrs = 6;
+  toast('🌅 The storm drops at dawn... but the lights over Frostpeak still blaze. It will be back tonight.', 'warn', 9000);
+}
+/** the climax: Scout howls at the altar, lightning strikes, a beam of light, and the storm breaks */
+function calmStorm() {
+  const st = G.story, s = R.scout; st.calming = true;
+  s.howlT = 4.5; sfx('doghowl'); setTimeout(() => sfx('doghowl'), 2200);
+  toast('🐕 Scout stands by the altar, lifts his nose to the storm... and <b>HOWLS</b>.', 'ok', 8000);
+  setTimeout(() => {
+    sfx('thunder'); sfx('zap'); R.flashT = 1; uiFlash('#bfefff', 0.9); R.shake = Math.max(R.shake, 0.9); beam();
+    setTimeout(() => {
+      endStorm(true); st.calming = false; st.calmT = G.day * 24 + G.hour; done(200);
+      banner('THE STORM BREAKS', 'The stones are home, and Scout led you through the Great Storm.');
+      if (R.scout) hearts(R.scout); sfx('discover');
+    }, 2500);
+  }, 4200);
+}
+/** a column of blue light from the altar up into the sky, fading over a few seconds */
+function beam() {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 160, 12, 1, true), litMat({ color: 0x9fe8ff, emissive: 0x9fe8ff, emissiveIntensity: 1 }));
+  m.material.transparent = true; m.material.opacity = 0.75; m.material.depthWrite = false; m.material.side = THREE.DoubleSide;
+  m.position.set(CI.x, heightAt(CI.x, CI.z) + 80, CI.z); R.scene.add(m); made.beam = { m, t: 5 };
+}
+
+/* ---------- the dawn after (chapter 8): Ember's family ---------- */
+function dawnScene() {
+  const st = Object.assign(G.story, { ch: 8, day: G.day, done: true, familyNews: true });
+  badge('stormdog');
+  // a red-gold dog towards Frostpeak, about 22 m away, looking at you, where no standing stone of the
+  // circle hides it
+  const p = G.p, fp = SITES.summit, a0 = Math.atan2(fp.x - p.x, fp.z - p.z);
+  const hidden = (x, z) => { for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; if (segDist(p.x, p.z, x, z, CI.x + Math.cos(a) * 8, CI.z + Math.sin(a) * 8) < 1.1) return true; } return false; };
+  const tries = []; for (const r of [22, 28, 16]) for (const da of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4]) tries.push([r, da]);
+  for (const [r, da] of tries) {
+    const a = a0 + da, x = p.x + Math.sin(a) * r, z = p.z + Math.cos(a) * r;
+    if (heightAt(x, z) < 1 || slopeAt(x, z) > 0.6 || hidden(x, z)) continue;
+    const m = gltfAnimal('stormdog');
+    if (m) { m.g.position.set(x, heightAt(x, z), z); m.g.rotation.y = a + Math.PI; R.scene.add(m.g); made.wild = { m, x, z, yaw: a + Math.PI, away: a, t: 0, howl: 0 }; }
+    break;
+  }
+  setTimeout(() => { sfx('doghowl', 'far'); toast('🐕 Up on the slope, in the first light: a <b>red-gold dog</b>. It lifts its nose... and howls.', 'ok', 9000); }, 1200);
+  setTimeout(() => { if (R.scout && G.scout.friend) R.scout.howlT = 4; sfx('doghowl'); toast('🐕 Scout howls back.', 'ok', 6000); }, 5000);
+  setTimeout(() => banner("🐾 EMBER'S FAMILY", 'Scout was never barking at the mountain. He was talking to his family.'), 10500);
+}
+/** how near (px, pz) passes to the segment from (ax, az) to (bx, bz) */
+function segDist(ax, az, bx, bz, px, pz) { const dx = bx - ax, dz = bz - az, l = dx * dx + dz * dz, t = l ? Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / l)) : 0; return Math.hypot(ax + dx * t - px, az + dz * t - pz); }
+/** every frame (from the game loop): the wild dog at dawn, and the beam of light */
+function updateStoryFx(dt) {
+  const w = made.wild;
+  if (w) {
+    w.t += dt; let mv = 0;
+    if (w.t > 9) { mv = 4.5; w.x += Math.sin(w.away) * mv * dt; w.z += Math.cos(w.away) * mv * dt; w.yaw += angDiff(w.yaw, w.away) * Math.min(1, dt * 4); }
+    w.howl = lerp(w.howl, w.t > 1.2 && w.t < 4.5 ? 1 : 0, Math.min(1, dt * 3));
+    w.m.g.position.set(w.x, heightAt(w.x, w.z), w.z); w.m.g.rotation.y = w.yaw;
+    w.m.anim({ state: 'idle', st: 0, moving: mv, flash: 0, dead: false, howl: w.howl }, dt);
+    if (w.t > 17) { R.scene.remove(w.m.g); made.wild = null; }
+  }
+  const b = made.beam;
+  if (b) { b.t -= dt; b.m.material.opacity = Math.max(0, Math.min(0.75, b.t * 0.25)); if (b.t <= 0) { R.scene.remove(b.m); b.m.geometry.dispose(); made.beam = null; } }
+}
+
+/* ---------- Tomas's whistle: a little box in the Stone Circle, a counting lock ---------- */
+const WH = STORY_SPOTS.whistle;
+function tryWhistleBox() {
+  showChoice('The little box has a number dial. Scratched on the lid: <b>HOW MANY STONES STAND IN THIS CIRCLE?</b>',
+    [6, 7, 8, 9, 10].map(n => [String(n), '', () => {
+      if (n !== 8) { sfx('deny'); hint('Click... the lid stays shut. Count the standing stones!', 3.5); return; }
+      G.story.whistle = true; if (made.whistleLid) made.whistleLid.rotation.x = -1.2;
+      sfx('chest'); give('whistle', 1); addXP(40); readNote('whistleBox');
+      setTimeout(() => toast('🪈 Press <b>H</b> to whistle: Scout comes running, wherever he is.', 'tip', 9000), 800);
+    }]));
+}
+R.whistle = () => {
+  if (!inv('whistle')) return;
+  sfx('whistle');
+  if (G.scout.friend) { R.teleScout = true; setTimeout(() => sfx('bark'), 500); toast('🐕 Scout comes running!', 'ok', 3000); }
+  else hint("Scout isn't with you. He's waiting at Uncle Ray's camp.", 3.5);
+};
+
 function showPlaced() { for (const k in STONES) if (made['glow_' + k]) made['glow_' + k].visible = placed(k); }
 
 /** Scout's E prompt while his paw is hurt: wrap it */
@@ -291,6 +420,12 @@ function buildProps() {
     }
     showPlaced();
   }
+  if (st.ch >= 2 && !made.whistleBox) {   // Tomas's little whistle box, inside the Stone Circle
+    const y = heightAt(WH.x, WH.z);
+    made.whistleBox = prop([part(box(0.42, 0.24, 0.3), 0x6e4a2c, [0, 0.12, 0], null, null, 0), part(cyl(0.06, 0.06, 0.03, 8), 0xd9a520, [0, 0.12, 0.16], [Math.PI / 2, 0, 0], null, 0)], WH.x, y, WH.z, -Math.PI / 2);
+    made.whistleLid = prop([part(box(0.44, 0.06, 0.32), 0x7a5232, [0, 0, 0], null, null, 0)], WH.x, y + 0.27, WH.z, -Math.PI / 2);
+    if (G.story.whistle) made.whistleLid.rotation.x = -1.2;
+  }
   if (st.ch >= 2 && !made.hole && (st.ch > 2 || st.done)) {   // where Scout dug up the Green Stone
     const g = STORY_SPOTS.green, y = heightAt(g.x, g.z);
     made.hole = prop([part(cyl(0.55, 0.6, 0.06, 8), 0x2e2116, [0, 0.03, 0], null, null, 0), part(cyl(0.25, 0.5, 0.22, 7), 0x6b4a2b, [0.85, 0.08, 0.2], null, null, 0)], g.x, y, g.z);
@@ -300,6 +435,10 @@ function buildProps() {
 function addPois() {
   if (made.pois) return; made.pois = true;
   const g = STORY_SPOTS.green;
+  POIS.push({
+    id: 'storyWhistle', x: WH.x, z: WH.z, get y() { return heightAt(WH.x, WH.z) + 0.4; }, reach: 2.6,
+    on: () => !!made.whistleBox && !G.story.whistle, label: 'A little box with a number dial', act: () => tryWhistleBox()
+  });
   for (const w in NOTCH) {
     const n = NOTCH[w];
     POIS.push({
@@ -343,6 +482,7 @@ function addPois() {
 /** Ray: the story first, then a hint for the chapter under way */
 R.rayTalk = () => {
   if (active(1)) { showDialog(DIALOGS.scoutPup, () => { done(30); if (G.scout.friend && R.scout) { hearts(R.scout); sfx('heart'); } }); return true; }
+  if (familyNews()) { showDialog(DIALOGS.scoutFamily, () => { G.story.familyHeard = true; if (G.scout.friend && R.scout) { hearts(R.scout); sfx('heart'); } }); return true; }
   if (pupsNews()) { showDialog(DIALOGS.scoutPups, () => { G.story.pupsHeard = true; if (G.scout.friend && R.scout) { hearts(R.scout); sfx('heart'); } }); return true; }
   const st = story(), hint = !st.done && DIALOGS.scoutHint[st.ch];
   if (hint) { showDialog(hint); return true; }
@@ -365,7 +505,7 @@ function updateScoutStory() {
   // a new day, a game just loaded, or Scout a friend again: is a chapter due? If not, a reminder
   if (G.day !== seenDay || (friend && !wasFriend)) {
     const newDay = seenDay !== null && G.day !== seenDay;
-    if (seenDay === null) buildProps();
+    if (seenDay === null) { buildProps(); if (G.story) G.story.calming = false; }   // (a save made mid-climax)
     seenDay = G.day;
     const st = story();
     if (!checkChapter() && newDay && st.ch && !st.done && friend && CHAPTERS[st.ch].daily) CHAPTERS[st.ch].daily();
@@ -382,7 +522,9 @@ function updateScoutStory() {
   if (st.ch && !st.done && ch && ch.tick) ch.tick();
   s.limp = !!(G.story && G.story.limp && friend);   // (after the chapters: from the moment the scare starts)
   if (made.paws) made.paws.visible = night();
-  R.auroraBoost = st.ch >= 8 ? 0 : st.ch === 7 ? 0.9 : Math.min(0.8, Math.max(0, st.ch - 1) * 0.16);   // the lights over Frostpeak
+  if (st.ch === 7 && st.done && !R.sleeping && !R.panel && G.hour >= 5.3 && G.hour < 12 && G.day * 24 + G.hour - (st.calmT || 0) >= 1) dawnScene();
+  R.auroraBoost = st.ch >= 8 ? 0 : st.ch === 7 ? (R.greatStorm ? 1.6 : 0.9) : Math.min(0.8, Math.max(0, st.ch - 1) * 0.16);   // the lights over Frostpeak (soft again after the dawn)
+  if (story().ch >= 8 && s.model && s.model.gltf && !s.model.chip) collarChip(s.model);
 
   // the evening after he hurt his paw: something far up the mountain answers his whimper (once)
   if (st.ch >= 4 && !G.story.answered && friend && G.hour >= 20 && G.hour < 23.5 && !R.sleeping && !R.raid) {
@@ -392,8 +534,8 @@ function updateScoutStory() {
 
   // thunder: Scout is scared of storms (just for show: he still fights)
   const storm = friend && G.weather === 'storm';
-  s.scared = storm;
-  if (storm && !R.sleeping) {
+  s.scared = storm && st.ch < 7;   // after the Great Storm began, never again
+  if (s.scared && !R.sleeping) {
     if (!wasStorm && stormDay !== G.day) { stormDay = G.day; sfx('whine'); toast('🐕 Scout presses against your legs, shaking. He hates thunder.', 'ok', 6000); }
     if (R.t > nextWhine) { nextWhine = R.t + 12 + Math.random() * 14; sfx('whine'); }
   }
@@ -403,6 +545,7 @@ function updateScoutStory() {
   if (friend && !s.lead && howledDay !== G.day && G.hour >= HOWL.from && G.hour < HOWL.to && howlsTonight(G.day, st.ch) &&
     !storm && !R.raid && !R.riding && !R.sleeping && !R.cinematic) {
     howledDay = G.day; s.howlT = HOWL.secs; sfx('doghowl'); setTimeout(() => { if (s.howlT > 0) sfx('doghowl'); }, 2600);
+    if (st.ch >= 8) setTimeout(() => sfx('doghowl', 'far'), 4200);   // his family answers
     toast('🐕 Scout stops, stares up at Frostpeak... and howls.', 'ok', 6000);
   }
 }
@@ -410,4 +553,4 @@ function updateScoutStory() {
 /** what the story has made in the world so far (for the checks) */
 const storyMade = () => made;
 
-export { updateScoutStory, leadTo, storyMade, buildProps };
+export { updateScoutStory, updateStoryFx, leadTo, storyMade, buildProps };

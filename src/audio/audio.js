@@ -80,6 +80,7 @@ const SFX = {
   whine() { tone('sine', 900, 1300, 0.25, 0.08); },
   // Scout howling at Frostpeak (added after the migration): higher than a wolf, with a wobble.
   // sfx('doghowl', 'far'): a dog far away up the mountain, quiet and a little lower
+  whistle() { tone('sine', 1800, 2500, 0.22, 0.12); tone('sine', 2500, 1700, 0.3, 0.12, 0.26); },   // Tomas's whistle (added after the migration)
   doghowl(far) { if (!AU.ready) return; const k = far ? 0.88 : 1, v = far ? 0.3 : 1, t = AU.ctx.currentTime, o = AU.ctx.createOscillator(), g = AU.ctx.createGain(), lfo = AU.ctx.createOscillator(), lg = AU.ctx.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(560 * k, t); o.frequency.linearRampToValueAtTime(900 * k, t + 0.35); o.frequency.linearRampToValueAtTime(860 * k, t + 1.1); o.frequency.linearRampToValueAtTime(620 * k, t + 1.6); lfo.frequency.value = 6; lg.gain.value = 14; lfo.connect(lg); lg.connect(o.frequency); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.11 * v, t + 0.2); g.gain.linearRampToValueAtTime(0.09 * v, t + 1.2); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.7); o.connect(g); g.connect(AU.master); o.start(t); lfo.start(t); o.stop(t + 1.8); lfo.stop(t + 1.8); },
   squeak() { tone('sine', 1500, 2200, 0.08, 0.08); },
   hiss() { burst('highpass', 4000, 0.35, 0.18); },

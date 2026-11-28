@@ -3,8 +3,11 @@
 > **Spoiler file, for Dad and Claude only.** Caspar agreed not to look in the game's files for what
 > gets built (IMPROVEMENTS.md, item 6). Nothing in the game or in his doc should repeat what's here.
 
-**Status:** plan only. Written 27 Nov 2026 from Caspar's picks. Reviewed against the code and
-rewritten 28 Nov 2026. Nothing is built yet.
+**Status: built 28 Nov 2026.**
+- Steps 1 to 8 are in the game (step 1 became choosing a tool in a hotbar slot), with the whistle
+  from step 9. Each step was committed after `npm test` and `npm run parity` passed.
+- Not built yet: the torn picture and tracks, from step 9. Those wait for Caspar to play.
+- How it works and how it's checked: `tests/golden/README.md`, the sections "The middle days".
 
 **Source:** the "Caspar's Choices: the Middle of the 100 Days" doc
 (https://claude.ai/artifact/UPmtvBou4phM6K5coQR7fh), filled in by Caspar. The `.docx` copy in this
@@ -368,16 +371,14 @@ Each step follows the usual way of working:
 | 6 | **The Snow Moon and P3, paws in the dark** (chapter 5) | Night-only glow, with the first moon twist. |
 | 7 | **The Storm Moon, P4 at the circle, and the growing lights** (chapter 6) | Builds the storm up. The stones can go back early. |
 | 8 | **The Great Storm, the dawn dog, the badge, the collar chip and the ending lines** (chapters 7–8) | The climax, once everything it needs exists. |
-| 9 | Optional extras (the whistle, the torn picture, tracks) | Only once Caspar has played steps 2–8. |
+| 9 | Optional extras (the whistle, the torn picture, tracks) | Only once Caspar has played steps 2–8. **The whistle is built;** the torn picture and tracks are not. |
 
 ---
 
 ### Step 2 in detail: the chapter engine, the thunder tremble, the dusk howl, chapter 1
 
-**Status: built 28 Nov 2026, not committed.**
-- All the checks pass: `npm test`, the smoke test (30/30) and ship (7/7).
-- The meadow screenshot's drift (6.98) was already there: the last commit scores 7.33.
-- Next, Caspar plays it before step 3 starts.
+**Status: built and committed 28 Nov 2026,** with all the checks passing. The meadow screenshot's
+drift (6.98) was already there: the commit before scores 7.33.
 
 **The pure rule** (`src/game/scout-story.js`, tested in `tests/scout-story.test.js`):
 - `chapterDue(s)` returns the chapter that's due now, or 0.

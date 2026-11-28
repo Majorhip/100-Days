@@ -72,6 +72,7 @@ const KINDS = {
   fox: { file: 'Fox', height: 0.62, scale: 1, colors: {}, fallback: foxBox(0xc0652e, 0x8a4420, 0xf3e6d6) },
   arcticfox: { file: 'Fox', height: 0.62, scale: 1, colors: { Main: { c: 0xf2f4f6 }, Main_Light: { c: 0xffffff }, Grey: { c: 0xd3d9df } }, fallback: foxBox(0xf2f4f6, 0xd3d9df, 0xffffff) },
   scout: { file: 'ShibaInu', height: 0.75, scale: 1, colors: { Main: { c: 0xc98a3c } }, collar: 0xd9342b, lift: 'Neck1' },
+  stormdog: { file: 'ShibaInu', height: 0.9, scale: 1, colors: { Main: { c: 0xb4582a } }, lift: 'Neck1' },   // Scout's wild family (Scout's story, chapter 8)
   boar: { file: 'Pig', height: 0.8, scale: 1, colors: { AtlasMaterial: { c: 0x93806f } } },
   snake: { file: 'Snake', height: 0.7, scale: 1, colors: {}, turn: true },
   crab: { file: 'Crab', height: 0.45, scale: 1, colors: {}, turn: true },
@@ -351,4 +352,18 @@ function upgradeScout(s) {
 /** Scout's state in the terms anim() reads: biting just after a bite lands, else moving or idle */
 const scoutPose = s => ({ state: s.bite > 0.8 ? 'wind' : 'idle', st: 0, moving: s.moving, flash: 0, dead: false, howl: s.howl || 0, dig: !!s.dig });
 
-export { KINDS, CLIP_INFO, loadAnimalModels, posedBox, isLoaded, gltfAnimal, upgradeScout, scoutPose, upgradeRay, rayAnim };
+/** a chip of glowing blue stone hanging from Scout's collar (Scout's story, after the Great Storm) */
+function collarChip(m) {
+  if (!m || !m.gltf || m.chip) return;
+  let neck = null, head = null; m.g.traverse(o => { if (o.isBone && o.name === 'Neck1') neck = o; if (o.isBone && o.name === 'Head') head = o; });
+  if (!neck || !head) return;
+  m.g.updateMatrixWorld(true);
+  const ring = neck.localToWorld(neck.worldToLocal(head.getWorldPosition(new THREE.Vector3())).multiplyScalar(0.35));   // where the collar sits
+  const fwd = new THREE.Vector3(0, 0, 1).transformDirection(m.g.matrixWorld);
+  const at = ring.add(new THREE.Vector3(0, -0.085, 0)).addScaledVector(fwd, 0.045);   // the front of the collar, under the chin
+  const chip = new THREE.Mesh(new THREE.IcosahedronGeometry(0.03, 0), litMat({ color: 0x7fdcff, emissive: 0x7fdcff, emissiveIntensity: 0.9 }));
+  chip.position.copy(neck.worldToLocal(at)); chip.scale.setScalar(1 / neck.getWorldScale(new THREE.Vector3()).x);
+  neck.add(chip); m.chip = chip;
+}
+
+export { KINDS, CLIP_INFO, loadAnimalModels, posedBox, isLoaded, gltfAnimal, upgradeScout, scoutPose, upgradeRay, rayAnim, collarChip };

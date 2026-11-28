@@ -53,7 +53,7 @@ import { DIFFICULTY, levelOf, diffOf } from './data/difficulty.js';   // added a
 import { setFinds } from './world/rarity.js';
 import { checkSightings } from './creatures/sightings.js';   // added after the migration: the animal journal
 import { updateMount } from './creatures/mount.js';   // added after the migration: riding
-import { updateScoutStory } from './story/scout-story.js';
+import { updateScoutStory, updateStoryFx } from './story/scout-story.js';
 import { HOTBAR } from './data/items.js';   // added after the migration: choosing a tool in a hotbar slot
 import { slotTools } from './player/inventory.js';   // added after the migration: Scout's story (MIDDLE-DAYS-PLAN.md)
 
@@ -213,7 +213,7 @@ function frame(now) {
       if (f.kind === 'pop') { const k = Math.min(1, f.t / 0.25); f.m.scale.setScalar(0.6 + 0.4 * k + Math.sin(k * Math.PI) * 0.12); if (k >= 1) { f.m.scale.setScalar(1); R.fx.splice(i, 1); } }
     }
   } else updatePlayerCamOnly();
-  updateViewModel(dt); updateStructures(dt); updateStory(dt);
+  updateViewModel(dt); updateStructures(dt); updateStory(dt); updateStoryFx(dt);
   R.torchLight.intensity = R.torchLight.userData.on ? (0.5 + nightAmount() * 1.0) * (1 + Math.sin(R.t * 17) * 0.06) : 0;
   updateHUD(dt); updateNums(dt); updateTouch(dt);
   renderFrame(dt);
