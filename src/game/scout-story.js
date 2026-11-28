@@ -45,7 +45,16 @@ function moonKind(day, chapter) {
  *  (a snow wolf has 66 health and bites for 13; a Wolf Moon red wolf about 48 and 9) */
 const SNOW_MOON_WOLVES = 8;
 
+/** Tomas's box (chapter 3): three picture dials, marked with a tree, dunes and a snowflake. The
+ *  answer is the three guardians Caspar fought himself: Old Grizzle in the woods, the Dune King in
+ *  the sands and Frostclaw on the ice */
+const LOCK_DIALS = [['tree', '🌲'], ['dunes', '🏜️'], ['snowflake', '❄️']];
+const LOCK_PICTURES = [['bear', '🐻', 'Bear'], ['scorpion', '🦂', 'Scorpion'], ['whitebear', '🐻‍❄️', 'White bear'], ['wolf', '🐺', 'Wolf'], ['rabbit', '🐇', 'Rabbit']];
+const LOCK_ANSWER = ['bear', 'scorpion', 'whitebear'];
+/** how many of the three dials are right */
+const lockRight = picks => LOCK_ANSWER.filter((a, i) => picks[i] === a).length;
+
 /** the Great Storm blows from 20:00 until dawn */
 const isStormHour = hour => hour >= 20 || hour < 5.5;
 
-export { CHAPTER_DAY, MIN_GAP, STORM_GAP, chapterDue, howlsTonight, moonKind, SNOW_MOON_WOLVES, isStormHour };
+export { CHAPTER_DAY, MIN_GAP, STORM_GAP, chapterDue, howlsTonight, moonKind, SNOW_MOON_WOLVES, LOCK_DIALS, LOCK_PICTURES, LOCK_ANSWER, lockRight, isStormHour };

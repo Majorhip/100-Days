@@ -612,3 +612,39 @@ Crystal Lantern he could never pick the fire torch again.
 **`--only` caveat:** some smoke steps depend on earlier ones. "torch and crystal lantern" run alone
 fails (the snow wolf flees the torch too) on today's build and on the build before the story work
 alike. Run the whole smoke test before a commit.
+
+## The middle days, steps 4 and 5: the guardians' lock, and the scare (28 Nov 2026)
+**Chapter 3** (from Day 41): Tomas's box by the Old Iron Mine (`STORY_SPOTS.box`).
+- **The box** is made once the story is past page 1 (`G.notes` has `tomas1`): an iron-banded wooden
+  box with three gold dials and a lid, plus a small collider.
+- **The lock:** E on the box turns the three dials one by one, each a choice of five pictures
+  (bear, scorpion, white bear, wolf, rabbit). It uses the game's own choice panel, so mouse and
+  touch both work.
+- **The answer** (`LOCK_ANSWER` in `src/game/scout-story.js`) is the three guardians Caspar fought:
+  tree is the bear, dunes the scorpion, snowflake the white bear.
+- **A wrong try** says how many dials clicked ("2 of the 3"), never which. From the second wrong try
+  Scout "growls softly, as if he remembers a big fight", and Ray's hint names the woods, the sands
+  and the ice.
+- **Opening it** gives the Gold Stone and Tomas's page 2.
+- **The box can be opened before chapter 3 starts.** Chapter 3 is then done straight away.
+
+**Chapter 4** (from Day 51, the morning after the biggest Wolf Moon):
+- **Scout limps** (`G.story.limp`, `R.scout.limp`): he walks at 45% speed, wobbles, and **doesn't
+  fight** while it lasts. His bite is unchanged.
+- **His E prompt** asks for a bandage (2 fibre and a healing herb), then wraps his paw.
+- **Healing:** once his paw is wrapped and he has had his meat that day, he's better. Left alone,
+  his paw heals after 2 days.
+- **That evening** (20:00 to 23:30, once): he whimpers, and something far up Frostpeak howls back
+  (`sfx('doghowl', 'far')`, quieter and lower).
+
+**Checks:**
+- **The rule tests (17):** the dials, the answer, and how a wrong try is counted.
+- **The smoke step "story: the guardians' lock":**
+  - the dials come up as TREE, DUNES, SNOWFLAKE
+  - wolf/scorpion/white bear gives "2 of 3" and the box stays shut
+  - the guardians open it, with the Gold Stone and page 2
+- **The smoke step "story: the scare":**
+  - he limps and doesn't bite a wolf right next to him
+  - the prompt changes from asking for a bandage, to wrapping his paw, to his meat
+  - fed after wrapping, he is healed
+  - the far howl comes at 20:30

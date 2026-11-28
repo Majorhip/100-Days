@@ -406,6 +406,75 @@ try {
     info: `chapter ${r.ch}, toast ${r.toast}, Ray's hint ${r.hint}; leading ${r.leading}, ${r.ahead} m ahead of you; digging ${r.dig} (${r.clip}), prompt ${r.on} "${r.label}"; Green Stone ${r.stone}, page ${r.page} shown ${r.note}, done ${r.done}`
   }));
 
+  // story step 4: chapter 3 on Day 41. Tomas's box at the Old Iron Mine has three picture dials
+  // (tree, dunes, snowflake); a wrong try says how many are right; the guardians (bear, scorpion,
+  // white bear) open it: the Gold Stone and Tomas's page 2
+  await step("story: the guardians' lock", async () => {
+    const keep = await ev(() => {
+      const S = window.__stranded, { G, R } = S, b = S.STORY_SPOTS.box, k = { friend: G.scout.friend, fed: G.scout.fed, rayFree: G.flags.rayFree, rayChoice: G.flags.rayChoice, radio: G.flags.radio, day: G.day, hour: G.hour, pos: [G.p.x, G.p.z], notes: G.notes.slice() };
+      S.clearCreatures(); G.day = 41; G.hour = 9; G.weather = 'clear'; G.weatherHrs = 99; S.take('goldstone', 99);
+      G.scout.friend = true; G.scout.fed = 41; G.flags.radio = true; G.flags.rayFree = true; G.flags.rayChoice = 'stay'; G.story = { ch: 2, day: 31, done: true }; if (!G.notes.includes('tomas1')) G.notes.push('tomas1'); S.placeRay();
+      G.p.x = b.x; G.p.z = b.z + 2.5; G.p.y = S.groundAt(G.p.x, G.p.z); G.p.vy = 0; R.teleScout = true;
+      S.updateScoutStory(); return k;
+    });
+    return ev(k => {
+      const S = window.__stranded, { G, R } = S, o = { ch: G.story.ch, toast: /OLD MINE/.test(document.getElementById('toasts').textContent) }, poi = S.POIS.find(q => q.id === 'storyBox');
+      const pick = names => { poi.act(); const qs = []; for (const n of names) { qs.push(document.getElementById('panel').textContent); const opt = R.panelArg.opts.find(x => x[0].includes(n)); S.closePanel(); opt[2](); } return qs; };
+      o.on = poi.on(); o.label = poi.label();
+      const qs = pick(['Wolf', 'Scorpion', 'White bear']); o.dials = qs.map(q => (q.match(/(TREE|DUNES|SNOWFLAKE)/) || [])[1]).join('/');
+      o.wrong = (document.getElementById('hint').textContent.match(/(\d) of the 3/) || [])[1]; o.shut = !G.story.boxOpen && !S.inv('goldstone');
+      pick(['Bear', 'Scorpion', 'White bear']);
+      o.open = G.story.boxOpen; o.stone = S.inv('goldstone'); o.page = /You know the guardians/.test(document.getElementById('panel').textContent); o.done = G.story.done; S.closePanel();
+      const set = (q, n, v) => { if (v === undefined) delete q[n]; else q[n] = v; };
+      G.scout.friend = k.friend; G.scout.fed = k.fed; set(G.flags, 'rayFree', k.rayFree); set(G.flags, 'rayChoice', k.rayChoice); set(G.flags, 'radio', k.radio);
+      G.day = k.day; G.hour = k.hour; G.p.x = k.pos[0]; G.p.z = k.pos[1]; G.p.y = S.groundAt(G.p.x, G.p.z); S.take('goldstone', 99); G.notes = k.notes; delete G.story; S.placeRay(); S.clearCreatures();
+      return o;
+    }, keep);
+  }, r => ({
+    ok: r.ch === 3 && r.toast && r.on && r.dials === 'TREE/DUNES/SNOWFLAKE' && r.wrong === '2' && r.shut && r.open && r.stone === 1 && r.page && r.done,
+    info: `chapter ${r.ch}, toast ${r.toast}; prompt ${r.on} "${r.label}"; dials ${r.dials}; wolf/scorpion/white bear: ${r.wrong} of 3 right, still shut ${r.shut}; bear/scorpion/white bear: open ${r.open}, Gold Stone ${r.stone}, page 2 ${r.page}, done ${r.done}`
+  }));
+
+  // story step 5: chapter 4 on Day 51, after the Wolf Moon. Scout limps: he doesn't bite a wolf
+  // beside him; his prompt asks for a bandage; wrapped, then fed his meat, he is better. That
+  // evening something far up Frostpeak howls back
+  await step('story: the scare', async () => {
+    const keep = await ev(() => {
+      const S = window.__stranded, { G, R } = S, k = { friend: G.scout.friend, fed: G.scout.fed, rayFree: G.flags.rayFree, rayChoice: G.flags.rayChoice, radio: G.flags.radio, day: G.day, hour: G.hour };
+      S.clearCreatures(); G.day = 51; G.hour = 9; G.weather = 'clear'; G.weatherHrs = 99; S.take('bandage', 99);
+      G.scout.friend = true; G.scout.fed = 50; G.flags.radio = true; G.flags.rayFree = true; G.flags.rayChoice = 'stay'; G.story = { ch: 3, day: 41, done: true }; S.placeRay(); R.teleScout = true;
+      S.updateScoutStory(); return k;
+    });
+    await wait(300);
+    const r = await ev(() => {
+      const S = window.__stranded, { G, R } = S, s = R.scout, o = { ch: G.story.ch, limp: s.limp, toast: /LIMPING/.test(document.getElementById('toasts').textContent) };
+      window.__w = S.spawnCreature('wolf', s.x + 1.2, s.z); window.__w.state = 'chase'; window.__w.warned = true; window.__whp = window.__w.hp;
+      return o;
+    });
+    await wait(2000);
+    Object.assign(r, await ev(() => {
+      const S = window.__stranded, { G, R } = S, s = R.scout, w = window.__w, o = { wolfHurt: w.hp < window.__whp };
+      S.clearCreatures(); s.bite = 0; R.invuln = 1e9;
+      o.label0 = R.scoutPoi.label(); S.give('bandage', 1, true); o.label1 = R.scoutPoi.label(); R.scoutPoi.act();
+      o.bandaged = !!G.story.bandaged && !S.inv('bandage'); o.label2 = R.scoutPoi.label();
+      S.give('rawmeat', 1, true); R.scoutPoi.act(); S.updateScoutStory();
+      o.healed = !G.story.limp && !s.limp && G.story.done;
+      G.hour = 20.5; S.updateScoutStory(); o.answered = !!G.story.answered;
+      return o;
+    }));
+    await wait(2000);
+    r.howlBack = await ev(() => /HOWLS/.test(document.getElementById('toasts').textContent));
+    await ev(k => {
+      const S = window.__stranded, { G } = S, set = (q, n, v) => { if (v === undefined) delete q[n]; else q[n] = v; };
+      G.scout.friend = k.friend; G.scout.fed = k.fed; set(G.flags, 'rayFree', k.rayFree); set(G.flags, 'rayChoice', k.rayChoice); set(G.flags, 'radio', k.radio);
+      G.day = k.day; G.hour = k.hour; delete G.story; S.placeRay(); S.clearCreatures(); S.R.scout.limp = false;
+    }, keep);
+    return r;
+  }, r => ({
+    ok: r.ch === 4 && r.limp && r.toast && !r.wolfHurt && /BANDAGE/.test(r.label0) && /Wrap/.test(r.label1) && r.bandaged && /meat|Feed/.test(r.label2) && r.healed && r.answered && r.howlBack,
+    info: `chapter ${r.ch}, limping ${r.limp}, toast ${r.toast}; wolf beside him bitten ${r.wolfHurt}; prompt "${r.label0}" -> "${r.label1}" -> "${r.label2}"; bandaged ${r.bandaged}, healed after his meat ${r.healed}; far howl at 20:30 ${r.answered}, tip ${r.howlBack}`
+  }));
+
   // rarer finds: about half the small finds are not there (hidden, cannot be picked, never
   // grow back), all of them stay near the start; rarer animals: smaller caps, one at a time
   await step('rarer finds and animals', () => ev(() => {

@@ -1,7 +1,7 @@
 // Scout's story (src/game/scout-story.js): when chapters are due, and which evenings Scout howls.
 // The rules are pure, so they are tested straight, with no stand-ins.
 import { describe, it, expect } from 'vitest';
-import { CHAPTER_DAY, chapterDue, howlsTonight, moonKind, SNOW_MOON_WOLVES, isStormHour } from '../src/game/scout-story.js';
+import { CHAPTER_DAY, chapterDue, howlsTonight, moonKind, SNOW_MOON_WOLVES, LOCK_DIALS, LOCK_PICTURES, lockRight, isStormHour } from '../src/game/scout-story.js';
 
 const base = { day: 25, stayed: true, scoutFriend: true, chapter: 0, chapterDay: 0, chapterDone: false, built: 6 };
 const due = o => chapterDue({ ...base, ...o });
@@ -71,5 +71,20 @@ describe('moonKind', () => {
 describe('isStormHour', () => {
   it('the Great Storm blows from 20:00 until dawn', () => {
     expect([19.9, 20, 23, 2, 5.4, 5.5, 12].map(isStormHour)).toEqual([false, true, true, true, true, false, false]);
+  });
+});
+
+describe("Tomas's box (the guardians' lock)", () => {
+  it('three dials, each turning through five pictures', () => {
+    expect(LOCK_DIALS.map(d => d[0])).toEqual(['tree', 'dunes', 'snowflake']);
+    expect(LOCK_PICTURES).toHaveLength(5);
+  });
+  it('opens with the guardians: bear, scorpion, white bear', () => {
+    expect(lockRight(['bear', 'scorpion', 'whitebear'])).toBe(3);
+  });
+  it('says how many dials are right, not which', () => {
+    expect(lockRight(['bear', 'wolf', 'whitebear'])).toBe(2);
+    expect(lockRight(['whitebear', 'scorpion', 'bear'])).toBe(1);
+    expect(lockRight(['rabbit', 'rabbit', 'rabbit'])).toBe(0);
   });
 });

@@ -5,6 +5,9 @@
 // - the chapter engine (the rule is src/game/scout-story.js)
 // - chapter 1: Ray tells how he found Scout as a pup in the Stone Circle
 // - chapter 2: Scout leads the way to the west woods and digs up the Green Stone and Tomas's page 1
+// - chapter 3: Tomas's box at the Old Iron Mine, with the guardians' lock (the Gold Stone, page 2)
+// - chapter 4: the scare. Scout limps (slow, no fighting) until a bandage and his meat heal him, or
+//   2 days pass; that evening, something far up Frostpeak howls back at him
 // - Scout is scared of thunder: he shivers, keeps close and whines (just for show: he still fights)
 // - now and then at dusk, Scout stops, faces Frostpeak and howls at it
 // - Ray gives a hint for the chapter under way when you talk to him
@@ -22,17 +25,18 @@ import { sfx } from '../audio/audio.js';
 import { heightAt } from '../world/terrain.js';
 import { puff } from '../world/sky.js';
 import { box, cyl, part } from '../core/geometry.js';
+import { addCollider } from '../world/collision.js';
 import { DIALOGS } from '../data/story.js';
 import { STORY_SPOTS } from '../data/story-spots.js';
-import { give, addXP } from '../player/inventory.js';
+import { inv, give, take, addXP } from '../player/inventory.js';
 import { POIS } from '../player/targeting.js';
 import { hearts, compassWord } from '../creatures/scout.js';
 import { prop, readNote } from './props.js';
-import { showDialog } from '../ui/panels.js';
-import { toast, banner } from '../ui/hud.js';
-import { chapterDue, howlsTonight } from '../game/scout-story.js';
+import { showDialog, showChoice } from '../ui/panels.js';
+import { toast, banner, hint } from '../ui/hud.js';
+import { chapterDue, howlsTonight, LOCK_DIALS, LOCK_PICTURES, lockRight } from '../game/scout-story.js';
 
-const BUILT = 2;   // chapters in the game so far
+const BUILT = 4;   // chapters in the game so far
 const HOWL = { from: 19, to: 20, secs: 5.5 };   // dusk (game hours), and how long he howls (s)
 const LEAD = { near: 150, ahead: 8, dig: 6 };   // he leads within 150 m; runs 8 m ahead; digs when you're within 6 m
 
@@ -46,12 +50,12 @@ const dirTo = (x, z) => compassWord(x - G.p.x, z - G.p.z);
 
 /* ---------- Scout leads the way ---------- */
 /** once a second while a chapter wants Scout to show the way to (x, z): within LEAD.near m and on
- *  foot, he runs ahead of you towards it and waits, looking back; at the spot he waits nose to it.
- *  Returns how far you are from it */
-function leadTo(x, z) {
+ *  foot, he runs ahead of you towards it and waits, looking back; at the spot he waits nose to it
+ *  (or to (lx, lz)). Returns how far you are from it */
+function leadTo(x, z, lx = x, lz = z) {
   const s = R.scout, p = G.p, d = dist(x, z);
   if (!G.scout.friend || R.riding || d > LEAD.near) return d;
-  if (d <= LEAD.ahead) s.lead = { x, z, lookX: x, lookZ: z };
+  if (d <= LEAD.ahead) s.lead = { x, z, lookX: lx, lookZ: lz };
   else { const k = LEAD.ahead / d; s.lead = { x: p.x + (x - p.x) * k, z: p.z + (z - p.z) * k }; }
   if (Math.hypot(s.x - p.x, s.z - p.z) > 5 && d > LEAD.ahead && Math.random() < 0.2) sfx('bark');
   return d;
@@ -74,8 +78,69 @@ const CHAPTERS = {
     start: () => { sfx('whine'); toast('🐕 Scout keeps staring ' + dirTo(STORY_SPOTS.green.x, STORY_SPOTS.green.z) + ' and whining. He wants to show you something!', 'ok', 9000); },
     daily: () => { sfx('whine'); toast('🐕 Scout looks ' + dirTo(STORY_SPOTS.green.x, STORY_SPOTS.green.z) + ' again and whines.', 'ok', 7000); },
     tick: () => { const g = STORY_SPOTS.green; leadTo(g.x, g.z); digAt(g.x, g.z); }
+  },
+  3: {
+    start: () => {
+      if (G.story.boxOpen) { done(); return; }   // opened already: page 1 told of it
+      sfx('whine'); toast('🐕 Scout sniffs Tomas\'s page and looks ' + dirTo(B.x, B.z) + '. The page said: a box at the OLD MINE.', 'ok', 9000);
+    },
+    daily: () => toast('🐕 Scout looks ' + dirTo(B.x, B.z) + ' again. Tomas\'s box is waiting at the Old Iron Mine.', 'ok', 7000),
+    tick: () => leadTo(B.x, B.z + 1.3, B.x, B.z)   // he waits in front of the box
+  },
+  4: {
+    start: () => {
+      G.story.limp = true; sfx('whine');
+      toast('🐕 Oh no, Scout is <b>LIMPING</b>! He hurt his paw' + (G.day % 10 === 1 ? ' fighting the wolves last night' : ' in the night') + '. He can\'t fight like this.', 'warn', 10000);
+    },
+    daily: () => { sfx('whine'); toast('🐕 Scout is still limping. Ray might know what to do.', 'ok', 7000); },
+    tick: () => {
+      const st = G.story;
+      if (st.bandaged && G.scout.fed >= G.day) healPaw('🐕 Scout\'s paw is better! He jumps up and licks your face.');
+      else if (!st.bandaged && G.day >= st.day + 2) healPaw('🐕 Scout\'s paw has healed by itself. He\'s running about again, and he stays extra close to you.');
+    }
   }
 };
+function healPaw(msg) {
+  G.story.limp = false; done(); sfx('bark'); sfx('heart'); toast(msg, 'ok', 8000);
+  if (R.scout) { R.scout.limp = false; hearts(R.scout); }
+}
+/** Scout's E prompt while his paw is hurt: wrap it */
+R.scoutLabel = () => {
+  const st = G.story; if (!st || !st.limp || st.bandaged || !G.scout.friend) return null;
+  return inv('bandage') ? 'Wrap Scout\'s sore paw' : 'Scout\'s paw is hurt. He needs a BANDAGE';
+};
+R.scoutAct = () => {
+  const st = G.story; if (!st || !st.limp || st.bandaged || !G.scout.friend) return false;
+  if (!inv('bandage')) { sfx('whine'); hint('Scout\'s paw is hurt. Make a <b>Bandage</b> (2 fibre and a healing herb), then wrap it.', 4.5); return true; }
+  take('bandage', 1); st.bandaged = true; hearts(R.scout); sfx('heart');
+  toast('🩹 You wrap Scout\'s paw. He licks your hand. Now he needs his meat and a rest.', 'ok', 8000);
+  return true;
+};
+const B = STORY_SPOTS.box;
+
+/* ---------- Tomas's box: three picture dials (chapter 3) ---------- */
+/** turn dial i of 3 (one choice each), then try the lid */
+function turnDials(i, picks) {
+  if (i === LOCK_DIALS.length) { tryLock(picks); return; }
+  const [name, e] = LOCK_DIALS[i];
+  showChoice('Dial ' + (i + 1) + ' of 3 has a ' + e + ' <b>' + name.toUpperCase() + '</b> on it. Turn it to...',
+    LOCK_PICTURES.map(([id, pe, pn]) => [pe + ' ' + pn, '', () => { sfx('click'); turnDials(i + 1, picks.concat(id)); }]));
+}
+function tryLock(picks) {
+  const n = lockRight(picks), st = G.story;
+  if (n < 3) {
+    st.lockTries = (st.lockTries || 0) + 1; sfx('deny');
+    hint(n ? 'Clunk. <b>' + n + ' of the 3</b> dials click into place... but the box stays shut.' : 'Clunk. None of the dials click. The box stays shut.', 4.5);
+    if (st.lockTries >= 2 && G.scout.friend) setTimeout(() => toast('🐕 Scout sniffs the dials and growls softly, as if he remembers a big fight.', 'ok', 7000), 1600);
+    return;
+  }
+  st.boxOpen = true; openLid(); sfx('chest'); give('goldstone', 1);
+  if (active(3)) done(); else addXP(60);
+  if (G.scout.friend && R.scout) hearts(R.scout);
+  banner('THE GOLD STONE', 'Click, click, click: the box opens!');
+  readNote('tomas2');
+}
+function openLid() { if (made.lid) { made.lid.rotation.x = -1.25; made.lid.position.y += 0.22; made.lid.position.z -= 0.24; } }
 
 /** start a chapter if one is due; true if one started */
 function checkChapter() {
@@ -95,6 +160,14 @@ function done(xp) { G.story.done = true; addXP(xp || 60); }
 const made = {};
 function buildProps() {
   const st = story();
+  if ((st.ch >= 3 || G.notes.includes('tomas1')) && !made.box) {   // Tomas's box, by the Old Iron Mine
+    const y = heightAt(B.x, B.z), dial = x => part(cyl(0.07, 0.07, 0.04, 8), 0xd9a520, [x, 0.25, 0.29], [Math.PI / 2, 0, 0], null, 0);
+    made.box = prop([part(box(0.8, 0.45, 0.55), 0x6e4a2c, [0, 0.225, 0], null, null, 0), part(box(0.84, 0.06, 0.59), 0x555a60, [0, 0.1, 0], null, null, 0),
+      part(box(0.84, 0.06, 0.59), 0x555a60, [0, 0.36, 0], null, null, 0), dial(-0.22), dial(0), dial(0.22)], B.x, y, B.z);
+    made.lid = prop([part(box(0.84, 0.1, 0.59), 0x7a5232, [0, 0, 0], null, null, 0), part(box(0.86, 0.04, 0.12), 0x555a60, [0, 0.05, 0], null, null, 0)], B.x, y + 0.5, B.z);
+    addCollider({ x: B.x, z: B.z, r: 0.5 });
+    if (G.story.boxOpen) openLid();
+  }
   if (st.ch >= 2 && !made.hole && (st.ch > 2 || st.done)) {   // where Scout dug up the Green Stone
     const g = STORY_SPOTS.green, y = heightAt(g.x, g.z);
     made.hole = prop([part(cyl(0.55, 0.6, 0.06, 8), 0x2e2116, [0, 0.03, 0], null, null, 0), part(cyl(0.25, 0.5, 0.22, 7), 0x6b4a2b, [0.85, 0.08, 0.2], null, null, 0)], g.x, y, g.z);
@@ -104,6 +177,11 @@ function buildProps() {
 function addPois() {
   if (made.pois) return; made.pois = true;
   const g = STORY_SPOTS.green;
+  POIS.push({
+    id: 'storyBox', x: B.x, z: B.z, get y() { return heightAt(B.x, B.z) + 0.5; }, reach: 2.8,
+    on: () => !!made.box, label: () => G.story && G.story.boxOpen ? 'Tomas\'s box (read the page again)' : 'Tomas\'s box: three picture dials',
+    act: () => { if (G.story.boxOpen) readNote('tomas2'); else turnDials(0, []); }
+  });
   POIS.push({
     id: 'storyDig', x: g.x, z: g.z, get y() { return heightAt(g.x, g.z) + 0.4; }, reach: 3.2,
     on: () => active(2) && !!R.scout.dig, label: 'Help Scout dig',
@@ -152,6 +230,13 @@ function updateScoutStory() {
   // the chapter under way
   const st = story(), ch = CHAPTERS[st.ch];
   if (st.ch && !st.done && ch && ch.tick) ch.tick();
+  s.limp = !!(G.story && G.story.limp && friend);   // (after the chapters: from the moment the scare starts)
+
+  // the evening after he hurt his paw: something far up the mountain answers his whimper (once)
+  if (st.ch >= 4 && !G.story.answered && friend && G.hour >= 20 && G.hour < 23.5 && !R.sleeping && !R.raid) {
+    G.story.answered = true; sfx('whine'); setTimeout(() => sfx('doghowl', 'far'), 1500); setTimeout(() => sfx('doghowl', 'far'), 3800);
+    setTimeout(() => toast('🐕 Scout whimpers... and far up on Frostpeak, something <b>HOWLS</b> back.', 'ok', 9000), 1500);
+  }
 
   // thunder: Scout is scared of storms (just for show: he still fights)
   const storm = friend && G.weather === 'storm';
